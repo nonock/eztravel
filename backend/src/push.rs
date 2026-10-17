@@ -360,17 +360,53 @@ struct Granted {
     expires_in: i64,
 }
 
+/// Helpers shared by the tests of the modules that send notifications.
+#[cfg(test)]
+pub(crate) mod testing {
+    use super::ServiceAccount;
+    use aws_lc_rs::encoding::{AsDer, Pkcs8V1Der};
+    use aws_lc_rs::rsa::{KeyPair, KeySize};
+    use aws_lc_rs::signature::KeyPair as _;
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
+    use std::sync::OnceLock;
+
+    /// A key made for the tests: the real one never leaves `local/`.
+    pub(crate) fn test_key() -> &'static (String, Vec<u8>) {
+        static KEY: OnceLock<(String, Vec<u8>)> = OnceLock::new();
+        KEY.get_or_init(|| {
+            let key = KeyPair::generate(KeySize::Rsa2048).unwrap();
+            let der = AsDer::<Pkcs8V1Der>::as_der(&key).unwrap();
+            let pem = format!(
+                "-----BEGIN PRIVATE KEY-----
+{}
+-----END PRIVATE KEY-----
+",
+                STANDARD.encode(der.as_ref())
+            );
+            (pem, key.public_key().as_ref().to_vec())
+        })
+    }
+
+    pub(crate) fn account(token_uri: &str) -> ServiceAccount {
+        ServiceAccount {
+            project_id: "demo-project".into(),
+            client_email: "sender@demo-project.iam.gserviceaccount.com".into(),
+            private_key: test_key().0.clone(),
+            token_uri: token_uri.into(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::testing::{account, test_key};
     use super::*;
     use crate::disruptions::{Cause, Period};
-    use aws_lc_rs::encoding::AsDer;
-    use aws_lc_rs::rsa::{KeyPair, KeySize};
-    use aws_lc_rs::signature::{KeyPair as _, RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
+    use aws_lc_rs::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
     use base64::Engine;
     use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
     use jiff::civil::date;
-    use std::sync::OnceLock;
     use wiremock::matchers::{body_json, body_string_contains, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -567,29 +603,6 @@ mod tests {
             message("t", &fixture("planned"))["message"]["android"]["collapse_key"],
             "planned"
         );
-    }
-
-    // A key made for the tests: the real one never leaves `local/`.
-    fn test_key() -> &'static (String, Vec<u8>) {
-        static KEY: OnceLock<(String, Vec<u8>)> = OnceLock::new();
-        KEY.get_or_init(|| {
-            let key = KeyPair::generate(KeySize::Rsa2048).unwrap();
-            let der = AsDer::<aws_lc_rs::encoding::Pkcs8V1Der>::as_der(&key).unwrap();
-            let pem = format!(
-                "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
-                STANDARD.encode(der.as_ref())
-            );
-            (pem, key.public_key().as_ref().to_vec())
-        })
-    }
-
-    fn account(token_uri: &str) -> ServiceAccount {
-        ServiceAccount {
-            project_id: "demo-project".into(),
-            client_email: "sender@demo-project.iam.gserviceaccount.com".into(),
-            private_key: test_key().0.clone(),
-            token_uri: token_uri.into(),
-        }
     }
 
     const NOW: &str = "2026-11-03T06:30:00Z";

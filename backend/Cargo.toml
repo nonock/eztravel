@@ -14,4 +14,5 @@ tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
 toml = "1.1.8"
 
 [dev-dependencies]
+tempfile = "3.27.0"
 wiremock = "0.6.5"
