@@ -1,0 +1,9 @@
+{
+  "type": "changed",
+  "line": "X",
+  "mode": "metro",
+  "severity": "disrupted",
+  "previous": "blocking",
+  "title": "Métro X : Reprise progressive / trafic reste perturbé",
+  "text": "Le trafic reprend mais reste perturbé sur toute la ligne."
+}
