@@ -37,7 +37,7 @@ pub struct WatchWindows {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Leg {
+pub enum Direction {
     Outbound,
     Inbound,
 }
@@ -100,25 +100,25 @@ pub fn is_public_holiday(date: Date, whit_monday_off: bool) -> bool {
     }
 }
 
-/// The leg being watched at `now`, if any.
-pub fn watched_leg(
+/// The direction being watched at `now`, if any.
+pub fn watched_direction(
     now: Timestamp,
     tz: &TimeZone,
     calendar: &Calendar,
     windows: &WatchWindows,
-) -> Option<Leg> {
+) -> Option<Direction> {
     let local = now.to_zoned(tz.clone());
     if !calendar.is_office_day(local.date()) {
         return None;
     }
     let time = local.time();
     [
-        (Leg::Outbound, windows.outbound),
-        (Leg::Inbound, windows.inbound),
+        (Direction::Outbound, windows.outbound),
+        (Direction::Inbound, windows.inbound),
     ]
     .into_iter()
     .find(|(_, window)| window.start <= time && time < window.end)
-    .map(|(leg, _)| leg)
+    .map(|(direction, _)| direction)
 }
 
 #[cfg(test)]
@@ -279,51 +279,51 @@ mod tests {
     }
 
     #[test]
-    fn watched_leg_follows_local_time() {
+    fn watched_direction_follows_local_time() {
         let (calendar, windows, tz) = (calendar(), windows(), paris());
         // Tuesday 3 November 2026, Paris is UTC+1.
         assert_eq!(
-            watched_leg(at("2026-11-03T05:44:59Z"), &tz, &calendar, &windows),
+            watched_direction(at("2026-11-03T05:44:59Z"), &tz, &calendar, &windows),
             None
         );
         assert_eq!(
-            watched_leg(at("2026-11-03T05:45:00Z"), &tz, &calendar, &windows),
-            Some(Leg::Outbound)
+            watched_direction(at("2026-11-03T05:45:00Z"), &tz, &calendar, &windows),
+            Some(Direction::Outbound)
         );
         assert_eq!(
-            watched_leg(at("2026-11-03T07:14:59Z"), &tz, &calendar, &windows),
-            Some(Leg::Outbound)
+            watched_direction(at("2026-11-03T07:14:59Z"), &tz, &calendar, &windows),
+            Some(Direction::Outbound)
         );
         assert_eq!(
-            watched_leg(at("2026-11-03T07:15:00Z"), &tz, &calendar, &windows),
+            watched_direction(at("2026-11-03T07:15:00Z"), &tz, &calendar, &windows),
             None
         );
         assert_eq!(
-            watched_leg(at("2026-11-03T15:00:00Z"), &tz, &calendar, &windows),
-            Some(Leg::Inbound)
+            watched_direction(at("2026-11-03T15:00:00Z"), &tz, &calendar, &windows),
+            Some(Direction::Inbound)
         );
         assert_eq!(
-            watched_leg(at("2026-11-03T16:30:00Z"), &tz, &calendar, &windows),
+            watched_direction(at("2026-11-03T16:30:00Z"), &tz, &calendar, &windows),
             None
         );
     }
 
     #[test]
-    fn watched_leg_across_the_change_to_winter_time() {
+    fn watched_direction_across_the_change_to_winter_time() {
         let (calendar, windows, tz) = (calendar(), windows(), paris());
         // Tuesday 20 October 2026, before 25 October: Paris is UTC+2.
         assert_eq!(
-            watched_leg(at("2026-10-20T04:45:00Z"), &tz, &calendar, &windows),
-            Some(Leg::Outbound)
+            watched_direction(at("2026-10-20T04:45:00Z"), &tz, &calendar, &windows),
+            Some(Direction::Outbound)
         );
         // Monday 26 October, after the change: UTC+1.
         assert_eq!(
-            watched_leg(at("2026-10-26T04:45:00Z"), &tz, &calendar, &windows),
+            watched_direction(at("2026-10-26T04:45:00Z"), &tz, &calendar, &windows),
             None
         );
         assert_eq!(
-            watched_leg(at("2026-10-26T05:45:00Z"), &tz, &calendar, &windows),
-            Some(Leg::Outbound)
+            watched_direction(at("2026-10-26T05:45:00Z"), &tz, &calendar, &windows),
+            Some(Direction::Outbound)
         );
     }
 
@@ -332,7 +332,7 @@ mod tests {
         let (calendar, windows, tz) = (calendar(), windows(), paris());
         // Monday 2 November 2026 is not an office day in a first week.
         assert_eq!(
-            watched_leg(at("2026-11-02T06:00:00Z"), &tz, &calendar, &windows),
+            watched_direction(at("2026-11-02T06:00:00Z"), &tz, &calendar, &windows),
             None
         );
     }
