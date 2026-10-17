@@ -23,6 +23,8 @@ pub struct RouteStop {
 }
 
 /// A ride on one line, between two stop areas.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Leg {
     pub line: String,
     pub board: String,

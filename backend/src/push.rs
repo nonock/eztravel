@@ -23,13 +23,16 @@ const TEXT_MAX_BYTES: usize = 3000;
 const TIME_TO_LIVE: &str = "1800s";
 const SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Mode {
     Train,
     Metro,
 }
 
 /// How a line is named on screen, by its line code.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LineLabel {
     pub code: String,
     pub name: String,

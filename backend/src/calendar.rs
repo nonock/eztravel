@@ -7,31 +7,58 @@
 use jiff::civil::{Date, Time, Weekday};
 use jiff::tz::TimeZone;
 use jiff::{Timestamp, ToSpan};
-use serde::{Deserialize, Serialize};
+use serde::de::Error;
+use serde::{Deserialize, Deserializer, Serialize};
 
-/// Office days as a two-week cycle.
-pub struct OfficeWeeks {
+/// Office days as a two-week cycle, minus public holidays and time away.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Calendar {
     /// Any day of a week that uses `first_week`. The weeks then alternate from there.
     pub anchor: Date,
+    #[serde(deserialize_with = "weekdays")]
     pub first_week: Vec<Weekday>,
+    #[serde(deserialize_with = "weekdays")]
     pub second_week: Vec<Weekday>,
-}
-
-pub struct Calendar {
-    pub weeks: OfficeWeeks,
     /// Whit Monday is a public holiday, but many employers make it a working "solidarity day".
+    #[serde(default = "yes")]
     pub whit_monday_off: bool,
     /// Last day away from the office, included.
+    #[serde(default)]
     pub away_through: Option<Date>,
 }
 
+fn yes() -> bool {
+    true
+}
+
+/// Weekdays by their English names, as in "monday".
+fn weekdays<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Weekday>, D::Error> {
+    Vec::<String>::deserialize(deserializer)?
+        .iter()
+        .map(|name| match name.to_lowercase().as_str() {
+            "monday" => Ok(Weekday::Monday),
+            "tuesday" => Ok(Weekday::Tuesday),
+            "wednesday" => Ok(Weekday::Wednesday),
+            "thursday" => Ok(Weekday::Thursday),
+            "friday" => Ok(Weekday::Friday),
+            "saturday" => Ok(Weekday::Saturday),
+            "sunday" => Ok(Weekday::Sunday),
+            _ => Err(D::Error::custom(format!("unknown weekday \"{name}\""))),
+        })
+        .collect()
+}
+
 /// A half-open span of local time: `start` is included, `end` is not.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Window {
     pub start: Time,
     pub end: Time,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WatchWindows {
     pub outbound: Window,
     pub inbound: Window,
@@ -52,13 +79,13 @@ impl Calendar {
         }
         // Count whole weeks from the anchor's Monday. ISO week numbers would not
         // do: a year with 53 weeks puts two odd weeks in a row.
-        let anchor = self.weeks.anchor;
+        let anchor = self.anchor;
         let monday = anchor - i64::from(anchor.weekday().to_monday_zero_offset()).days();
         let weeks = (date - monday).get_days().div_euclid(7);
         let days = if weeks % 2 == 0 {
-            &self.weeks.first_week
+            &self.first_week
         } else {
-            &self.weeks.second_week
+            &self.second_week
         };
         days.contains(&date.weekday())
     }
@@ -132,11 +159,9 @@ mod tests {
     // week, Monday, Wednesday and Friday the next.
     fn calendar() -> Calendar {
         Calendar {
-            weeks: OfficeWeeks {
-                anchor: date(2026, 11, 4),
-                first_week: vec![Tuesday, Thursday],
-                second_week: vec![Monday, Wednesday, Friday],
-            },
+            anchor: date(2026, 11, 4),
+            first_week: vec![Tuesday, Thursday],
+            second_week: vec![Monday, Wednesday, Friday],
             whit_monday_off: true,
             away_through: None,
         }
@@ -194,17 +219,32 @@ mod tests {
     fn alternation_ignores_iso_week_numbers() {
         // 2026 has 53 ISO weeks: weeks 53 and 1 are both odd, but must still alternate.
         let calendar = Calendar {
-            whit_monday_off: true,
-            away_through: None,
-            weeks: OfficeWeeks {
-                anchor: date(2026, 12, 28),
-                ..calendar().weeks
-            },
+            anchor: date(2026, 12, 28),
+            ..calendar()
         };
         assert!(calendar.is_office_day(date(2026, 12, 29)));
         assert!(!calendar.is_office_day(date(2027, 1, 5)));
         assert!(calendar.is_office_day(date(2027, 1, 6)));
         assert!(calendar.is_office_day(date(2027, 1, 12)));
+    }
+
+    #[test]
+    fn weekdays_are_read_by_their_english_names() {
+        #[derive(Deserialize)]
+        struct Days {
+            #[serde(deserialize_with = "weekdays")]
+            days: Vec<Weekday>,
+        }
+        let all = r#"{"days": ["Monday", "tuesday", "WEDNESDAY", "thursday", "friday", "saturday", "sunday"]}"#;
+        let days: Days = serde_json::from_str(all).unwrap();
+        use Weekday::{Saturday, Sunday};
+        assert_eq!(
+            days.days,
+            [
+                Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday
+            ]
+        );
+        assert!(serde_json::from_str::<Days>(r#"{"days": "monday"}"#).is_err());
     }
 
     #[test]

@@ -1,0 +1,50 @@
+# eztravel backend configuration: an example commute, not anyone's real one.
+# Copy it outside the repository and describe your own commute there.
+
+time_zone = "Europe/Paris"
+
+[calendar]
+# Any day of a week that uses `first_week`; the weeks then alternate.
+anchor = "2026-11-04"
+first_week = ["tuesday", "thursday"]
+second_week = ["monday", "wednesday", "friday"]
+# Whit Monday is a public holiday, but many employers make it a working day.
+whit_monday_off = true
+# Last day away from the office, included.
+# away_through = "2026-12-31"
+
+[windows]
+outbound = { start = "06:45", end = "08:15" }
+inbound = { start = "16:00", end = "17:30" }
+
+# How each line is named in notifications.
+[[lines]]
+code = "C01740"
+name = "L"
+mode = "train"
+
+[[lines]]
+code = "C02000"
+name = "X"
+mode = "metro"
+
+# The rides of each way, in order. Stops are Navitia stop areas.
+[[outbound]]
+line = "C01740"
+board = "stop_area:IDFM:71100"
+alight = "stop_area:IDFM:71370"
+
+[[outbound]]
+line = "C02000"
+board = "stop_area:IDFM:71380"
+alight = "stop_area:IDFM:71400"
+
+[[inbound]]
+line = "C02000"
+board = "stop_area:IDFM:71400"
+alight = "stop_area:IDFM:71380"
+
+[[inbound]]
+line = "C01740"
+board = "stop_area:IDFM:71370"
+alight = "stop_area:IDFM:71100"
