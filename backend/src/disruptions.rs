@@ -101,7 +101,8 @@ pub fn parse(json: &[u8], lines: &[&str]) -> Result<Vec<Disruption>, serde_json:
                     id: object.id.clone(),
                     name: object.name.clone(),
                 };
-                if object.kind != "line" && !stops.contains(&place) {
+                let is_stop = matches!(object.kind.as_str(), "stop_point" | "stop_area");
+                if is_stop && !stops.contains(&place) {
                     stops.push(place);
                 }
             }
@@ -335,6 +336,22 @@ mod tests {
                 name: "Gare A".into()
             }]
         );
+    }
+
+    #[test]
+    fn only_stops_count_as_stops() {
+        // Seen in the real feed: a line can list its whole network among the impacted objects.
+        let network = r#"{ "type": "network", "id": "network:IDFM:1046", "name": "Transilien", "disruptionIds": ["d-shared"] },"#;
+        let json = feed().replacen(
+            r#"{"disruptionIds":["d-station"]"#,
+            &format!("{network}{{\"disruptionIds\":[\"d-station\"]"),
+            1,
+        );
+        assert!(json.contains("network:IDFM:1046"));
+        let disruptions = parse(json.as_bytes(), &[WATCHED]).unwrap();
+        let shared = by_id(&disruptions, "d-shared");
+        assert_eq!(shared.lines, [WATCHED]);
+        assert!(shared.stops.is_empty());
     }
 
     #[test]
