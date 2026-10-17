@@ -1,0 +1,16 @@
+# Secrets and personal data: never commit
+.env
+/local/
+/captures/
+google-services.json
+*.jks
+*.keystore
+
+# Rust
+target/
+
+# Android
+.gradle/
+build/
+local.properties
+.idea/
