@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use jiff::civil::DateTime;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Disruption {
@@ -61,7 +61,7 @@ pub enum Cause {
     Unknown,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Severity {
     #[serde(rename = "BLOQUANTE")]
     Blocking,

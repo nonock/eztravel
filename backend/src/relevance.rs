@@ -5,17 +5,17 @@
 //! starts still stops its trains. So sections are placed on the routes of the
 //! line, whose stops come in travel order from Navitia (`route_schedules`).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::disruptions::Disruption;
 
 /// One route of a line, its stops in travel order.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Route {
     pub stops: Vec<RouteStop>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RouteStop {
     pub stop_point: String,
     pub stop_area: String,
@@ -351,6 +351,15 @@ mod tests {
         assert_eq!(
             parse_route(json.to_string().as_bytes()).unwrap(),
             route(&["N1", "T1", "P"])
+        );
+    }
+
+    #[test]
+    fn routes_can_be_kept_between_runs() {
+        let saved = serde_json::to_string(&routes()).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<Route>>(&saved).unwrap(),
+            routes()
         );
     }
 

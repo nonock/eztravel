@@ -12,6 +12,7 @@
 
 use jiff::SignedDuration;
 use jiff::civil::{Date, DateTime};
+use serde::{Deserialize, Serialize};
 
 use crate::calendar::Direction;
 use crate::disruptions::{Cause, Disruption, Severity};
@@ -49,8 +50,8 @@ pub enum Notification {
     },
 }
 
-/// What has been notified so far. Kept between polls.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// What has been notified so far. Kept between polls, and across restarts.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
     window: Option<(Date, Direction)>,
     lines: Vec<(String, Severity)>,
@@ -523,6 +524,21 @@ mod tests {
                 disruptions: vec![second]
             }]
         );
+    }
+
+    #[test]
+    fn the_state_survives_a_restart() {
+        let mut state = State::default();
+        let current = [
+            incident("a", Severity::Blocking),
+            planned("w", Cause::Works, at(3, 5, 0), at(3, 12, 0)),
+        ];
+        poll(&mut state, at(3, 7, 30), MORNING, &current);
+        let saved = serde_json::to_string(&state).unwrap();
+        let mut restored: State = serde_json::from_str(&saved).unwrap();
+        assert_eq!(restored, state);
+        // Nothing is sent twice because the service restarted.
+        assert_eq!(poll(&mut restored, at(3, 7, 32), MORNING, &current), []);
     }
 
     #[test]

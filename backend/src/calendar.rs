@@ -7,6 +7,7 @@
 use jiff::civil::{Date, Time, Weekday};
 use jiff::tz::TimeZone;
 use jiff::{Timestamp, ToSpan};
+use serde::{Deserialize, Serialize};
 
 /// Office days as a two-week cycle.
 pub struct OfficeWeeks {
@@ -36,7 +37,7 @@ pub struct WatchWindows {
     pub inbound: Window,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
     Outbound,
     Inbound,
