@@ -21,6 +21,8 @@ use crate::push::{self, PushError, Sender};
 use crate::relevance::{Leg, Route};
 
 const STATE_FILE: &str = "state.json";
+const PRIM_URL: &str = "https://prim.iledefrance-mobilites.fr/marketplace";
+const FCM_URL: &str = "https://fcm.googleapis.com";
 const ROUTES_FILE: &str = "routes.json";
 
 pub struct Service {
@@ -65,6 +67,51 @@ impl Service {
             devices,
             data_dir: data_dir.to_path_buf(),
         }
+    }
+
+    /// Everything from environment variables, as on fly.io where they are secrets:
+    /// `EZTRAVEL_CONFIG` (the configuration file's text), `PRIM_API_KEY`,
+    /// `FIREBASE_SERVICE_ACCOUNT` (the key file's text), `DEVICE_TOKENS`
+    /// (separated by commas, spaces or new lines) and, optionally,
+    /// `EZTRAVEL_DATA` (default `/data`), `PRIM_URL` and `FCM_URL`.
+    pub fn from_env(var: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
+        let required = |name: &str| var(name).ok_or_else(|| format!("{name} is not set"));
+        let config = Config::parse(&required("EZTRAVEL_CONFIG")?)
+            .map_err(|error| format!("EZTRAVEL_CONFIG: {error}"))?;
+        let account = serde_json::from_str(&required("FIREBASE_SERVICE_ACCOUNT")?)
+            .map_err(|error| format!("FIREBASE_SERVICE_ACCOUNT: {error}"))?;
+        let devices: Vec<String> = required("DEVICE_TOKENS")?
+            .split([',', ' ', '\n'])
+            .filter(|token| !token.is_empty())
+            .map(String::from)
+            .collect();
+        if devices.is_empty() {
+            return Err("DEVICE_TOKENS holds no token".into());
+        }
+        let prim = Prim::new(
+            &var("PRIM_URL").unwrap_or(PRIM_URL.into()),
+            &required("PRIM_API_KEY")?,
+        );
+        let sender = Sender::new(account, &var("FCM_URL").unwrap_or(FCM_URL.into()));
+        let data_dir = var("EZTRAVEL_DATA").unwrap_or("/data".into());
+        Ok(Self::new(
+            config,
+            prim,
+            sender,
+            devices,
+            Path::new(&data_dir),
+        ))
+    }
+
+    /// The local time and what is watched, to check the time zone where the service runs.
+    pub fn describe(&self, now: Timestamp) -> String {
+        let time_zone = self.config.time_zone();
+        let direction =
+            watched_direction(now, &time_zone, &self.config.calendar, &self.config.windows);
+        format!(
+            "local time {}, watching {direction:?}",
+            now.to_zoned(time_zone).strftime("%A %Y-%m-%d %H:%M %Z")
+        )
     }
 
     pub async fn poll(&mut self, now: Timestamp) -> Poll {
@@ -396,6 +443,70 @@ mod tests {
         );
         assert_eq!(service.poll(at(MORNING)).await, Poll::Sent(1));
         assert!(!missing.exists());
+    }
+
+    fn environment(overrides: &[(&str, Option<&str>)]) -> impl Fn(&str) -> Option<String> {
+        let mut vars: BTreeMap<String, String> = BTreeMap::from([
+            ("EZTRAVEL_CONFIG".into(), EXAMPLE.into()),
+            ("PRIM_API_KEY".into(), "key".into()),
+            ("FIREBASE_SERVICE_ACCOUNT".into(), serde_json::json!({
+                "type": "service_account", "project_id": "demo-project",
+                "client_email": "sender@demo-project.iam.gserviceaccount.com",
+                "private_key": crate::push::testing::test_key().0, "token_uri": "https://oauth2.example/token"
+            }).to_string()),
+            ("DEVICE_TOKENS".into(), "first,second
+third  ".into()),
+        ]);
+        for (name, value) in overrides {
+            match value {
+                Some(value) => vars.insert(name.to_string(), value.to_string()),
+                None => vars.remove(*name),
+            };
+        }
+        move |name: &str| vars.get(name).cloned()
+    }
+
+    #[test]
+    fn starts_from_environment_variables() {
+        let service = Service::from_env(environment(&[])).unwrap();
+        assert_eq!(service.devices, ["first", "second", "third"]);
+        assert_eq!(service.data_dir, Path::new("/data"));
+        let elsewhere =
+            Service::from_env(environment(&[("EZTRAVEL_DATA", Some("/tmp/eztravel"))])).unwrap();
+        assert_eq!(elsewhere.data_dir, Path::new("/tmp/eztravel"));
+    }
+
+    #[test]
+    fn says_which_variable_is_wrong() {
+        let error = |overrides: &[(&str, Option<&str>)]| {
+            Service::from_env(environment(overrides)).err().unwrap()
+        };
+        for name in [
+            "EZTRAVEL_CONFIG",
+            "FIREBASE_SERVICE_ACCOUNT",
+            "DEVICE_TOKENS",
+            "PRIM_API_KEY",
+        ] {
+            assert_eq!(error(&[(name, None)]), format!("{name} is not set"));
+        }
+        assert!(error(&[("EZTRAVEL_CONFIG", Some("[calendar"))]).contains("EZTRAVEL_CONFIG"));
+        assert!(
+            error(&[("FIREBASE_SERVICE_ACCOUNT", Some("{}"))]).contains("FIREBASE_SERVICE_ACCOUNT")
+        );
+        assert!(error(&[("DEVICE_TOKENS", Some(" , "))]).contains("DEVICE_TOKENS"));
+    }
+
+    #[test]
+    fn describes_local_time_and_what_is_watched() {
+        let service = Service::from_env(environment(&[])).unwrap();
+        assert_eq!(
+            service.describe(at(MORNING)),
+            "local time Tuesday 2026-11-03 07:00 CET, watching Some(Outbound)"
+        );
+        assert_eq!(
+            service.describe(at(LATE_MORNING)),
+            "local time Tuesday 2026-11-03 11:00 CET, watching None"
+        );
     }
 
     /// One route for line L through the example's stops; none for line X.

@@ -1,0 +1,17 @@
+# The backend has no HTTP service yet: it only reads PRIM and sends notifications.
+app = "eztravel-backend"
+primary_region = "cdg"
+
+[env]
+  EZTRAVEL_DATA = "/data"
+
+[[mounts]]
+  source = "eztravel_data"
+  destination = "/data"
+
+[[restart]]
+  policy = "always"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
