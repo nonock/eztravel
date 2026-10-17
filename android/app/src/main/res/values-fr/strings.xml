@@ -1,0 +1,18 @@
+<resources>
+    <string name="home_waiting">Vous serez prévenu ici quand les lignes de votre trajet seront perturbées.</string>
+    <string name="channel_disruptions">Perturbations</string>
+    <string name="channel_disruptions_description">Perturbations sur les lignes de votre trajet</string>
+    <string name="line_train">Ligne %1$s</string>
+    <string name="line_metro">Métro %1$s</string>
+    <string name="line_other">Ligne %1$s</string>
+    <string name="notification_started_blocking">%1$s : trafic interrompu</string>
+    <string name="notification_started_disrupted">%1$s : trafic perturbé</string>
+    <string name="notification_changed_blocking">%1$s : trafic désormais interrompu</string>
+    <string name="notification_changed_disrupted">%1$s : reprise, trafic encore perturbé</string>
+    <string name="notification_ended">%1$s : trafic rétabli</string>
+    <plurals name="notification_planned">
+        <item quantity="one">%d perturbation prévue sur vos lignes aujourd’hui</item>
+        <item quantity="many">%d perturbations prévues sur vos lignes aujourd’hui</item>
+        <item quantity="other">%d perturbations prévues sur vos lignes aujourd’hui</item>
+    </plurals>
+</resources>

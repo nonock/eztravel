@@ -1,3 +1,18 @@
 <resources>
-    <string name="app_name">eztravel</string>
+    <string name="app_name" translatable="false">eztravel</string>
+    <string name="home_waiting">You will be notified here when the lines of your commute are disrupted.</string>
+    <string name="channel_disruptions">Disruptions</string>
+    <string name="channel_disruptions_description">Disruptions on the lines of your commute</string>
+    <string name="line_train">Line %1$s</string>
+    <string name="line_metro">Metro %1$s</string>
+    <string name="line_other">Line %1$s</string>
+    <string name="notification_started_blocking">%1$s: service interrupted</string>
+    <string name="notification_started_disrupted">%1$s: service disrupted</string>
+    <string name="notification_changed_blocking">%1$s: now interrupted</string>
+    <string name="notification_changed_disrupted">%1$s: running again, still disrupted</string>
+    <string name="notification_ended">%1$s: back to normal</string>
+    <plurals name="notification_planned">
+        <item quantity="one">%d planned disruption on your lines today</item>
+        <item quantity="other">%d planned disruptions on your lines today</item>
+    </plurals>
 </resources>
