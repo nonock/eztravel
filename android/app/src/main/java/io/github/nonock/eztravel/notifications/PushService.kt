@@ -7,7 +7,7 @@ import com.google.firebase.messaging.RemoteMessage
 /** Receives the backend's messages, even when the app is closed. */
 class PushService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
-        PushMessage.parse(message.data)?.let { Notifier.show(this, it) }
+        Notifier.receive(this, message.data)
     }
 
     override fun onNewToken(token: String) {

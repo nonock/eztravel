@@ -3,6 +3,7 @@ package io.github.nonock.eztravel.notifications
 import android.Manifest
 import android.app.Notification
 import android.app.NotificationManager
+import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
@@ -29,21 +30,47 @@ class NotifierTest {
 
     private fun shown(tag: String) = manager.activeNotifications.filter { it.tag == tag }
 
+    private fun titleOf(tag: String) = shown(tag).singleOrNull()?.notification?.extras?.getString(Notification.EXTRA_TITLE)
+
+    /** Posting is asynchronous and limited to a few updates per second per app: wait for the system. */
+    private fun waitForTitle(tag: String, expected: String) {
+        val deadline = SystemClock.uptimeMillis() + 3_000
+        while (titleOf(tag) != expected && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(50)
+        assertEquals(expected, titleOf(tag))
+    }
+
     @Test
     fun aMessageIsShownOnTheDisruptionsChannel() {
         Notifier.show(context, started)
+        waitForTitle("line-L", started.text(context.resources).title)
         val notification = shown("line-L").single().notification
         assertEquals(Notifier.CHANNEL, notification.channelId)
-        assertEquals(started.text(context.resources).title, notification.extras.getString(Notification.EXTRA_TITLE))
         assertEquals("Texte de l'opérateur", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
 
     @Test
     fun aLaterMessageAboutTheSameLineReplacesTheEarlierOne() {
         Notifier.show(context, started)
-        Notifier.show(context, PushMessage.Ended(Line("L", Mode.TRAIN)))
-        val notification = shown("line-L").single().notification
-        assertEquals(PushMessage.Ended(Line("L", Mode.TRAIN)).text(context.resources).title, notification.extras.getString(Notification.EXTRA_TITLE))
+        waitForTitle("line-L", started.text(context.resources).title)
+        SystemClock.sleep(500)
+        val ended = PushMessage.Ended(Line("L", Mode.TRAIN))
+        Notifier.show(context, ended)
+        waitForTitle("line-L", ended.text(context.resources).title)
+        assertEquals(1, shown("line-L").size)
+    }
+
+    @Test
+    fun aReceivedMessageIsShown() {
+        val data = mapOf("type" to "started", "line" to "L", "mode" to "train", "severity" to "blocking", "text" to "Texte reçu")
+        assertEquals(true, Notifier.receive(context, data))
+        waitForTitle("line-L", PushMessage.parse(data)!!.text(context.resources).title)
+        assertEquals("Texte reçu", shown("line-L").single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    }
+
+    @Test
+    fun anUnknownMessageIsDropped() {
+        assertEquals(false, Notifier.receive(context, mapOf("type" to "something-new")))
+        assertEquals(0, manager.activeNotifications.size)
     }
 
     @Test

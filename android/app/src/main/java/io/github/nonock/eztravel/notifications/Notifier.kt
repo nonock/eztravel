@@ -27,6 +27,13 @@ object Notifier {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
+    /** Shows the backend's message; false when it is not one this version knows. */
+    fun receive(context: Context, data: Map<String, String>): Boolean {
+        val message = PushMessage.parse(data) ?: return false
+        show(context, message)
+        return true
+    }
+
     fun show(context: Context, message: PushMessage) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
