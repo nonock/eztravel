@@ -1,9 +1,17 @@
-# The backend has no HTTP service yet: it only reads PRIM and sends notifications.
+# The backend reads PRIM, sends notifications and serves the app's API.
 app = "eztravel-backend"
 primary_region = "cdg"
 
 [env]
   EZTRAVEL_DATA = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # The machine also runs the poll loop: it must never be stopped for lack of HTTP traffic.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
 
 [[mounts]]
   source = "eztravel_data"
