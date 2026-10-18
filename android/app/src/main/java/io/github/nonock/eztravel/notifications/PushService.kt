@@ -1,8 +1,8 @@
 package io.github.nonock.eztravel.notifications
 
-import android.util.Log
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import io.github.nonock.eztravel.backend.AppBackend
 
 /** Receives the backend's messages, even when the app is closed. */
 class PushService : FirebaseMessagingService() {
@@ -10,12 +10,8 @@ class PushService : FirebaseMessagingService() {
         Notifier.receive(this, message.data)
     }
 
+    /** Called off the main thread, so registering may block. */
     override fun onNewToken(token: String) {
-        // Until the backend registers devices, the token is read from the log.
-        Log.i(TAG, "FCM token: $token")
-    }
-
-    companion object {
-        const val TAG = "eztravel"
+        AppBackend.register(token)
     }
 }

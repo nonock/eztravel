@@ -1,0 +1,69 @@
+package io.github.nonock.eztravel.backend
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.time.LocalDate
+
+/** The eztravel backend, as the app sees it. Tests replace it with a fake. */
+interface Backend {
+    /** False when this build has no backend address or no app key. */
+    val configured: Boolean
+
+    /** Blocking: call it off the main thread. */
+    fun register(token: String)
+
+    /** The last day away from the office, included, if any. */
+    suspend fun awayThrough(): LocalDate?
+
+    suspend fun setAwayThrough(date: LocalDate?)
+}
+
+class BackendError(val status: Int) : IOException("the backend answered $status")
+
+class HttpBackend(private val baseUrl: String, private val key: String) : Backend {
+    override val configured: Boolean
+        get() = baseUrl.isNotEmpty() && key.isNotEmpty()
+
+    override fun register(token: String) {
+        request("POST", "/devices", JSONObject().put("token", token))
+    }
+
+    override suspend fun awayThrough(): LocalDate? = withContext(Dispatchers.IO) {
+        val settings = JSONObject(request("GET", "/settings", null))
+        // Android's org.json may read a null as the text "null": check for it first.
+        if (settings.isNull("away_through")) null else LocalDate.parse(settings.getString("away_through"))
+    }
+
+    override suspend fun setAwayThrough(date: LocalDate?) = withContext(Dispatchers.IO) {
+        request("PUT", "/settings", JSONObject().put("away_through", date?.toString() ?: JSONObject.NULL))
+        Unit
+    }
+
+    private fun request(method: String, path: String, body: JSONObject?): String {
+        val connection = URL(baseUrl + path).openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = method
+            connection.connectTimeout = TIMEOUT_MS
+            connection.readTimeout = TIMEOUT_MS
+            connection.setRequestProperty("Authorization", "Bearer $key")
+            if (body != null) {
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.outputStream.use { it.write(body.toString().toByteArray()) }
+            }
+            val status = connection.responseCode
+            if (status !in 200..299) throw BackendError(status)
+            return connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private companion object {
+        const val TIMEOUT_MS = 15_000
+    }
+}

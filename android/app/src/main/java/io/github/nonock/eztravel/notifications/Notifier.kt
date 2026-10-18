@@ -21,7 +21,6 @@ object Notifier {
     private const val ID = 1
 
     fun createChannel(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(CHANNEL, context.getString(R.string.channel_disruptions), NotificationManager.IMPORTANCE_HIGH)
         channel.description = context.getString(R.string.channel_disruptions_description)
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)

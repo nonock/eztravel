@@ -15,4 +15,13 @@
         <item quantity="many">%d perturbations prévues sur vos lignes aujourd’hui</item>
         <item quantity="other">%d perturbations prévues sur vos lignes aujourd’hui</item>
     </plurals>
+    <string name="away_title">Absence</string>
+    <string name="away_loading">Chargement…</string>
+    <string name="away_none">Aucune absence prévue : vous êtes prévenu les jours de bureau.</string>
+    <string name="away_until">Absent jusqu’au %1$s inclus : aucune notification d’ici là.</string>
+    <string name="away_choose">Choisir le dernier jour d’absence</string>
+    <string name="away_clear">Annuler l’absence</string>
+    <string name="away_unreachable">Le serveur est injoignable. Réessayez plus tard.</string>
+    <string name="away_not_configured">Cette version de l’appli n’a ni adresse de serveur ni clé (voir local.properties).</string>
+    <string name="cancel">Annuler</string>
 </resources>

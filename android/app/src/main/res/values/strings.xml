@@ -15,4 +15,14 @@
         <item quantity="one">%d planned disruption on your lines today</item>
         <item quantity="other">%d planned disruptions on your lines today</item>
     </plurals>
+    <string name="away_title">Time away</string>
+    <string name="away_loading">Loading…</string>
+    <string name="away_none">No time away planned: you are notified on office days.</string>
+    <string name="away_until">Away until %1$s included: no notifications until then.</string>
+    <string name="away_choose">Choose the last day away</string>
+    <string name="away_clear">Cancel the time away</string>
+    <string name="away_unreachable">The server cannot be reached. Try again later.</string>
+    <string name="away_not_configured">This build of the app has no server address or key (see local.properties).</string>
+    <string name="ok" translatable="false">OK</string>
+    <string name="cancel">Cancel</string>
 </resources>

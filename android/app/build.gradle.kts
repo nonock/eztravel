@@ -1,8 +1,20 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.google.services)
 }
+
+// The backend's address and the app key belong to each user's own build: they
+// live in local.properties, out of the repository. Without them the app builds
+// but says it is not configured.
+val localProperties = Properties().apply {
+    providers.fileContents(rootProject.layout.projectDirectory.file("local.properties")).asText.orNull
+        ?.let { load(it.reader()) }
+}
+
+fun quoted(name: String) = "\"" + localProperties.getProperty(name, "") + "\""
 
 android {
     namespace = "io.github.nonock.eztravel"
@@ -12,12 +24,16 @@ android {
 
     defaultConfig {
         applicationId = "io.github.nonock.eztravel"
-        minSdk = 24
+        // Android 8.0, for java.time.
+        minSdk = 26
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "BACKEND_URL", quoted("eztravel.backendUrl"))
+        buildConfigField("String", "APP_KEY", quoted("eztravel.appKey"))
     }
 
     buildTypes {
@@ -38,6 +54,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     lint {
         // Every text shown to the user must exist in French too.
