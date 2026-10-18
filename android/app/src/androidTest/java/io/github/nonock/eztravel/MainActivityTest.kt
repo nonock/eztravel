@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
 import io.github.nonock.eztravel.backend.AppBackend
@@ -40,10 +41,22 @@ class MainActivityTest {
     @get:Rule(order = 2)
     val compose = createAndroidComposeRule<MainActivity>()
 
+    private fun text(id: Int) = compose.activity.getString(id)
+
     @Test
-    fun theHomeScreenSaysWhatToExpect() {
-        compose.onNodeWithText(compose.activity.getString(R.string.home_waiting)).assertIsDisplayed()
-        compose.onNodeWithText(compose.activity.getString(R.string.away_none)).assertIsDisplayed()
+    fun theHomeScreenShowsTheStatusAndTheTimeAway() {
+        compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > 0 }
+        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.away_none)).assertIsDisplayed()
+    }
+
+    @Test
+    fun savingTheTimeAwayReadsTheStatusAgain() {
+        compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() == 1 }
+        compose.onNodeWithText(text(R.string.away_choose)).performClick()
+        compose.onNodeWithText(text(R.string.ok)).performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() == 2 }
     }
 
     @Test

@@ -20,6 +20,9 @@ interface Backend {
     suspend fun awayThrough(): LocalDate?
 
     suspend fun setAwayThrough(date: LocalDate?)
+
+    /** What the backend sees: the lines being watched and whether checks work. */
+    suspend fun status(): Status
 }
 
 class BackendError(val status: Int) : IOException("the backend answered $status")
@@ -41,6 +44,10 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
     override suspend fun setAwayThrough(date: LocalDate?) = withContext(Dispatchers.IO) {
         request("PUT", "/settings", JSONObject().put("away_through", date?.toString() ?: JSONObject.NULL))
         Unit
+    }
+
+    override suspend fun status(): Status = withContext(Dispatchers.IO) {
+        Status.parse(request("GET", "/status", null))
     }
 
     private fun request(method: String, path: String, body: JSONObject?): String {

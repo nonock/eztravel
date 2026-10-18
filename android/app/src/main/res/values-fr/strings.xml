@@ -1,5 +1,4 @@
 <resources>
-    <string name="home_waiting">Vous serez prévenu ici quand les lignes de votre trajet seront perturbées.</string>
     <string name="channel_disruptions">Perturbations</string>
     <string name="channel_disruptions_description">Perturbations sur les lignes de votre trajet</string>
     <string name="line_train">Ligne %1$s</string>
@@ -15,6 +14,25 @@
         <item quantity="many">%d perturbations prévues sur vos lignes aujourd’hui</item>
         <item quantity="other">%d perturbations prévues sur vos lignes aujourd’hui</item>
     </plurals>
+    <string name="notification_outage">Surveillance interrompue</string>
+    <string name="notification_outage_text">Aucun relevé réussi depuis 10 minutes : sans notification, rien ne garantit que le trafic est normal. Vérifiez-le ailleurs.</string>
+    <string name="notification_recovered">Surveillance rétablie</string>
+    <string name="notification_recovered_text">Les relevés fonctionnent de nouveau.</string>
+    <string name="status_title">Votre trajet</string>
+    <string name="status_unreachable">Le serveur est injoignable : impossible de savoir si vos lignes sont surveillées.</string>
+    <string name="status_watching_outbound">Surveillance du trajet aller.</string>
+    <string name="status_watching_inbound">Surveillance du trajet retour.</string>
+    <string name="status_line_normal">%1$s : trafic normal</string>
+    <string name="status_line_disrupted">%1$s : trafic perturbé</string>
+    <string name="status_line_blocking">%1$s : trafic interrompu</string>
+    <string name="status_not_watching">Pas de surveillance en ce moment.</string>
+    <string name="status_next">Prochaine surveillance : %1$s.</string>
+    <string name="status_no_next">Aucun jour de bureau à venir : rien ne sera surveillé.</string>
+    <string name="status_checked">Dernier relevé : %1$s.</string>
+    <string name="status_planned">Prévu aujourd’hui :</string>
+    <string name="status_outage_prim">Surveillance interrompue depuis %1$s : les données d’Île-de-France Mobilités sont illisibles. Vérifiez le trafic ailleurs.</string>
+    <string name="status_outage_firebase">Surveillance interrompue depuis %1$s : les notifications ne partent plus. Vérifiez le trafic ailleurs.</string>
+    <string name="status_outage_server">Surveillance interrompue depuis %1$s : le serveur ne fait plus ses relevés. Vérifiez le trafic ailleurs.</string>
     <string name="away_title">Absence</string>
     <string name="away_loading">Chargement…</string>
     <string name="away_none">Aucune absence prévue : vous êtes prévenu les jours de bureau.</string>

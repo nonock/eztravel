@@ -4,6 +4,7 @@ import org.json.JSONException
 import java.io.IOException
 import java.time.LocalDate
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 
 /** A backend kept in memory, to test the app without a network. */
 class FakeBackend(
@@ -12,9 +13,12 @@ class FakeBackend(
     var failing: Boolean = false,
     /** Answers that cannot be read, as from a server in a bad state. */
     var garbled: Boolean = false,
+    /** Outside the windows, with nothing checked yet. */
+    var status: Status = Status(null, null, null, null, emptyList(), emptyList()),
 ) : Backend {
     val registered = CopyOnWriteArrayList<String>()
     val saved = CopyOnWriteArrayList<String>()
+    val statusReads = AtomicInteger()
 
     override fun register(token: String) {
         if (failing) throw IOException("unreachable")
@@ -31,5 +35,12 @@ class FakeBackend(
         if (failing) throw IOException("unreachable")
         saved += date.toString()
         away = date
+    }
+
+    override suspend fun status(): Status {
+        statusReads.incrementAndGet()
+        if (failing) throw IOException("unreachable")
+        if (garbled) throw JSONException("not JSON")
+        return status
     }
 }

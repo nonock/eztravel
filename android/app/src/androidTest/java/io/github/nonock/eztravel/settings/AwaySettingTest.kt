@@ -69,6 +69,24 @@ class AwaySettingTest {
     }
 
     @Test
+    fun eachSaveIsReported() {
+        // The home screen then reads the status again: the next watch may have moved.
+        val backend = FakeBackend()
+        var saves = 0
+        compose.setContent { AwaySetting(backend, onSaved = { saves++ }) }
+        compose.onNodeWithText(text(R.string.away_choose)).performClick()
+        compose.onNodeWithText(text(R.string.ok)).performClick()
+        compose.onNodeWithText(text(R.string.away_clear)).performClick()
+        compose.onNodeWithText(text(R.string.away_none)).assertIsDisplayed()
+        assertEquals(2, saves)
+        backend.failing = true
+        compose.onNodeWithText(text(R.string.away_choose)).performClick()
+        compose.onNodeWithText(text(R.string.ok)).performClick()
+        compose.onNodeWithText(text(R.string.away_unreachable)).assertIsDisplayed()
+        assertEquals(2, saves)
+    }
+
+    @Test
     fun anUnreachableServerIsSaid() {
         show(FakeBackend(failing = true))
         compose.onNodeWithText(text(R.string.away_unreachable)).assertIsDisplayed()

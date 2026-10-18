@@ -26,6 +26,12 @@ sealed interface PushMessage {
 
     data class Planned(val count: Int, val titles: String) : PushMessage
 
+    /** The backend has not managed to check for a while: no notification no longer means no disruption. */
+    data object Outage : PushMessage
+
+    /** Checks work again, after an outage. */
+    data object Recovered : PushMessage
+
     /** Notifications with the same tag replace each other. */
     val tag: String
         get() = when (this) {
@@ -33,6 +39,7 @@ sealed interface PushMessage {
             is Changed -> "line-${line.name}"
             is Ended -> "line-${line.name}"
             is Planned -> "planned"
+            Outage, Recovered -> "watch"
         }
 
     companion object {
@@ -58,11 +65,14 @@ sealed interface PushMessage {
                     data["count"]?.toIntOrNull() ?: return null,
                     data["titles"] ?: return null,
                 )
+                "outage" -> Outage
+                "recovered" -> Recovered
                 else -> null
             }
         }
 
-        private fun mode(name: String?) = when (name) {
+        /** `train`, `metro`, or any other mode, as named by the backend. */
+        fun mode(name: String?) = when (name) {
             "train" -> Mode.TRAIN
             "metro" -> Mode.METRO
             else -> Mode.OTHER

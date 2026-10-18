@@ -26,9 +26,11 @@ fun PushMessage.text(resources: Resources): NotificationText = when (this) {
     )
     is PushMessage.Ended -> NotificationText(resources.getString(R.string.notification_ended, line.label(resources)), "")
     is PushMessage.Planned -> NotificationText(resources.getQuantityString(R.plurals.notification_planned, count, count), titles)
+    PushMessage.Outage -> NotificationText(resources.getString(R.string.notification_outage), resources.getString(R.string.notification_outage_text))
+    PushMessage.Recovered -> NotificationText(resources.getString(R.string.notification_recovered), resources.getString(R.string.notification_recovered_text))
 }
 
-private fun Line.label(resources: Resources): String = resources.getString(
+fun Line.label(resources: Resources): String = resources.getString(
     when (mode) {
         Mode.TRAIN -> R.string.line_train
         Mode.METRO -> R.string.line_metro

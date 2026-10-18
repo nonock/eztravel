@@ -1,6 +1,5 @@
 <resources>
     <string name="app_name" translatable="false">eztravel</string>
-    <string name="home_waiting">You will be notified here when the lines of your commute are disrupted.</string>
     <string name="channel_disruptions">Disruptions</string>
     <string name="channel_disruptions_description">Disruptions on the lines of your commute</string>
     <string name="line_train">Line %1$s</string>
@@ -15,6 +14,25 @@
         <item quantity="one">%d planned disruption on your lines today</item>
         <item quantity="other">%d planned disruptions on your lines today</item>
     </plurals>
+    <string name="notification_outage">Watching interrupted</string>
+    <string name="notification_outage_text">No successful check for 10 minutes: no notification no longer means no disruption. Check the traffic elsewhere.</string>
+    <string name="notification_recovered">Watching restored</string>
+    <string name="notification_recovered_text">Checks are working again.</string>
+    <string name="status_title">Your commute</string>
+    <string name="status_unreachable">The server cannot be reached: whether your lines are watched is unknown.</string>
+    <string name="status_watching_outbound">Watching the way to work.</string>
+    <string name="status_watching_inbound">Watching the way home.</string>
+    <string name="status_line_normal">%1$s: normal service</string>
+    <string name="status_line_disrupted">%1$s: disrupted</string>
+    <string name="status_line_blocking">%1$s: interrupted</string>
+    <string name="status_not_watching">Not watching right now.</string>
+    <string name="status_next">Next watch: %1$s.</string>
+    <string name="status_no_next">No office day ahead: nothing will be watched.</string>
+    <string name="status_checked">Last check: %1$s.</string>
+    <string name="status_planned">Planned today:</string>
+    <string name="status_outage_prim">Watching interrupted since %1$s: Île-de-France Mobilités data cannot be read. Check the traffic elsewhere.</string>
+    <string name="status_outage_firebase">Watching interrupted since %1$s: notifications cannot be sent. Check the traffic elsewhere.</string>
+    <string name="status_outage_server">Watching interrupted since %1$s: the server has stopped checking. Check the traffic elsewhere.</string>
     <string name="away_title">Time away</string>
     <string name="away_loading">Loading…</string>
     <string name="away_none">No time away planned: you are notified on office days.</string>

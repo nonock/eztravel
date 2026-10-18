@@ -40,9 +40,9 @@ private sealed interface Away {
     data class Known(val lastDay: LocalDate?) : Away
 }
 
-/** The last day away from the office: no notification until then. */
+/** The last day away from the office: no notification until then. `onSaved` follows each change saved. */
 @Composable
-fun AwaySetting(backend: Backend, modifier: Modifier = Modifier) {
+fun AwaySetting(backend: Backend, modifier: Modifier = Modifier, onSaved: () -> Unit = {}) {
     var away by remember { mutableStateOf<Away>(Away.Loading) }
     var choosing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -55,6 +55,7 @@ fun AwaySetting(backend: Backend, modifier: Modifier = Modifier) {
         scope.launch {
             away = reach {
                 backend.setAwayThrough(lastDay)
+                onSaved()
                 Away.Known(lastDay)
             }
         }

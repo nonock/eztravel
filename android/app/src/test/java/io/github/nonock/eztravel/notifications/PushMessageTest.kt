@@ -57,6 +57,12 @@ class PushMessageTest {
     }
 
     @Test
+    fun readsAnOutageAndItsEnd() {
+        assertEquals(PushMessage.Outage, PushMessage.parse(fixture("outage")))
+        assertEquals(PushMessage.Recovered, PushMessage.parse(fixture("recovered")))
+    }
+
+    @Test
     fun aLineOfAnotherModeIsJustALine() {
         assertEquals(
             PushMessage.Ended(Line("C09999", Mode.OTHER)),
@@ -94,5 +100,8 @@ class PushMessageTest {
         assertEquals("line-X", PushMessage.parse(fixture("changed"))!!.tag)
         assertEquals("line-L", PushMessage.parse(fixture("ended"))!!.tag)
         assertEquals("planned", PushMessage.parse(fixture("planned"))!!.tag)
+        // Watching restored replaces watching interrupted.
+        assertEquals("watch", PushMessage.Outage.tag)
+        assertEquals("watch", PushMessage.Recovered.tag)
     }
 }

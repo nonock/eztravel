@@ -10,6 +10,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.io.File
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.time.LocalDate
@@ -63,6 +64,14 @@ class HttpBackendTest {
         assertEquals(listOf("PUT", "PUT"), received.map { it.method })
         assertEquals("2026-12-24", JSONObject(received[0].body).getString("away_through"))
         assertTrue(JSONObject(received[1].body).isNull("away_through"))
+    }
+
+    @Test
+    fun readsTheStatus() = runBlocking {
+        status = 200
+        answer = File("../../fixtures/api/status-watching.json").readText()
+        assertEquals(Status.parse(answer), backend.status())
+        assertEquals(listOf("GET /status"), received.map { "${it.method} ${it.path}" })
     }
 
     @Test

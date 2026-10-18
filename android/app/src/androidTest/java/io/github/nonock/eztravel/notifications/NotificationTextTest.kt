@@ -79,4 +79,28 @@ class NotificationTextTest {
         assertEquals("2 planned disruptions on your lines today", two.text(english).title)
         assertEquals("2 perturbations prévues sur vos lignes aujourd’hui", two.text(french).title)
     }
+
+    @Test
+    fun anOutageSaysThatSilenceMeansNothing() {
+        assertEquals(
+            NotificationText(
+                "Watching interrupted",
+                "No successful check for 10 minutes: no notification no longer means no disruption. Check the traffic elsewhere.",
+            ),
+            PushMessage.Outage.text(english),
+        )
+        assertEquals(
+            NotificationText(
+                "Surveillance interrompue",
+                "Aucun relevé réussi depuis 10 minutes : sans notification, rien ne garantit que le trafic est normal. Vérifiez-le ailleurs.",
+            ),
+            PushMessage.Outage.text(french),
+        )
+    }
+
+    @Test
+    fun theEndOfAnOutageSaysWatchingIsBack() {
+        assertEquals(NotificationText("Watching restored", "Checks are working again."), PushMessage.Recovered.text(english))
+        assertEquals(NotificationText("Surveillance rétablie", "Les relevés fonctionnent de nouveau."), PushMessage.Recovered.text(french))
+    }
 }
