@@ -3,7 +3,10 @@ package io.github.nonock.eztravel.home
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -40,12 +43,17 @@ class CommuteStatusTest {
     private fun show(backend: FakeBackend) = compose.setContent { CommuteStatus(backend, refresh) }
 
     /** The status is read once the screen is resumed: wait for it. */
-    private fun waitFor(text: String) {
+    private fun waitFor(text: String) = waitFor(hasText(text))
+
+    private fun waitFor(matcher: SemanticsMatcher) {
         compose.waitUntil(timeoutMillis = 5_000) {
-            compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText(text).assertIsDisplayed()
+        compose.onNode(matcher).assertIsDisplayed()
     }
+
+    /** A line's row: its badge names the line, its text says how it runs. */
+    private fun row(line: String, state: Int) = hasContentDescription(line) and hasText(text(state))
 
     private val now = Instant.now()
     private val train = Line("L", Mode.TRAIN)
@@ -60,15 +68,15 @@ class CommuteStatusTest {
             FakeBackend(
                 status = watching(
                     Direction.OUTBOUND,
-                    LineState(train, Severity.BLOCKING),
+                    LineState(train, Severity.BLOCKING, color = 0xFF7B61C9.toInt()),
                     LineState(metro, null),
                     planned = listOf("Ligne L : travaux entre Nanterre et Cergy"),
                 ),
             ),
         )
         waitFor(text(R.string.status_watching_outbound))
-        waitFor(text(R.string.status_line_blocking, text(R.string.line_train, "L")))
-        waitFor(text(R.string.status_line_normal, text(R.string.line_metro, "X")))
+        waitFor(row(text(R.string.line_train, "L"), R.string.status_state_blocking))
+        waitFor(row(text(R.string.line_metro, "X"), R.string.status_state_normal))
         waitFor(text(R.string.status_checked, now.shown()))
         waitFor(text(R.string.status_planned))
         waitFor("Ligne L : travaux entre Nanterre et Cergy")
@@ -79,7 +87,7 @@ class CommuteStatusTest {
     fun theWayHomeIsSaidToo() {
         show(FakeBackend(status = watching(Direction.INBOUND, LineState(metro, Severity.DISRUPTED))))
         waitFor(text(R.string.status_watching_inbound))
-        waitFor(text(R.string.status_line_disrupted, text(R.string.line_metro, "X")))
+        waitFor(row(text(R.string.line_metro, "X"), R.string.status_state_disrupted))
         compose.onNodeWithText(text(R.string.status_planned)).assertDoesNotExist()
     }
 

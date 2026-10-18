@@ -45,6 +45,8 @@ class NotifierTest {
         waitForTitle("line-L", started.text(context.resources).title)
         val notification = shown("line-L").single().notification
         assertEquals(Notifier.CHANNEL, notification.channelId)
+        // The logo's amber, for the icon in the notification shade.
+        assertEquals(context.getColor(io.github.nonock.eztravel.R.color.brand_amber), notification.color)
         assertEquals("Texte de l'opérateur", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
 

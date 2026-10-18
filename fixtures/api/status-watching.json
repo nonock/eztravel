@@ -4,8 +4,8 @@
   "next": "2026-11-03T15:00:00Z",
   "outage": null,
   "lines": [
-    { "line": "L", "mode": "train", "severity": "blocking" },
-    { "line": "X", "mode": "metro", "severity": null }
+    { "line": "L", "mode": "train", "color": "#7B61C9", "severity": "blocking" },
+    { "line": "X", "mode": "metro", "color": "#E07A1F", "severity": null }
   ],
   "planned": ["Ligne L : travaux entre Nanterre et Cergy"]
 }

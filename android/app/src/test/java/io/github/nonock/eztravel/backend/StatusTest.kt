@@ -29,8 +29,8 @@ class StatusTest {
                 next = at("2026-11-03T15:00:00Z"),
                 outage = null,
                 lines = listOf(
-                    LineState(Line("L", Mode.TRAIN), Severity.BLOCKING),
-                    LineState(Line("X", Mode.METRO), null),
+                    LineState(Line("L", Mode.TRAIN), Severity.BLOCKING, 0xFF7B61C9.toInt()),
+                    LineState(Line("X", Mode.METRO), null, 0xFFE07A1F.toInt()),
                 ),
                 planned = listOf("Ligne L : travaux entre Nanterre et Cergy"),
             ),
@@ -44,7 +44,10 @@ class StatusTest {
         assertEquals(Direction.INBOUND, status.watching)
         assertEquals(Outage(at("2026-11-03T15:20:00Z"), Cause.PRIM), status.outage)
         assertEquals(
-            listOf(LineState(Line("X", Mode.METRO), null), LineState(Line("L", Mode.TRAIN), Severity.DISRUPTED)),
+            listOf(
+                LineState(Line("X", Mode.METRO), null, color = null),
+                LineState(Line("L", Mode.TRAIN), Severity.DISRUPTED, 0xFF7B61C9.toInt()),
+            ),
             status.lines,
         )
         assertEquals(emptyList<String>(), status.planned)
@@ -75,11 +78,14 @@ class StatusTest {
         assertEquals(Cause.SERVER, Status.parse(withOutage("something-new")).outage?.cause)
         val json = JSONObject(fixture("status-watching"))
         json.put("watching", "sideways").put("checked_at", JSONObject.NULL).put("next", JSONObject.NULL)
-        json.getJSONArray("lines").getJSONObject(0).put("severity", "catastrophic").put("mode", "bus")
+        json.getJSONArray("lines").getJSONObject(0).put("severity", "catastrophic").put("mode", "bus").put("color", "purple")
         val status = Status.parse(json.toString())
         assertNull(status.watching)
         assertNull(status.checkedAt)
         assertNull(status.next)
-        assertEquals(LineState(Line("L", Mode.OTHER), Severity.DISRUPTED), status.lines[0])
+        assertEquals(LineState(Line("L", Mode.OTHER), Severity.DISRUPTED, color = null), status.lines[0])
+        // A line without a color at all reads as one without a configured color.
+        json.getJSONArray("lines").getJSONObject(0).remove("color")
+        assertNull(Status.parse(json.toString()).lines[0].color)
     }
 }

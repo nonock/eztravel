@@ -1,8 +1,11 @@
 package io.github.nonock.eztravel.home
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -12,7 +15,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -24,7 +28,6 @@ import io.github.nonock.eztravel.backend.Status
 import io.github.nonock.eztravel.backend.Status.Cause
 import io.github.nonock.eztravel.backend.Status.Direction
 import io.github.nonock.eztravel.notifications.PushMessage.Severity
-import io.github.nonock.eztravel.notifications.label
 import kotlinx.coroutines.delay
 import org.json.JSONException
 import java.io.IOException
@@ -76,7 +79,6 @@ fun CommuteStatus(backend: Backend, refresh: Int, modifier: Modifier = Modifier)
 
 @Composable
 private fun Known(status: Status) {
-    val resources = LocalResources.current
     status.outage?.let { outage ->
         val reason = when (outage.cause) {
             Cause.PRIM -> R.string.status_outage_prim
@@ -98,12 +100,20 @@ private fun Known(status: Status) {
                 ),
             )
             for (state in status.lines) {
-                val severity = when (state.severity) {
-                    null -> R.string.status_line_normal
-                    Severity.BLOCKING -> R.string.status_line_blocking
-                    Severity.DISRUPTED -> R.string.status_line_disrupted
+                val (words, color) = when (state.severity) {
+                    null -> R.string.status_state_normal to MaterialTheme.colorScheme.onSurface
+                    Severity.BLOCKING -> R.string.status_state_blocking to MaterialTheme.colorScheme.error
+                    Severity.DISRUPTED -> R.string.status_state_disrupted to MaterialTheme.colorScheme.primary
                 }
-                Text(stringResource(severity, state.line.label(resources)))
+                // One row, read as one: "Line J, interrupted".
+                Row(
+                    Modifier.padding(vertical = 4.dp).semantics(mergeDescendants = true) {},
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    LineBadge(state.line, state.color)
+                    Spacer(Modifier.width(12.dp))
+                    Text(stringResource(words), color = color)
+                }
             }
         }
     }

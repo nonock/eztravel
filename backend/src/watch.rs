@@ -119,6 +119,8 @@ impl Health {
 pub struct LineStatus {
     pub line: String,
     pub mode: &'static str,
+    /// "#RRGGBB", when configured.
+    pub color: Option<String>,
     /// `blocking` or `disrupted`; `None` when fine.
     pub severity: Option<&'static str>,
 }
@@ -280,10 +282,16 @@ mod tests {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
-    fn line(name: &str, mode: &'static str, severity: Option<&'static str>) -> LineStatus {
+    fn line(
+        name: &str,
+        mode: &'static str,
+        color: Option<&str>,
+        severity: Option<&'static str>,
+    ) -> LineStatus {
         LineStatus {
             line: name.into(),
             mode,
+            color: color.map(String::from),
             severity,
         }
     }
@@ -298,8 +306,8 @@ mod tests {
                 ..morning()
             },
             lines: vec![
-                line("L", "train", Some("blocking")),
-                line("X", "metro", None),
+                line("L", "train", Some("#7B61C9"), Some("blocking")),
+                line("X", "metro", Some("#E07A1F"), None),
             ],
             planned: vec!["Ligne L : travaux entre Nanterre et Cergy".into()],
         };
@@ -320,8 +328,8 @@ mod tests {
             watching: Some(Direction::Inbound),
             health,
             lines: vec![
-                line("X", "metro", None),
-                line("L", "train", Some("disrupted")),
+                line("X", "metro", None, None),
+                line("L", "train", Some("#7B61C9"), Some("disrupted")),
             ],
             planned: vec![],
         };

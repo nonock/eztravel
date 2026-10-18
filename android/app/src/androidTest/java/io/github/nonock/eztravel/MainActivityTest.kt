@@ -6,11 +6,13 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.core.view.WindowCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
 import io.github.nonock.eztravel.backend.AppBackend
 import io.github.nonock.eztravel.backend.FakeBackend
 import io.github.nonock.eztravel.notifications.Notifier
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Rule
 import org.junit.Test
@@ -60,6 +62,14 @@ class MainActivityTest {
         compose.onNodeWithText(text(R.string.away_choose)).performClick()
         compose.onNodeWithText(text(R.string.ok)).performClick()
         compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > atLaunch }
+    }
+
+    @Test
+    fun theStatusBarIconsAreLightOnTheNavyBackground() {
+        compose.runOnUiThread {
+            val window = compose.activity.window
+            assertFalse(WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars)
+        }
     }
 
     @Test

@@ -29,8 +29,8 @@ data class Status(
     /** No check has been complete since `since`. */
     data class Outage(val since: Instant, val cause: Cause)
 
-    /** `severity` is null when the line runs normally. */
-    data class LineState(val line: PushMessage.Line, val severity: PushMessage.Severity?)
+    /** `severity` is null when the line runs normally; `color` (ARGB) when the backend has one. */
+    data class LineState(val line: PushMessage.Line, val severity: PushMessage.Severity?, val color: Int? = null)
 
     companion object {
         /** Values a newer backend may add fall back on the safe side: trouble stays trouble. */
@@ -65,6 +65,7 @@ data class Status(
                             line.getString("severity") == "blocking" -> PushMessage.Severity.BLOCKING
                             else -> PushMessage.Severity.DISRUPTED
                         },
+                        if (line.isNull("color")) null else hexColor(line.getString("color")),
                     )
                 },
                 planned = status.getJSONArray("planned").let { titles -> List(titles.length()) { titles.getString(it) } },
@@ -75,5 +76,12 @@ data class Status(
         private fun JSONObject.instant(name: String): Instant? = if (isNull(name)) null else Instant.parse(getString(name))
 
         private fun JSONArray.objects(): List<JSONObject> = List(length()) { getJSONObject(it) }
+
+        /** "#RRGGBB" as an opaque ARGB color; null when written otherwise. */
+        private fun hexColor(text: String): Int? = text
+            .takeIf { it.length == 7 && it.startsWith("#") }
+            ?.substring(1)
+            ?.toLongOrNull(16)
+            ?.let { (0xFF000000 or it).toInt() }
     }
 }

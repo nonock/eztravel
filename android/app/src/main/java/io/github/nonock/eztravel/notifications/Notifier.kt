@@ -44,6 +44,7 @@ object Notifier {
         val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
+            .setColor(ContextCompat.getColor(context, R.color.brand_amber))
             .setContentTitle(text.title)
             .setContentText(text.body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text.body))

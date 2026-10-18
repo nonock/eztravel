@@ -98,4 +98,13 @@ class BrandingTest {
         )
         assertEquals(R.style.Theme_Eztravel, startingTheme(SplashR.attr.postSplashScreenTheme) { it.getResourceId(0, 0) })
     }
+
+    @Test
+    fun theWindowBehindTheAppIsNavyToo() {
+        // No white flash between the splash screen and the first frame.
+        val values = context.obtainStyledAttributes(R.style.Theme_Eztravel, intArrayOf(android.R.attr.windowBackground))
+        val background = values.getDrawable(0) as ColorDrawable
+        values.recycle()
+        assertEquals(context.getColor(R.color.brand_navy), background.color)
+    }
 }

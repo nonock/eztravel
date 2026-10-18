@@ -16,16 +16,19 @@ whit_monday_off = true
 outbound = { start = "06:45", end = "08:15" }
 inbound = { start = "16:00", end = "17:30" }
 
-# How each line is named in notifications.
+# How each line is named in notifications, and its color on the home screen
+# (optional, "#RRGGBB": Navitia gives it as the line's `color`).
 [[lines]]
 code = "C01740"
 name = "L"
 mode = "train"
+color = "#7B61C9"
 
 [[lines]]
 code = "C02000"
 name = "X"
 mode = "metro"
+color = "#E07A1F"
 
 # The rides of each way, in order. Stops are Navitia stop areas.
 [[outbound]]

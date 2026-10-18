@@ -288,6 +288,7 @@ impl Service {
                 LineStatus {
                     line,
                     mode,
+                    color: self.config.line_color(&leg.line).map(String::from),
                     severity: self.state.severity(&leg.line).map(push::severity_name),
                 }
             })
@@ -858,9 +859,10 @@ mod tests {
         let mut service = setup.service();
         let status = service.status();
         service.poll(at(MORNING)).await;
-        let line = |line: &str, mode, severity| LineStatus {
+        let line = |line: &str, mode, color: &str, severity| LineStatus {
             line: line.into(),
             mode,
+            color: Some(color.into()),
             severity,
         };
         {
@@ -871,8 +873,8 @@ mod tests {
             assert_eq!(
                 view.lines,
                 [
-                    line("L", "train", Some("blocking")),
-                    line("X", "metro", None)
+                    line("L", "train", "#7B61C9", Some("blocking")),
+                    line("X", "metro", "#E07A1F", None)
                 ]
             );
         }

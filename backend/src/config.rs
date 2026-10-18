@@ -47,6 +47,14 @@ impl Config {
         }
     }
 
+    /// The color of the line `code` on the home screen, if configured.
+    pub fn line_color(&self, code: &str) -> Option<&str> {
+        self.lines
+            .iter()
+            .find(|label| label.code == code)
+            .and_then(|label| label.color.as_deref())
+    }
+
     /// Codes of the lines ridden, each once, in commute order.
     pub fn line_codes(&self) -> Vec<String> {
         let mut codes: Vec<String> = vec![];
@@ -101,7 +109,8 @@ mod tests {
             LineLabel {
                 code: "C02000".into(),
                 name: "X".into(),
-                mode: Mode::Metro
+                mode: Mode::Metro,
+                color: Some("#E07A1F".into())
             }
         );
         assert_eq!(
@@ -115,6 +124,20 @@ mod tests {
         assert_eq!(config.inbound.len(), 2);
         assert_eq!(config.time_zone(), TimeZone::get("Europe/Paris").unwrap());
         assert_eq!(config.line_codes(), ["C01740", "C02000"]);
+        assert_eq!(config.line_color("C01740"), Some("#7B61C9"));
+        assert_eq!(config.line_color("C09999"), None);
+    }
+
+    #[test]
+    fn a_line_color_is_optional_but_must_be_one() {
+        let without = Config::parse(&EXAMPLE.replace("color = \"#7B61C9\"", "")).unwrap();
+        assert_eq!(without.line_color("C01740"), None);
+        for wrong in ["#7B61C", "7B61C9", "#7B61CZ", "purple"] {
+            let error = Config::parse(&EXAMPLE.replace("#7B61C9", wrong)).unwrap_err();
+            assert!(error.contains("color"), "{wrong}: {error}");
+        }
+        let number = Config::parse(&EXAMPLE.replace("\"#7B61C9\"", "5")).unwrap_err();
+        assert!(number.contains("color"), "{number}");
     }
 
     #[test]

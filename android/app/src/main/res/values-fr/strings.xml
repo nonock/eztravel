@@ -22,9 +22,9 @@
     <string name="status_unreachable">Le serveur est injoignable : impossible de savoir si vos lignes sont surveillées.</string>
     <string name="status_watching_outbound">Surveillance du trajet aller.</string>
     <string name="status_watching_inbound">Surveillance du trajet retour.</string>
-    <string name="status_line_normal">%1$s : trafic normal</string>
-    <string name="status_line_disrupted">%1$s : trafic perturbé</string>
-    <string name="status_line_blocking">%1$s : trafic interrompu</string>
+    <string name="status_state_normal">Trafic normal</string>
+    <string name="status_state_disrupted">Trafic perturbé</string>
+    <string name="status_state_blocking">Trafic interrompu</string>
     <string name="status_not_watching">Pas de surveillance en ce moment.</string>
     <string name="status_next">Prochaine surveillance : %1$s.</string>
     <string name="status_no_next">Aucun jour de bureau à venir : rien ne sera surveillé.</string>

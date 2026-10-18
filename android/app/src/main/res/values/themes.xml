@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.Eztravel" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Always dark, on the logo's navy: no white flash before the first frame. -->
+    <style name="Theme.Eztravel" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/brand_navy</item>
+    </style>
 
     <!-- While the app starts: the logo on navy, as on the launcher icon. -->
     <style name="Theme.Eztravel.Starting" parent="Theme.SplashScreen">

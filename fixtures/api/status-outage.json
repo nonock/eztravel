@@ -4,8 +4,8 @@
   "next": "2026-11-05T05:45:00Z",
   "outage": { "since": "2026-11-03T15:20:00Z", "cause": "prim" },
   "lines": [
-    { "line": "X", "mode": "metro", "severity": null },
-    { "line": "L", "mode": "train", "severity": "disrupted" }
+    { "line": "X", "mode": "metro", "color": null, "severity": null },
+    { "line": "L", "mode": "train", "color": "#7B61C9", "severity": "disrupted" }
   ],
   "planned": []
 }

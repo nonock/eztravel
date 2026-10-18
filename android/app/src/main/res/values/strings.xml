@@ -22,9 +22,9 @@
     <string name="status_unreachable">The server cannot be reached: whether your lines are watched is unknown.</string>
     <string name="status_watching_outbound">Watching the way to work.</string>
     <string name="status_watching_inbound">Watching the way home.</string>
-    <string name="status_line_normal">%1$s: normal service</string>
-    <string name="status_line_disrupted">%1$s: disrupted</string>
-    <string name="status_line_blocking">%1$s: interrupted</string>
+    <string name="status_state_normal">Normal service</string>
+    <string name="status_state_disrupted">Disrupted</string>
+    <string name="status_state_blocking">Interrupted</string>
     <string name="status_not_watching">Not watching right now.</string>
     <string name="status_next">Next watch: %1$s.</string>
     <string name="status_no_next">No office day ahead: nothing will be watched.</string>

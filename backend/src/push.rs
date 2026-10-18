@@ -12,7 +12,8 @@ use aws_lc_rs::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use jiff::{SignedDuration, Timestamp};
-use serde::Deserialize;
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer};
 
 use crate::alerts::Notification;
 use crate::disruptions::{Disruption, Severity};
@@ -39,6 +40,22 @@ pub struct LineLabel {
     pub code: String,
     pub name: String,
     pub mode: Mode,
+    /// Its color on the home screen, as "#RRGGBB".
+    #[serde(default, deserialize_with = "hex_color")]
+    pub color: Option<String>,
+}
+
+fn hex_color<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    let color = String::deserialize(deserializer)?;
+    let digits = color
+        .strip_prefix('#')
+        .filter(|digits| digits.len() == 6 && digits.chars().all(|c| c.is_ascii_hexdigit()));
+    match digits {
+        Some(_) => Ok(Some(color)),
+        None => Err(D::Error::custom(format!(
+            "color \"{color}\" is not written \"#RRGGBB\""
+        ))),
+    }
 }
 
 /// The key file of a Google service account, as downloaded from Firebase.
@@ -426,11 +443,13 @@ mod tests {
                 code: "C01740".into(),
                 name: "L".into(),
                 mode: Mode::Train,
+                color: None,
             },
             LineLabel {
                 code: "C02000".into(),
                 name: "X".into(),
                 mode: Mode::Metro,
+                color: None,
             },
         ]
     }
