@@ -48,6 +48,10 @@ pub enum Notification {
     Planned {
         disruptions: Vec<Disruption>,
     },
+    /// No complete check for a while: no news no longer means good news.
+    Outage,
+    /// Checks work again, after an outage was notified.
+    Recovered,
 }
 
 /// What has been notified so far. Kept between polls, and across restarts.
@@ -57,6 +61,25 @@ pub struct State {
     lines: Vec<(String, Severity)>,
     planned_day: Option<Date>,
     planned_titles: Vec<String>,
+}
+
+impl State {
+    /// How disrupted `line` is in the current window, as last notified; `None` when fine.
+    pub fn severity(&self, line: &str) -> Option<Severity> {
+        self.lines
+            .iter()
+            .find(|(known, _)| known == line)
+            .map(|(_, severity)| *severity)
+    }
+
+    /// The planned disruptions announced on `today`.
+    pub fn planned(&self, today: Date) -> &[String] {
+        if self.planned_day == Some(today) {
+            &self.planned_titles
+        } else {
+            &[]
+        }
+    }
 }
 
 /// `now` is in network local time; `direction` is the one being watched, if any.
@@ -128,11 +151,7 @@ pub fn decide(
             .iter()
             .map(|disruption| level(disruption.severity))
             .max_by_key(|severity| *severity == Severity::Blocking);
-        let previous = state
-            .lines
-            .iter()
-            .find(|(known, _)| *known == line)
-            .map(|(_, severity)| *severity);
+        let previous = state.severity(&line);
         state.lines.retain(|(known, _)| *known != line);
         if let Some(severity) = severity {
             state.lines.push((line.clone(), severity));
@@ -539,6 +558,30 @@ mod tests {
         assert_eq!(restored, state);
         // Nothing is sent twice because the service restarted.
         assert_eq!(poll(&mut restored, at(3, 7, 32), MORNING, &current), []);
+    }
+
+    #[test]
+    fn a_state_saved_by_the_previous_version_is_read() {
+        // The service on fly.io keeps its state across deploys: the shape must not change.
+        let saved = r#"{"window":["2026-11-03","Outbound"],"lines":[["C01740","BLOQUANTE"]],"planned_day":"2026-11-03","planned_titles":["Prévu w"]}"#;
+        let state: State = serde_json::from_str(saved).unwrap();
+        assert_eq!(state.severity(TRAIN), Some(Severity::Blocking));
+        assert_eq!(state.planned(date(2026, 11, 3)), ["Prévu w"]);
+    }
+
+    #[test]
+    fn the_state_tells_each_line_and_what_is_planned_today() {
+        let mut state = State::default();
+        let current = [
+            incident("a", Severity::Disrupted),
+            planned("w", Cause::Works, at(3, 5, 0), at(3, 12, 0)),
+        ];
+        poll(&mut state, at(3, 7, 30), MORNING, &current);
+        assert_eq!(state.severity(TRAIN), Some(Severity::Disrupted));
+        assert_eq!(state.severity(METRO), None);
+        assert_eq!(state.planned(date(2026, 11, 3)), ["Prévu w"]);
+        // Announced yesterday is not planned today.
+        assert_eq!(state.planned(date(2026, 11, 4)), Vec::<String>::new());
     }
 
     #[test]

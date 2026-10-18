@@ -1,9 +1,12 @@
 //! Client for the PRIM APIs of Île-de-France Mobilités.
 
+use std::time::Duration;
+
 use jiff::civil::DateTime;
 use serde::Deserialize;
 
 use crate::disruptions::{Disruption, parse};
+use crate::http;
 use crate::relevance::{Route, parse_route};
 
 pub struct Prim {
@@ -22,8 +25,12 @@ pub enum PrimError {
 impl Prim {
     /// `base_url` is `https://prim.iledefrance-mobilites.fr/marketplace`, or a test server.
     pub fn new(base_url: &str, key: &str) -> Self {
+        Self::with_timeout(base_url, key, http::TIMEOUT)
+    }
+
+    pub(crate) fn with_timeout(base_url: &str, key: &str, timeout: Duration) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: http::client(timeout),
             base_url: base_url.trim_end_matches('/').to_string(),
             key: key.to_string(),
         }
@@ -192,6 +199,22 @@ mod tests {
             ),
             "http"
         );
+    }
+
+    #[tokio::test]
+    async fn a_request_that_hangs_is_an_error() {
+        // Waiting for ever would stop the poll loop without a word.
+        let server = MockServer::start().await;
+        Mock::given(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(feed())
+                    .set_delay(std::time::Duration::from_secs(1)),
+            )
+            .mount(&server)
+            .await;
+        let prim = Prim::with_timeout(&server.uri(), KEY, std::time::Duration::from_millis(100));
+        assert_eq!(outcome(prim.disruptions(&["C01740"]).await), "http");
     }
 
     async fn navitia() -> MockServer {

@@ -3,31 +3,34 @@
 //! The alert state is committed only once every notification it decided has
 //! been sent, so a failed send is retried at the next poll: a rare duplicate
 //! is better than a missed alert. A failed read of PRIM decides nothing,
-//! since an empty answer would read as "the disruption is over".
+//! since an empty answer would read as "the disruption is over". Failures
+//! are counted in `watch`, which tells the phone when they last.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use jiff::Timestamp;
-use jiff::civil::Date;
+use jiff::civil::{Date, DateTime};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::alerts::{Commute, State, WatchedLeg, decide};
+use crate::alerts::{Commute, Notification, State, WatchedLeg, decide};
 use crate::api;
-use crate::calendar::{Calendar, watched_direction};
+use crate::calendar::{Calendar, Direction, next_window, watched_direction};
 use crate::config::Config;
 use crate::prim::Prim;
-use crate::profile::Store;
+use crate::profile::{Profile, Store};
 use crate::push::{self, PushError, Sender};
 use crate::relevance::{Leg, Route};
+use crate::watch::{Cause, Health, LineStatus, Snapshot};
 
 const STATE_FILE: &str = "state.json";
 const PRIM_URL: &str = "https://prim.iledefrance-mobilites.fr/marketplace";
 const FCM_URL: &str = "https://fcm.googleapis.com";
 const ROUTES_FILE: &str = "routes.json";
 const PROFILE_FILE: &str = "profile.json";
+const HEALTH_FILE: &str = "health.json";
 
 pub struct Service {
     config: Config,
@@ -36,6 +39,8 @@ pub struct Service {
     store: Arc<Store>,
     data_dir: PathBuf,
     state: State,
+    health: Health,
+    status: Arc<Mutex<Snapshot>>,
     routes: BTreeMap<String, Vec<Route>>,
     routes_day: Option<Date>,
 }
@@ -72,6 +77,8 @@ impl Service {
     ) -> Self {
         Self {
             state: load(&data_dir.join(STATE_FILE)).unwrap_or_default(),
+            health: load(&data_dir.join(HEALTH_FILE)).unwrap_or_default(),
+            status: Arc::default(),
             routes: load(&data_dir.join(ROUTES_FILE)).unwrap_or_default(),
             routes_day: None,
             config,
@@ -111,10 +118,16 @@ impl Service {
         let sender = Sender::new(account, &var("FCM_URL").unwrap_or(FCM_URL.into()));
         let data_dir = PathBuf::from(var("EZTRAVEL_DATA").unwrap_or("/data".into()));
         let store = Arc::new(Store::open(&data_dir.join(PROFILE_FILE), &seed));
+        let service = Self::new(config, prim, sender, store.clone(), &data_dir);
         Ok(Startup {
-            api: api::router(store.clone(), app_key),
-            service: Self::new(config, prim, sender, store, &data_dir),
+            api: api::router(store, service.status(), app_key),
+            service,
         })
+    }
+
+    /// What the last poll saw, updated after each poll.
+    pub fn status(&self) -> Arc<Mutex<Snapshot>> {
+        self.status.clone()
     }
 
     /// The local time, what is watched and who is notified, to check the service where it runs.
@@ -150,18 +163,40 @@ impl Service {
         let profile = self.store.profile();
         let time_zone = self.config.time_zone();
         let local = now.to_zoned(time_zone.clone()).datetime();
-        let direction = watched_direction(
-            now,
-            &time_zone,
-            &self.calendar(&profile.away_through),
-            &self.config.windows,
-        );
-        if direction.is_none() {
-            let mut next = self.state.clone();
-            decide(&mut next, local, None, &self.commute(), &[]);
-            self.commit(next);
-            return Poll::Idle;
+        let calendar = self.calendar(&profile.away_through);
+        let direction = watched_direction(now, &time_zone, &calendar, &self.config.windows);
+        let mut health = self.health.clone();
+        let outcome = match direction {
+            None => {
+                let mut next = self.state.clone();
+                decide(&mut next, local, None, &self.commute(), &[]);
+                self.commit(next);
+                health.idle();
+                Poll::Idle
+            }
+            Some(direction) => {
+                health.watching(now, local.date(), direction);
+                self.watch(now, local, direction, &profile, &mut health)
+                    .await
+            }
+        };
+        if health != self.health {
+            self.health = health;
+            save(&self.data_dir.join(HEALTH_FILE), &self.health);
         }
+        self.publish(now, local.date(), direction, &calendar);
+        outcome
+    }
+
+    /// A poll during a window.
+    async fn watch(
+        &mut self,
+        now: Timestamp,
+        local: DateTime,
+        direction: Direction,
+        profile: &Profile,
+        health: &mut Health,
+    ) -> Poll {
         if profile.devices.is_empty() {
             return Poll::NoDevice;
         }
@@ -170,11 +205,57 @@ impl Service {
         let codes: Vec<&str> = lines.iter().map(String::as_str).collect();
         let disruptions = match self.prim.disruptions(&codes).await {
             Ok(disruptions) => disruptions,
-            Err(error) => return Poll::Unavailable(format!("{error:?}")),
+            Err(error) => {
+                self.failed(now, Cause::Prim, profile, health).await;
+                return Poll::Unavailable(format!("{error:?}"));
+            }
         };
         let mut next = self.state.clone();
-        let notifications = decide(&mut next, local, direction, &self.commute(), &disruptions);
-        for notification in &notifications {
+        let mut notifications = decide(
+            &mut next,
+            local,
+            Some(direction),
+            &self.commute(),
+            &disruptions,
+        );
+        if health.recovering() {
+            notifications.insert(0, Notification::Recovered);
+        }
+        if let Err(error) = self.send(now, profile, &notifications).await {
+            self.failed(now, Cause::Firebase, profile, health).await;
+            return Poll::NotSent(format!("{error:?}"));
+        }
+        self.commit(next);
+        health.checked(now);
+        Poll::Sent(notifications.len())
+    }
+
+    /// Tells the phone when polls have failed for too long.
+    async fn failed(
+        &mut self,
+        now: Timestamp,
+        cause: Cause,
+        profile: &Profile,
+        health: &mut Health,
+    ) {
+        if health.failed(now, cause)
+            && self
+                .send(now, profile, &[Notification::Outage])
+                .await
+                .is_ok()
+        {
+            health.outage_sent();
+        }
+    }
+
+    /// Every notification to every device, or the first error.
+    async fn send(
+        &mut self,
+        now: Timestamp,
+        profile: &Profile,
+        notifications: &[Notification],
+    ) -> Result<(), PushError> {
+        for notification in notifications {
             let data = push::data(notification, &self.config.lines);
             for device in &profile.devices {
                 match self.sender.send(now, device, &data).await {
@@ -185,12 +266,54 @@ impl Service {
                         );
                         self.store.update(|profile| profile.forget(device));
                     }
-                    Err(error) => return Poll::NotSent(format!("{error:?}")),
+                    Err(error) => return Err(error),
                 }
             }
         }
-        self.commit(next);
-        Poll::Sent(notifications.len())
+        Ok(())
+    }
+
+    /// What the app's home screen shows: the lines of the way being watched, and how polls go.
+    fn publish(
+        &self,
+        now: Timestamp,
+        today: Date,
+        direction: Option<Direction>,
+        calendar: &Calendar,
+    ) {
+        let legs: &[Leg] = match direction {
+            Some(Direction::Outbound) => &self.config.outbound,
+            Some(Direction::Inbound) => &self.config.inbound,
+            None => &[],
+        };
+        let lines = legs
+            .iter()
+            .map(|leg| {
+                let (line, mode) = push::label(&leg.line, &self.config.lines);
+                LineStatus {
+                    line,
+                    mode,
+                    severity: self.state.severity(&leg.line).map(push::severity_name),
+                }
+            })
+            .collect();
+        let snapshot = Snapshot {
+            polled_at: Some(now),
+            watching: direction,
+            next: next_window(
+                now,
+                &self.config.time_zone(),
+                calendar,
+                &self.config.windows,
+            ),
+            health: self.health.clone(),
+            lines,
+            planned: self.state.planned(today).to_vec(),
+        };
+        *self
+            .status
+            .lock()
+            .expect("no thread panics while holding the status") = snapshot;
     }
 
     fn commute(&self) -> Commute {
@@ -274,6 +397,7 @@ pub(crate) fn save<T: Serialize>(path: &Path, value: &T) {
 mod tests {
     use super::*;
     use crate::push::testing::account;
+    use crate::watch::{Cause, LineStatus, Outage};
     use wiremock::matchers::{body_string_contains, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -354,10 +478,15 @@ mod tests {
         }
 
         async fn firebase_answers(&self, status: u16, times: u64) {
+            self.firebase_answers_to("started", status, times).await;
+        }
+
+        /// Answers notifications of `kind` (their `type`).
+        async fn firebase_answers_to(&self, kind: &str, status: u16, times: u64) {
             let body = if status == 404 { "UNREGISTERED" } else { "" };
             let mock = Mock::given(method("POST"))
                 .and(path("/v1/projects/demo-project/messages:send"))
-                .and(body_string_contains(r#""type":"started""#))
+                .and(body_string_contains(format!(r#""type":"{kind}""#)))
                 .respond_with(ResponseTemplate::new(status).set_body_string(body));
             // Answers only `times` requests, so that a later mock can answer differently.
             let mock = if times > 0 {
@@ -649,6 +778,143 @@ mod tests {
             .mount(&server)
             .await;
         server
+    }
+
+    /// Tuesday 3 November 2026 at `time` UTC (one hour behind Paris).
+    fn tuesday(time: &str) -> Timestamp {
+        at(&format!("2026-11-03T{time}:00Z"))
+    }
+
+    /// PRIM answers 503 to the first `failures` requests, then a quiet feed.
+    async fn prim_fails(setup: &Setup, failures: u64) {
+        Mock::given(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(failures)
+            .mount(&setup.server)
+            .await;
+        Mock::given(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(feed(false)))
+            .mount(&setup.server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn prim_out_for_ten_minutes_is_notified_once_and_so_is_its_end() {
+        let setup = Setup::new().await;
+        prim_fails(&setup, 3).await;
+        setup.firebase_answers_to("outage", 200, 1).await;
+        setup.firebase_answers_to("recovered", 200, 1).await;
+        let mut service = setup.service();
+        let unavailable = Poll::Unavailable("Status(503)".into());
+        // The window's first poll is at 7:00 in Paris.
+        assert_eq!(service.poll(tuesday("06:00")).await, unavailable);
+        assert_eq!(service.poll(tuesday("06:10")).await, unavailable);
+        assert_eq!(service.poll(tuesday("06:12")).await, unavailable);
+        // A restart does not forget that the outage was notified.
+        assert_eq!(setup.service().poll(tuesday("06:14")).await, Poll::Sent(1));
+    }
+
+    #[tokio::test]
+    async fn an_outage_that_could_not_be_sent_is_tried_again() {
+        let setup = Setup::new().await;
+        prim_fails(&setup, 3).await;
+        setup.firebase_answers_to("outage", 500, 1).await;
+        setup.firebase_answers_to("outage", 200, 1).await;
+        let mut service = setup.service();
+        for time in ["06:00", "06:10", "06:12"] {
+            service.poll(tuesday(time)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn notifications_that_cannot_be_sent_are_an_outage_too() {
+        let setup = Setup::new().await;
+        setup.prim_answers(200, true, 2).await;
+        setup.firebase_answers(500, 2).await;
+        // Telling the phone fails as well, most likely.
+        setup.firebase_answers_to("outage", 500, 1).await;
+        let mut service = setup.service();
+        service.poll(tuesday("06:00")).await;
+        service.poll(tuesday("06:10")).await;
+        let status = service.status();
+        let outage = status.lock().unwrap().view(tuesday("06:10")).outage;
+        assert_eq!(
+            outage,
+            Some(Outage {
+                since: tuesday("06:00"),
+                cause: Cause::Firebase
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn each_poll_publishes_what_it_saw() {
+        let setup = Setup::new().await;
+        setup.prim_answers(200, true, 1).await;
+        setup.firebase_answers(200, 1).await;
+        let mut service = setup.service();
+        let status = service.status();
+        service.poll(at(MORNING)).await;
+        let line = |line: &str, mode, severity| LineStatus {
+            line: line.into(),
+            mode,
+            severity,
+        };
+        {
+            let seen = status.lock().unwrap();
+            let view = seen.view(at(MORNING));
+            assert_eq!(view.watching, Some("outbound"));
+            assert_eq!(view.checked_at, Some(at(MORNING)));
+            // 16:00 in Paris, the evening window.
+            assert_eq!(view.next, Some(tuesday("15:00")));
+            assert_eq!(
+                view.lines,
+                [
+                    line("L", "train", Some("blocking")),
+                    line("X", "metro", None)
+                ]
+            );
+        }
+        service.poll(at(LATE_MORNING)).await;
+        let seen = status.lock().unwrap();
+        let view = seen.view(at(LATE_MORNING));
+        assert_eq!(
+            (view.watching, view.lines, view.checked_at),
+            (None, vec![], Some(at(MORNING)))
+        );
+        assert_eq!(seen.polled_at, Some(at(LATE_MORNING)));
+    }
+
+    #[tokio::test]
+    async fn the_evening_status_lists_the_lines_of_the_way_home() {
+        let setup = Setup::new().await;
+        setup.prim_answers(200, false, 1).await;
+        let mut service = setup.service();
+        // 16:00 in Paris.
+        assert_eq!(service.poll(tuesday("15:00")).await, Poll::Sent(0));
+        let view = service.status().lock().unwrap().view(tuesday("15:00"));
+        assert_eq!(view.watching, Some("inbound"));
+        let names: Vec<&str> = view.lines.iter().map(|line| line.line.as_str()).collect();
+        assert_eq!(names, ["X", "L"]);
+    }
+
+    #[tokio::test]
+    async fn todays_planned_disruptions_are_published() {
+        let setup = Setup::new().await;
+        let mut feed = feed(true);
+        feed["disruptions"][0]["cause"] = "TRAVAUX".into();
+        Mock::given(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(feed))
+            .mount(&setup.server)
+            .await;
+        setup.firebase_answers_to("planned", 200, 1).await;
+        let mut service = setup.service();
+        assert_eq!(service.poll(at(MORNING)).await, Poll::Sent(1));
+        let status = service.status();
+        assert_eq!(
+            status.lock().unwrap().planned,
+            ["Ligne L : trafic interrompu"]
+        );
     }
 
     #[tokio::test]

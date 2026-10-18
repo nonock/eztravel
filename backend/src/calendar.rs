@@ -149,6 +149,28 @@ pub fn watched_direction(
     .map(|(direction, _)| direction)
 }
 
+/// How far `next_window` looks ahead: no time away lasts longer.
+const LOOKAHEAD_DAYS: i64 = 366;
+
+/// When the next watch window opens, strictly after `now`.
+pub fn next_window(
+    now: Timestamp,
+    tz: &TimeZone,
+    calendar: &Calendar,
+    windows: &WatchWindows,
+) -> Option<Timestamp> {
+    let today = now.to_zoned(tz.clone()).date();
+    let mut starts = [windows.outbound.start, windows.inbound.start];
+    starts.sort();
+    (0..LOOKAHEAD_DAYS)
+        .map(|offset| today + offset.days())
+        .filter(|day| calendar.is_office_day(*day))
+        .flat_map(|day| starts.map(|start| day.to_datetime(start)))
+        .filter_map(|start| start.to_zoned(tz.clone()).ok())
+        .map(|start| start.timestamp())
+        .find(|start| *start > now)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,6 +396,64 @@ mod tests {
         // Monday 2 November 2026 is not an office day in a first week.
         assert_eq!(
             watched_direction(at("2026-11-02T06:00:00Z"), &tz, &calendar, &windows),
+            None
+        );
+    }
+
+    #[test]
+    fn the_next_window_is_the_next_start_on_an_office_day() {
+        let (calendar, windows, tz) = (calendar(), windows(), paris());
+        let next = |now: &str| next_window(at(now), &tz, &calendar, &windows);
+        // Tuesday 3 November, 7:00 in Paris, during the morning window: next is 16:00.
+        assert_eq!(
+            next("2026-11-03T06:00:00Z"),
+            Some(at("2026-11-03T15:00:00Z"))
+        );
+        // At the very start of a window, that window is not the next one.
+        assert_eq!(
+            next("2026-11-03T05:45:00Z"),
+            Some(at("2026-11-03T15:00:00Z"))
+        );
+        // Tuesday evening: Wednesday is not an office day, Thursday is.
+        assert_eq!(
+            next("2026-11-03T17:00:00Z"),
+            Some(at("2026-11-05T05:45:00Z"))
+        );
+    }
+
+    #[test]
+    fn the_next_window_skips_time_away_and_holidays() {
+        let (windows, tz) = (windows(), paris());
+        let calendar = Calendar {
+            away_through: Some(date(2026, 11, 9)),
+            ..calendar()
+        };
+        // From Thursday 5 November: away on Monday 9, Wednesday 11 is a holiday, Friday 13 it is.
+        assert_eq!(
+            next_window(at("2026-11-05T17:00:00Z"), &tz, &calendar, &windows),
+            Some(at("2026-11-13T05:45:00Z"))
+        );
+    }
+
+    #[test]
+    fn the_next_window_is_in_local_time_across_the_change_to_winter_time() {
+        let (calendar, windows, tz) = (calendar(), windows(), paris());
+        // Friday 23 October, in summer time; Monday 26 October, 6:45 in winter time.
+        assert_eq!(
+            next_window(at("2026-10-23T16:00:00Z"), &tz, &calendar, &windows),
+            Some(at("2026-10-26T05:45:00Z"))
+        );
+    }
+
+    #[test]
+    fn without_office_days_there_is_no_next_window() {
+        let calendar = Calendar {
+            first_week: vec![],
+            second_week: vec![],
+            ..calendar()
+        };
+        assert_eq!(
+            next_window(at("2026-11-03T06:00:00Z"), &paris(), &calendar, &windows()),
             None
         );
     }

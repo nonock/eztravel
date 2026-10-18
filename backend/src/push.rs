@@ -5,6 +5,7 @@
 //! The format of the data is fixed by the files in `fixtures/push/`.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
@@ -15,6 +16,7 @@ use serde::Deserialize;
 
 use crate::alerts::Notification;
 use crate::disruptions::{Disruption, Severity};
+use crate::http;
 
 /// Firebase caps the data of a message at 4 KB: titles and texts are cut well below.
 const TITLE_MAX_BYTES: usize = 300;
@@ -64,25 +66,10 @@ pub fn data(notification: &Notification, labels: &[LineLabel]) -> BTreeMap<Strin
     let mut put = |key: &str, value: &str| {
         data.insert(key.to_string(), value.to_string());
     };
-    let line = |code: &str, put: &mut dyn FnMut(&str, &str)| match labels
-        .iter()
-        .find(|label| label.code == code)
-    {
-        Some(label) => {
-            put("line", &label.name);
-            put(
-                "mode",
-                if label.mode == Mode::Train {
-                    "train"
-                } else {
-                    "metro"
-                },
-            );
-        }
-        None => {
-            put("line", code);
-            put("mode", "line");
-        }
+    let line = |code: &str, put: &mut dyn FnMut(&str, &str)| {
+        let (name, mode) = label(code, labels);
+        put("line", &name);
+        put("mode", mode);
     };
     match notification {
         Notification::Started {
@@ -118,8 +105,25 @@ pub fn data(notification: &Notification, labels: &[LineLabel]) -> BTreeMap<Strin
                 .collect();
             put("titles", &truncate(&titles.join("\n"), TEXT_MAX_BYTES));
         }
+        Notification::Outage => put("type", "outage"),
+        Notification::Recovered => put("type", "recovered"),
     }
     data
+}
+
+/// How the line `code` is named on screen, and its mode: `train`, `metro`, or `line` when unlabelled.
+pub fn label(code: &str, labels: &[LineLabel]) -> (String, &'static str) {
+    match labels.iter().find(|label| label.code == code) {
+        Some(label) => (
+            label.name.clone(),
+            if label.mode == Mode::Train {
+                "train"
+            } else {
+                "metro"
+            },
+        ),
+        None => (code.to_string(), "line"),
+    }
 }
 
 /// Severity, and the words of the record that has it.
@@ -138,7 +142,7 @@ fn describe(severity: Severity, disruptions: &[Disruption], put: &mut dyn FnMut(
     }
 }
 
-fn severity_name(severity: Severity) -> &'static str {
+pub fn severity_name(severity: Severity) -> &'static str {
     match severity {
         Severity::Blocking => "blocking",
         _ => "disrupted",
@@ -148,9 +152,11 @@ fn severity_name(severity: Severity) -> &'static str {
 /// The body of an FCM v1 `messages:send` request.
 pub fn message(device: &str, data: &BTreeMap<String, String>) -> serde_json::Value {
     // While the phone is offline, a newer message about the same line replaces the older one.
-    let collapse_key = match data.get("line") {
-        Some(line) => format!("line-{line}"),
-        None => "planned".to_string(),
+    let collapse_key = match (data.get("line"), data.get("type").map(String::as_str)) {
+        (Some(line), _) => format!("line-{line}"),
+        (None, Some("planned")) => "planned".to_string(),
+        // An outage and its end.
+        _ => "watch".to_string(),
     };
     serde_json::json!({
         "message": {
@@ -284,8 +290,12 @@ pub struct Sender {
 impl Sender {
     /// `fcm_url` is `https://fcm.googleapis.com`, or a test server.
     pub fn new(account: ServiceAccount, fcm_url: &str) -> Self {
+        Self::with_timeout(account, fcm_url, http::TIMEOUT)
+    }
+
+    pub(crate) fn with_timeout(account: ServiceAccount, fcm_url: &str, timeout: Duration) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: http::client(timeout),
             account,
             fcm_url: fcm_url.trim_end_matches('/').to_string(),
             token: None,
@@ -603,6 +613,22 @@ mod tests {
             message("t", &fixture("planned"))["message"]["android"]["collapse_key"],
             "planned"
         );
+        // A restored watch replaces the outage, not the planned disruptions.
+        for name in ["outage", "recovered"] {
+            assert_eq!(
+                message("t", &fixture(name))["message"]["android"]["collapse_key"],
+                "watch"
+            );
+        }
+    }
+
+    #[test]
+    fn an_outage_and_its_end_carry_their_type_only() {
+        assert_eq!(data(&Notification::Outage, &labels()), fixture("outage"));
+        assert_eq!(
+            data(&Notification::Recovered, &labels()),
+            fixture("recovered")
+        );
     }
 
     const NOW: &str = "2026-11-03T06:30:00Z";
@@ -778,6 +804,33 @@ mod tests {
         );
         let server = token_server(1).await;
         assert_eq!(send_to(&server, "http://127.0.0.1:9").await, "http");
+    }
+
+    #[tokio::test]
+    async fn a_request_that_hangs_is_an_http_error() {
+        // Waiting for ever would stop the poll loop without a word.
+        let server = MockServer::start().await;
+        Mock::given(path("/token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "access_token": "a", "expires_in": 3599 }))
+                    .set_delay(std::time::Duration::from_secs(1)),
+            )
+            .mount(&server)
+            .await;
+        let mut sender = Sender::with_timeout(
+            account(&format!("{}/token", server.uri())),
+            &server.uri(),
+            std::time::Duration::from_millis(100),
+        );
+        assert_eq!(
+            outcome(
+                sender
+                    .send(NOW.parse().unwrap(), "t", &fixture("ended"))
+                    .await
+            ),
+            "http"
+        );
     }
 
     #[tokio::test]

@@ -130,4 +130,16 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn a_profile_saved_by_the_previous_version_is_read() {
+        // Unreadable, it would give way to the seed: the phone registered since would be lost.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profile.json");
+        std::fs::write(&path, r#"{"devices":["old","phone"],"away_through":null}"#).unwrap();
+        assert_eq!(
+            tokens(&Store::open(&path, &["seed".into()]).profile()),
+            ["old", "phone"]
+        );
+    }
 }

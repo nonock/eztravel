@@ -1,22 +1,25 @@
-//! The API the app calls: register the phone, read and set the time away.
+//! The API the app calls: register the phone, read and set the time away,
+//! and see what the backend sees.
 //!
 //! Every request carries the app key (`Authorization: Bearer …`), compiled
 //! into the user's own build of the app and kept out of the repository.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use aws_lc_rs::constant_time::verify_slices_are_equal;
-use axum::extract::{Request, State};
+use axum::extract::{FromRef, Request, State};
 use axum::http::StatusCode;
 use axum::http::header::AUTHORIZATION;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use jiff::Timestamp;
 use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 
 use crate::profile::Store;
+use crate::watch::{Snapshot, View};
 
 /// Firebase tokens are a few hundred characters long.
 const MAX_TOKEN_LENGTH: usize = 4096;
@@ -35,12 +38,32 @@ struct Device {
     token: String,
 }
 
-pub fn router(store: Arc<Store>, key: String) -> Router {
+/// What the handlers share with the poll loop.
+#[derive(Clone)]
+struct Shared {
+    store: Arc<Store>,
+    status: Arc<Mutex<Snapshot>>,
+}
+
+impl FromRef<Shared> for Arc<Store> {
+    fn from_ref(shared: &Shared) -> Self {
+        shared.store.clone()
+    }
+}
+
+impl FromRef<Shared> for Arc<Mutex<Snapshot>> {
+    fn from_ref(shared: &Shared) -> Self {
+        shared.status.clone()
+    }
+}
+
+pub fn router(store: Arc<Store>, status: Arc<Mutex<Snapshot>>, key: String) -> Router {
     Router::new()
         .route("/devices", post(register))
         .route("/settings", get(settings).put(set_settings))
+        .route("/status", get(status_now))
         .layer(middleware::from_fn_with_state(Arc::new(key), authorize))
-        .with_state(store)
+        .with_state(Shared { store, status })
 }
 
 async fn authorize(State(key): State<Arc<String>>, request: Request, next: Next) -> Response {
@@ -72,6 +95,16 @@ async fn settings(State(store): State<Arc<Store>>) -> Json<Settings> {
     })
 }
 
+/// As of the last poll; the outage is judged now, so that a stopped poll loop shows.
+async fn status_now(State(status): State<Arc<Mutex<Snapshot>>>) -> Json<View> {
+    Json(
+        status
+            .lock()
+            .expect("no thread panics while holding the status")
+            .view(Timestamp::now()),
+    )
+}
+
 async fn set_settings(
     State(store): State<Arc<Store>>,
     Json(settings): Json<Settings>,
@@ -87,12 +120,14 @@ mod tests {
     use axum::http::{Method, Request, StatusCode};
     use http_body_util::BodyExt;
     use jiff::civil::date;
+    use jiff::{SignedDuration, Timestamp};
     use tower::ServiceExt;
 
     const KEY: &str = "the-app-key";
 
     struct Api {
         store: Arc<Store>,
+        status: Arc<Mutex<Snapshot>>,
         _dir: tempfile::TempDir,
     }
 
@@ -100,7 +135,11 @@ mod tests {
         fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
             let store = Arc::new(Store::open(&dir.path().join("profile.json"), &[]));
-            Api { store, _dir: dir }
+            Api {
+                store,
+                status: Arc::default(),
+                _dir: dir,
+            }
         }
 
         async fn call(
@@ -120,7 +159,7 @@ mod tests {
             let request = request
                 .body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))
                 .unwrap();
-            let response = router(self.store.clone(), KEY.into())
+            let response = router(self.store.clone(), self.status.clone(), KEY.into())
                 .oneshot(request)
                 .await
                 .unwrap();
@@ -147,6 +186,7 @@ mod tests {
             (Method::POST, "/devices", Some(r#"{"token":"t"}"#)),
             (Method::GET, "/settings", None),
             (Method::PUT, "/settings", Some(r#"{"away_through":null}"#)),
+            (Method::GET, "/status", None),
         ] {
             for authorization in [
                 None,
@@ -242,6 +282,26 @@ mod tests {
         api.authorized(Method::PUT, "/settings", Some(r#"{"away_through":null}"#))
             .await;
         assert_eq!(api.store.profile().away_through, None);
+    }
+
+    #[tokio::test]
+    async fn the_status_is_what_the_poll_loop_last_saw() {
+        let api = Api::new();
+        // Nothing polled yet: nothing to say.
+        assert_eq!(
+            api.authorized(Method::GET, "/status", None).await,
+            (
+                StatusCode::OK,
+                r#"{"watching":null,"checked_at":null,"next":null,"outage":null,"lines":[],"planned":[]}"#.into()
+            )
+        );
+        // A poll loop silent for an hour has stopped.
+        let an_hour_ago = Timestamp::now() - SignedDuration::from_hours(1);
+        api.status.lock().unwrap().polled_at = Some(an_hour_ago);
+        let (_, body) = api.authorized(Method::GET, "/status", None).await;
+        let status: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(status["outage"]["cause"], "server");
+        assert_eq!(status["outage"]["since"], an_hour_ago.to_string());
     }
 
     #[tokio::test]
