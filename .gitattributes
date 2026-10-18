@@ -1,0 +1,5 @@
+# Unix line endings everywhere, so that tests, Docker builds and scripts behave the same on every machine.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.webp binary

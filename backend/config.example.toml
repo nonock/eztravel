@@ -10,8 +10,7 @@ first_week = ["tuesday", "thursday"]
 second_week = ["monday", "wednesday", "friday"]
 # Whit Monday is a public holiday, but many employers make it a working day.
 whit_monday_off = true
-# Last day away from the office, included.
-# away_through = "2026-12-31"
+# Time away (holidays, days off) is set in the app.
 
 [windows]
 outbound = { start = "06:45", end = "08:15" }

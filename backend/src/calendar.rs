@@ -23,8 +23,8 @@ pub struct Calendar {
     /// Whit Monday is a public holiday, but many employers make it a working "solidarity day".
     #[serde(default = "yes")]
     pub whit_monday_off: bool,
-    /// Last day away from the office, included.
-    #[serde(default)]
+    /// Last day away from the office, included. Set from the app, not from the configuration file.
+    #[serde(skip)]
     pub away_through: Option<Date>,
 }
 

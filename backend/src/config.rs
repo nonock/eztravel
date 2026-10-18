@@ -111,13 +111,13 @@ mod tests {
 
     #[test]
     fn optional_settings_have_defaults() {
-        let short = EXAMPLE
-            .replace("time_zone = \"Europe/Paris\"\n", "")
-            .replace("whit_monday_off = true\n", "");
-        let config = Config::parse(&short.replace("# away_through", "away_through")).unwrap();
+        let short: Vec<&str> = EXAMPLE
+            .lines()
+            .filter(|line| !line.starts_with("time_zone") && !line.starts_with("whit_monday_off"))
+            .collect();
+        let config = Config::parse(&short.join("\n")).unwrap();
         assert_eq!(config.time_zone, "Europe/Paris");
         assert!(config.calendar.whit_monday_off);
-        assert_eq!(config.calendar.away_through, Some(date(2026, 12, 31)));
     }
 
     #[test]
@@ -127,8 +127,16 @@ mod tests {
         let zone = Config::parse(&EXAMPLE.replace("Europe/Paris", "Europe/Atlantis")).unwrap_err();
         assert!(zone.contains("Europe/Atlantis"), "{zone}");
         // A misspelt setting is not silently ignored.
-        let field = Config::parse(&EXAMPLE.replace("# away_through", "away_until")).unwrap_err();
-        assert!(field.contains("away_until"), "{field}");
+        let field =
+            Config::parse(&EXAMPLE.replace("whit_monday_off", "whit_monday_of")).unwrap_err();
+        assert!(field.contains("whit_monday_of"), "{field}");
+        // Time away comes from the app only: two sources would contradict each other.
+        let away = EXAMPLE.replace(
+            "whit_monday_off = true",
+            "whit_monday_off = true
+away_through = 2026-12-31",
+        );
+        assert!(Config::parse(&away).unwrap_err().contains("away_through"));
         let window = Config::parse(&EXAMPLE.replace("outbound = { start", "outbound = { begin"))
             .unwrap_err();
         assert!(window.contains("begin"), "{window}");
