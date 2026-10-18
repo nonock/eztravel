@@ -53,10 +53,13 @@ class MainActivityTest {
 
     @Test
     fun savingTheTimeAwayReadsTheStatusAgain() {
-        compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() == 1 }
+        // Counted from the reads at launch, however many: the screen may resume more than once.
+        compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > 0 }
+        compose.waitForIdle()
+        val atLaunch = backend.statusReads.get()
         compose.onNodeWithText(text(R.string.away_choose)).performClick()
         compose.onNodeWithText(text(R.string.ok)).performClick()
-        compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() == 2 }
+        compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > atLaunch }
     }
 
     @Test

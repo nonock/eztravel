@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The "Z route" logo: an amber ride on navy. -->
+    <color name="brand_navy">#FF0E1A2B</color>
+    <color name="brand_amber">#FFFFB547</color>
+</resources>
