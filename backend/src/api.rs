@@ -18,6 +18,7 @@ use jiff::Timestamp;
 use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 
+use crate::calendar::Schedule;
 use crate::profile::Store;
 use crate::watch::{Snapshot, View};
 
@@ -43,6 +44,7 @@ struct Device {
 struct Shared {
     store: Arc<Store>,
     status: Arc<Mutex<Snapshot>>,
+    schedule: Arc<Schedule>,
 }
 
 impl FromRef<Shared> for Arc<Store> {
@@ -57,13 +59,28 @@ impl FromRef<Shared> for Arc<Mutex<Snapshot>> {
     }
 }
 
-pub fn router(store: Arc<Store>, status: Arc<Mutex<Snapshot>>, key: String) -> Router {
+impl FromRef<Shared> for Arc<Schedule> {
+    fn from_ref(shared: &Shared) -> Self {
+        shared.schedule.clone()
+    }
+}
+
+pub fn router(
+    store: Arc<Store>,
+    status: Arc<Mutex<Snapshot>>,
+    schedule: Schedule,
+    key: String,
+) -> Router {
     Router::new()
         .route("/devices", post(register))
         .route("/settings", get(settings).put(set_settings))
         .route("/status", get(status_now))
         .layer(middleware::from_fn_with_state(Arc::new(key), authorize))
-        .with_state(Shared { store, status })
+        .with_state(Shared {
+            store,
+            status,
+            schedule: Arc::new(schedule),
+        })
 }
 
 async fn authorize(State(key): State<Arc<String>>, request: Request, next: Next) -> Response {
@@ -96,12 +113,19 @@ async fn settings(State(store): State<Arc<Store>>) -> Json<Settings> {
 }
 
 /// As of the last poll; the outage is judged now, so that a stopped poll loop shows.
-async fn status_now(State(status): State<Arc<Mutex<Snapshot>>>) -> Json<View> {
+async fn status_now(
+    State(status): State<Arc<Mutex<Snapshot>>>,
+    State(store): State<Arc<Store>>,
+    State(schedule): State<Arc<Schedule>>,
+) -> Json<View> {
+    let now = Timestamp::now();
+    // From the time away as it is now, not as of the last poll: the app reads this right after a change.
+    let next = schedule.next_window(now, store.profile().away_through);
     Json(
         status
             .lock()
             .expect("no thread panics while holding the status")
-            .view(Timestamp::now()),
+            .view(now, next),
     )
 }
 
@@ -116,6 +140,7 @@ async fn set_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode};
     use http_body_util::BodyExt;
@@ -159,10 +184,18 @@ mod tests {
             let request = request
                 .body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))
                 .unwrap();
-            let response = router(self.store.clone(), self.status.clone(), KEY.into())
-                .oneshot(request)
-                .await
-                .unwrap();
+            let schedule = Config::parse(include_str!("../config.example.toml"))
+                .unwrap()
+                .schedule();
+            let response = router(
+                self.store.clone(),
+                self.status.clone(),
+                schedule,
+                KEY.into(),
+            )
+            .oneshot(request)
+            .await
+            .unwrap();
             let status = response.status();
             let bytes = response.into_body().collect().await.unwrap().to_bytes();
             (status, String::from_utf8(bytes.to_vec()).unwrap())
@@ -287,12 +320,18 @@ mod tests {
     #[tokio::test]
     async fn the_status_is_what_the_poll_loop_last_saw() {
         let api = Api::new();
-        // Nothing polled yet: nothing to say.
+        // Nothing polled yet: nothing to say but when the next window opens.
+        let (status, body) = api.authorized(Method::GET, "/status", None).await;
+        assert_eq!(status, StatusCode::OK);
+        let next = body
+            .split(r#""next":""#)
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .unwrap();
         assert_eq!(
-            api.authorized(Method::GET, "/status", None).await,
-            (
-                StatusCode::OK,
-                r#"{"watching":null,"checked_at":null,"next":null,"outage":null,"lines":[],"planned":[]}"#.into()
+            body,
+            format!(
+                r#"{{"watching":null,"checked_at":null,"next":"{next}","outage":null,"lines":[],"planned":[]}}"#
             )
         );
         // A poll loop silent for an hour has stopped.
@@ -302,6 +341,25 @@ mod tests {
         let status: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(status["outage"]["cause"], "server");
         assert_eq!(status["outage"]["since"], an_hour_ago.to_string());
+    }
+
+    /// When the next window opens, as `GET /status` says, in Paris.
+    async fn next_watch(api: &Api) -> jiff::Zoned {
+        let (_, body) = api.authorized(Method::GET, "/status", None).await;
+        let status: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let next: Timestamp = status["next"].as_str().unwrap().parse().unwrap();
+        next.in_tz("Europe/Paris").unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_next_watch_follows_the_time_away_at_once() {
+        // The app reads the status right after saving: it must already show the change.
+        let api = Api::new();
+        let before = next_watch(&api).await;
+        let away = format!(r#"{{"away_through":"{}"}}"#, before.date());
+        api.authorized(Method::PUT, "/settings", Some(&away)).await;
+        let after = next_watch(&api).await;
+        assert!(after.date() > before.date(), "{before} then {after}");
     }
 
     #[tokio::test]

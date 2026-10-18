@@ -43,7 +43,10 @@ pub struct Health {
     checked_at: Option<Timestamp>,
     /// What failed since then.
     failure: Option<Cause>,
+    /// The outage was notified in the current window.
     outage_sent: bool,
+    /// An outage was notified, in this window or an earlier one, and its end not yet.
+    unresolved: bool,
 }
 
 impl Health {
@@ -54,6 +57,7 @@ impl Health {
             *self = Health {
                 window: Some((today, direction, now)),
                 checked_at: self.checked_at,
+                unresolved: self.unresolved,
                 ..Health::default()
             };
         }
@@ -63,6 +67,7 @@ impl Health {
     pub fn idle(&mut self) {
         *self = Health {
             checked_at: self.checked_at,
+            unresolved: self.unresolved,
             ..Health::default()
         };
     }
@@ -72,6 +77,7 @@ impl Health {
         self.checked_at = Some(now);
         self.failure = None;
         self.outage_sent = false;
+        self.unresolved = false;
     }
 
     /// A failed poll. True when the outage is to be notified now.
@@ -82,11 +88,13 @@ impl Health {
 
     pub fn outage_sent(&mut self) {
         self.outage_sent = true;
+        self.unresolved = true;
     }
 
-    /// True when an outage was notified: the next complete poll says it is over.
+    /// True when an outage was notified: the next complete poll says it is over,
+    /// even in a later window.
     pub fn recovering(&self) -> bool {
-        self.outage_sent
+        self.unresolved
     }
 
     pub fn checked_at(&self) -> Option<Timestamp> {
@@ -120,7 +128,6 @@ pub struct LineStatus {
 pub struct Snapshot {
     pub polled_at: Option<Timestamp>,
     pub watching: Option<Direction>,
-    pub next: Option<Timestamp>,
     pub health: Health,
     pub lines: Vec<LineStatus>,
     pub planned: Vec<String>,
@@ -138,7 +145,8 @@ pub struct View {
 }
 
 impl Snapshot {
-    pub fn view(&self, now: Timestamp) -> View {
+    /// `next` is computed when asked, so that it follows a change of time away at once.
+    pub fn view(&self, now: Timestamp, next: Option<Timestamp>) -> View {
         // A poll loop that stopped cannot say so itself: the time of its last poll does.
         let stopped = self
             .polled_at
@@ -153,7 +161,7 @@ impl Snapshot {
                 Direction::Inbound => "inbound",
             }),
             checked_at: self.health.checked_at,
-            next: self.next,
+            next,
             outage: stopped.or_else(|| self.health.outage(now)),
             lines: self.lines.clone(),
             planned: self.planned.clone(),
@@ -230,14 +238,17 @@ mod tests {
     }
 
     #[test]
-    fn a_new_window_starts_afresh() {
+    fn a_new_window_starts_afresh_but_still_owes_the_end_of_an_outage() {
         let mut health = morning();
         health.failed(at("06:10"), Cause::Prim);
         health.outage_sent();
         health.watching(at("15:00"), TUESDAY, Direction::Inbound);
-        assert!(!health.recovering());
+        // "Interrupted" may have stayed on the phone all day: "restored" still follows.
+        assert!(health.recovering());
         assert_eq!(health.outage(at("15:09")), None);
         assert_eq!(health.checked_at(), Some(at("06:00")));
+        // Still out in this window: said again.
+        assert!(health.failed(at("15:10"), Cause::Prim));
     }
 
     #[test]
@@ -252,14 +263,16 @@ mod tests {
     }
 
     #[test]
-    fn closing_the_window_ends_an_outage_quietly() {
+    fn outside_the_windows_nothing_is_out_but_the_end_of_an_outage_is_still_owed() {
         let mut health = morning();
         health.failed(at("06:10"), Cause::Prim);
         health.outage_sent();
         health.idle();
-        assert!(!health.recovering());
         assert_eq!(health.outage(at("09:00")), None);
+        assert!(health.recovering());
         assert_eq!(health.checked_at(), Some(at("06:00")));
+        health.checked(at("15:00"));
+        assert!(!health.recovering());
     }
 
     fn fixture(name: &str) -> serde_json::Value {
@@ -280,7 +293,6 @@ mod tests {
         let snapshot = Snapshot {
             polled_at: Some(at("06:42")),
             watching: Some(Direction::Outbound),
-            next: Some(at("15:00")),
             health: Health {
                 checked_at: Some(at("06:42")),
                 ..morning()
@@ -292,7 +304,7 @@ mod tests {
             planned: vec!["Ligne L : travaux entre Nanterre et Cergy".into()],
         };
         assert_eq!(
-            serde_json::to_value(snapshot.view(at("06:43"))).unwrap(),
+            serde_json::to_value(snapshot.view(at("06:43"), Some(at("15:00")))).unwrap(),
             fixture("status-watching")
         );
     }
@@ -306,7 +318,6 @@ mod tests {
         let snapshot = Snapshot {
             polled_at: Some(at("15:30")),
             watching: Some(Direction::Inbound),
-            next: Some("2026-11-05T05:45:00Z".parse().unwrap()),
             health,
             lines: vec![
                 line("X", "metro", None),
@@ -315,7 +326,10 @@ mod tests {
             planned: vec![],
         };
         assert_eq!(
-            serde_json::to_value(snapshot.view(at("15:31"))).unwrap(),
+            serde_json::to_value(
+                snapshot.view(at("15:31"), Some("2026-11-05T05:45:00Z".parse().unwrap()))
+            )
+            .unwrap(),
             fixture("status-outage")
         );
     }
@@ -327,13 +341,12 @@ mod tests {
         let snapshot = Snapshot {
             polled_at: Some(at("10:00")),
             watching: None,
-            next: Some(at("15:00")),
             health,
             lines: vec![],
             planned: vec![],
         };
         assert_eq!(
-            serde_json::to_value(snapshot.view(at("10:01"))).unwrap(),
+            serde_json::to_value(snapshot.view(at("10:01"), Some(at("15:00")))).unwrap(),
             fixture("status-idle")
         );
     }
@@ -344,12 +357,12 @@ mod tests {
             polled_at: Some(at("10:00")),
             ..Snapshot::default()
         };
-        assert_eq!(snapshot.view(at("10:09")).outage, None);
+        assert_eq!(snapshot.view(at("10:09"), None).outage, None);
         assert_eq!(
-            snapshot.view(at("10:10")).outage,
+            snapshot.view(at("10:10"), None).outage,
             outage("10:00", Cause::Server)
         );
         // Before the first poll, there is nothing to say yet.
-        assert_eq!(Snapshot::default().view(at("10:10")).outage, None);
+        assert_eq!(Snapshot::default().view(at("10:10"), None).outage, None);
     }
 }

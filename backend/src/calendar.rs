@@ -149,6 +149,25 @@ pub fn watched_direction(
     .map(|(direction, _)| direction)
 }
 
+/// The configured calendar and watch windows, in their time zone.
+#[derive(Clone, Debug)]
+pub struct Schedule {
+    pub calendar: Calendar,
+    pub windows: WatchWindows,
+    pub time_zone: TimeZone,
+}
+
+impl Schedule {
+    /// When the next window opens after `now`, with the time away set from the app.
+    pub fn next_window(&self, now: Timestamp, away_through: Option<Date>) -> Option<Timestamp> {
+        let calendar = Calendar {
+            away_through,
+            ..self.calendar.clone()
+        };
+        next_window(now, &self.time_zone, &calendar, &self.windows)
+    }
+}
+
 /// How far `next_window` looks ahead: no time away lasts longer.
 const LOOKAHEAD_DAYS: i64 = 366;
 
@@ -442,6 +461,26 @@ mod tests {
         assert_eq!(
             next_window(at("2026-10-23T16:00:00Z"), &tz, &calendar, &windows),
             Some(at("2026-10-26T05:45:00Z"))
+        );
+    }
+
+    #[test]
+    fn the_schedule_takes_the_time_away_it_is_given() {
+        let schedule = Schedule {
+            calendar: calendar(),
+            windows: windows(),
+            time_zone: paris(),
+        };
+        // From Tuesday 3 November, 18:00 in Paris.
+        let evening = at("2026-11-03T17:00:00Z");
+        assert_eq!(
+            schedule.next_window(evening, None),
+            Some(at("2026-11-05T05:45:00Z"))
+        );
+        // Away through Thursday: Monday 9 November.
+        assert_eq!(
+            schedule.next_window(evening, Some(date(2026, 11, 5))),
+            Some(at("2026-11-09T05:45:00Z"))
         );
     }
 

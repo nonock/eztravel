@@ -17,7 +17,7 @@ use serde::de::DeserializeOwned;
 
 use crate::alerts::{Commute, Notification, State, WatchedLeg, decide};
 use crate::api;
-use crate::calendar::{Calendar, Direction, next_window, watched_direction};
+use crate::calendar::{Calendar, Direction, watched_direction};
 use crate::config::Config;
 use crate::prim::Prim;
 use crate::profile::{Profile, Store};
@@ -118,9 +118,10 @@ impl Service {
         let sender = Sender::new(account, &var("FCM_URL").unwrap_or(FCM_URL.into()));
         let data_dir = PathBuf::from(var("EZTRAVEL_DATA").unwrap_or("/data".into()));
         let store = Arc::new(Store::open(&data_dir.join(PROFILE_FILE), &seed));
+        let schedule = config.schedule();
         let service = Self::new(config, prim, sender, store.clone(), &data_dir);
         Ok(Startup {
-            api: api::router(store, service.status(), app_key),
+            api: api::router(store, service.status(), schedule, app_key),
             service,
         })
     }
@@ -184,7 +185,7 @@ impl Service {
             self.health = health;
             save(&self.data_dir.join(HEALTH_FILE), &self.health);
         }
-        self.publish(now, local.date(), direction, &calendar);
+        self.publish(now, local.date(), direction);
         outcome
     }
 
@@ -274,13 +275,7 @@ impl Service {
     }
 
     /// What the app's home screen shows: the lines of the way being watched, and how polls go.
-    fn publish(
-        &self,
-        now: Timestamp,
-        today: Date,
-        direction: Option<Direction>,
-        calendar: &Calendar,
-    ) {
+    fn publish(&self, now: Timestamp, today: Date, direction: Option<Direction>) {
         let legs: &[Leg] = match direction {
             Some(Direction::Outbound) => &self.config.outbound,
             Some(Direction::Inbound) => &self.config.inbound,
@@ -300,12 +295,6 @@ impl Service {
         let snapshot = Snapshot {
             polled_at: Some(now),
             watching: direction,
-            next: next_window(
-                now,
-                &self.config.time_zone(),
-                calendar,
-                &self.config.windows,
-            ),
             health: self.health.clone(),
             lines,
             planned: self.state.planned(today).to_vec(),
@@ -815,6 +804,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_outage_of_the_morning_is_said_over_in_the_evening() {
+        let setup = Setup::new().await;
+        prim_fails(&setup, 2).await;
+        setup.firebase_answers_to("outage", 200, 1).await;
+        setup.firebase_answers_to("recovered", 200, 1).await;
+        let mut service = setup.service();
+        service.poll(tuesday("06:00")).await;
+        service.poll(tuesday("06:10")).await;
+        assert_eq!(service.poll(at(LATE_MORNING)).await, Poll::Idle);
+        // 16:00 in Paris: PRIM answers again.
+        assert_eq!(service.poll(tuesday("15:00")).await, Poll::Sent(1));
+    }
+
+    #[tokio::test]
     async fn an_outage_that_could_not_be_sent_is_tried_again() {
         let setup = Setup::new().await;
         prim_fails(&setup, 3).await;
@@ -837,7 +840,7 @@ mod tests {
         service.poll(tuesday("06:00")).await;
         service.poll(tuesday("06:10")).await;
         let status = service.status();
-        let outage = status.lock().unwrap().view(tuesday("06:10")).outage;
+        let outage = status.lock().unwrap().view(tuesday("06:10"), None).outage;
         assert_eq!(
             outage,
             Some(Outage {
@@ -862,11 +865,9 @@ mod tests {
         };
         {
             let seen = status.lock().unwrap();
-            let view = seen.view(at(MORNING));
+            let view = seen.view(at(MORNING), None);
             assert_eq!(view.watching, Some("outbound"));
             assert_eq!(view.checked_at, Some(at(MORNING)));
-            // 16:00 in Paris, the evening window.
-            assert_eq!(view.next, Some(tuesday("15:00")));
             assert_eq!(
                 view.lines,
                 [
@@ -877,7 +878,7 @@ mod tests {
         }
         service.poll(at(LATE_MORNING)).await;
         let seen = status.lock().unwrap();
-        let view = seen.view(at(LATE_MORNING));
+        let view = seen.view(at(LATE_MORNING), None);
         assert_eq!(
             (view.watching, view.lines, view.checked_at),
             (None, vec![], Some(at(MORNING)))
@@ -892,7 +893,11 @@ mod tests {
         let mut service = setup.service();
         // 16:00 in Paris.
         assert_eq!(service.poll(tuesday("15:00")).await, Poll::Sent(0));
-        let view = service.status().lock().unwrap().view(tuesday("15:00"));
+        let view = service
+            .status()
+            .lock()
+            .unwrap()
+            .view(tuesday("15:00"), None);
         assert_eq!(view.watching, Some("inbound"));
         let names: Vec<&str> = view.lines.iter().map(|line| line.line.as_str()).collect();
         assert_eq!(names, ["X", "L"]);

@@ -6,7 +6,7 @@
 use jiff::tz::TimeZone;
 use serde::Deserialize;
 
-use crate::calendar::{Calendar, WatchWindows};
+use crate::calendar::{Calendar, Schedule, WatchWindows};
 use crate::push::LineLabel;
 use crate::relevance::Leg;
 
@@ -37,6 +37,14 @@ impl Config {
 
     pub fn time_zone(&self) -> TimeZone {
         TimeZone::get(&self.time_zone).expect("checked when the configuration was read")
+    }
+
+    pub fn schedule(&self) -> Schedule {
+        Schedule {
+            calendar: self.calendar.clone(),
+            windows: self.windows.clone(),
+            time_zone: self.time_zone(),
+        }
     }
 
     /// Codes of the lines ridden, each once, in commute order.
@@ -143,5 +151,19 @@ away_through = 2026-12-31",
         let windows =
             Config::parse(&EXAMPLE.replace("inbound = { start", "evening = { start")).unwrap_err();
         assert!(windows.contains("evening"), "{windows}");
+    }
+
+    #[test]
+    fn the_schedule_is_the_calendar_and_windows_in_their_time_zone() {
+        let config = Config::parse(EXAMPLE).unwrap();
+        let schedule = config.schedule();
+        assert_eq!(
+            (schedule.calendar, schedule.windows, schedule.time_zone),
+            (
+                config.calendar.clone(),
+                config.windows.clone(),
+                config.time_zone()
+            )
+        );
     }
 }
