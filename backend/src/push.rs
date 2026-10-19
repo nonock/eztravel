@@ -25,6 +25,8 @@ const TITLE_MAX_BYTES: usize = 300;
 const TEXT_MAX_BYTES: usize = 3000;
 /// An alert older than this is no longer worth showing.
 const TIME_TO_LIVE: &str = "1800s";
+/// A train's message stays this long after the train was due, late or not.
+const TRAIN_SHOWN_AFTER: SignedDuration = SignedDuration::from_mins(10);
 const SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -162,9 +164,9 @@ fn describe_train(train: &Train, labels: &[LineLabel], put: &mut dyn FnMut(&str,
     }
     put("destination", &train.destination);
     put("from", &train.from);
-    let aimed = train.aimed.to_string();
-    put("aimed", &aimed);
-    put("until", &aimed);
+    put("aimed", &train.aimed.to_string());
+    let until = train.aimed.max(train.expected) + TRAIN_SHOWN_AFTER;
+    put("until", &until.to_string());
 }
 
 /// How the line `code` is named on screen, and its mode: `train`, `metro`, or `line` when unlabelled.
@@ -702,6 +704,7 @@ mod tests {
             destination: "Gare Centrale".into(),
             from: "Les Aubépines".into(),
             aimed: "2026-11-03T06:52:00Z".parse().unwrap(),
+            expected: "2026-11-03T06:52:00Z".parse().unwrap(),
         }
     }
 
@@ -727,6 +730,22 @@ mod tests {
             fixture("train_back")
         );
         assert!(!data(&back(None), &labels(), until()).contains_key("mission"));
+        // A late train stays on the phone until after it was expected.
+        let late = Notification::TrainCancelled {
+            train: Train {
+                expected: "2026-11-03T07:05:00Z".parse().unwrap(),
+                ..train(Some("PALO"))
+            },
+            why: Why::Announced,
+        };
+        assert_eq!(
+            data(&late, &labels(), until())["until"],
+            "2026-11-03T07:15:00Z"
+        );
+        assert_eq!(
+            data(&late, &labels(), until())["aimed"],
+            "2026-11-03T06:52:00Z"
+        );
     }
 
     #[test]

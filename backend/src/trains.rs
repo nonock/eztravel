@@ -34,8 +34,10 @@ pub struct Train {
     pub destination: String,
     /// The stop it leaves from, by name.
     pub from: String,
-    /// Its departure in the timetable.
+    /// Its departure in the timetable: with the line, what names it.
     pub aimed: Timestamp,
+    /// Its departure as last listed: later than `aimed` when it runs late.
+    pub expected: Timestamp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,8 +70,6 @@ pub struct Trains {
 struct Followed {
     journey: String,
     train: Train,
-    /// Its departure as last listed.
-    expected: Timestamp,
     /// Polls in a row without it, while it could not have left.
     missing: u32,
     said_cancelled: bool,
@@ -105,7 +105,10 @@ pub fn follow(
                 .iter_mut()
                 .find(|followed| followed.journey == visit.journey)
             {
-                followed.expected = expected;
+                // A train being changed may come back under another mission.
+                followed.train.mission = visit.mission.clone();
+                followed.train.destination = visit.destination.clone();
+                followed.train.expected = expected;
                 followed.missing = 0;
                 followed.said_cancelled = said_cancelled;
                 if followed.notified && !said_cancelled {
@@ -129,8 +132,8 @@ pub fn follow(
                     destination: visit.destination.clone(),
                     from: leg.from.clone(),
                     aimed,
+                    expected,
                 },
-                expected,
                 missing: 0,
                 said_cancelled,
                 notified: false,
@@ -139,7 +142,7 @@ pub fn follow(
     }
     for followed in &mut trains.followed {
         if !listed.contains(&followed.journey.as_str())
-            && followed.expected.duration_since(now) > LEAVING
+            && followed.train.expected.duration_since(now) > LEAVING
         {
             followed.missing += 1;
         }
@@ -161,7 +164,7 @@ pub fn follow(
     }
     trains
         .followed
-        .retain(|followed| now.duration_since(followed.expected) < FORGET_AFTER);
+        .retain(|followed| now.duration_since(followed.train.expected) < FORGET_AFTER);
     notifications
 }
 
@@ -232,6 +235,7 @@ mod tests {
             destination: "Gare Centrale".into(),
             from: "Les Aubépines".into(),
             aimed: at(aimed),
+            expected: at(aimed),
         }
     }
 
@@ -333,6 +337,44 @@ mod tests {
         assert_eq!(
             polls(&mut trains, "06:18", 2, true, || vec![j1("onTime")]),
             []
+        );
+    }
+
+    #[test]
+    fn a_late_train_is_named_as_last_listed() {
+        // Late, then cancelled after its timetable time; back under another mission.
+        let mut trains = Trains::default();
+        polls(&mut trains, "06:50", 1, true, || {
+            vec![visit("j1", "06:52", "07:05", "delayed", 200)]
+        });
+        let late = Train {
+            expected: at("07:05"),
+            ..train("06:52")
+        };
+        assert_eq!(
+            polls(&mut trains, "06:58", 1, true, || vec![visit(
+                "j1",
+                "06:52",
+                "07:05",
+                "cancelled",
+                200
+            )]),
+            vec![Notification::TrainCancelled {
+                train: late.clone(),
+                why: Why::Announced
+            }]
+        );
+        let mut changed = visit("j1", "06:52", "07:08", "onTime", 200);
+        changed["MonitoredVehicleJourney"]["JourneyNote"] = json!([{ "value": "PILO" }]);
+        assert_eq!(
+            polls(&mut trains, "07:00", 1, true, || vec![changed.clone()]),
+            vec![Notification::TrainBack {
+                train: Train {
+                    mission: Some("PILO".into()),
+                    expected: at("07:08"),
+                    ..late
+                }
+            }]
         );
     }
 

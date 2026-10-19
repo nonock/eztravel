@@ -290,6 +290,7 @@ mod tests {
             destination: "Gare Centrale".into(),
             from: "Les Aubépines".into(),
             aimed: "2026-11-03T06:52:00Z".parse().unwrap(),
+            expected: "2026-11-03T06:52:00Z".parse().unwrap(),
         };
         assert_eq!(records(&Notification::TrainBack { train }), []);
     }
