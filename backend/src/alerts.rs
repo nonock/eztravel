@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::calendar::Direction;
 use crate::disruptions::{Cause, Disruption, Severity};
 use crate::relevance::{Leg, Route, affects};
+use crate::trains::{Train, Why};
 
 /// One ride of the commute, with the routes of its line.
 pub struct WatchedLeg {
@@ -52,6 +53,15 @@ pub enum Notification {
     Outage,
     /// Checks work again, after an outage was notified.
     Recovered,
+    /// A train of the window will not run.
+    TrainCancelled {
+        train: Train,
+        why: Why,
+    },
+    /// A train notified as cancelled runs after all.
+    TrainBack {
+        train: Train,
+    },
 }
 
 /// What has been notified so far. Kept between polls, and across restarts.

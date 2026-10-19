@@ -13,7 +13,9 @@ whit_monday_off = true
 # Time away (holidays, days off) is set in the app.
 
 [windows]
-outbound = { start = "06:45", end = "08:15" }
+# Optional `trains_from`: trains are followed from then, without notifying,
+# so that trains cancelled early are known when the window opens.
+outbound = { start = "06:45", end = "08:15", trains_from = "05:30" }
 inbound = { start = "16:00", end = "17:30" }
 
 # How each line is named in notifications, and its color on the home screen

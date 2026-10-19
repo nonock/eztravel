@@ -87,7 +87,11 @@ pub fn records(notification: &Notification) -> Vec<Record> {
         Notification::Started { disruptions, .. }
         | Notification::Changed { disruptions, .. }
         | Notification::Planned { disruptions } => disruptions.iter().map(Record::from).collect(),
-        Notification::Ended { .. } | Notification::Outage | Notification::Recovered => vec![],
+        Notification::Ended { .. }
+        | Notification::Outage
+        | Notification::Recovered
+        | Notification::TrainCancelled { .. }
+        | Notification::TrainBack { .. } => vec![],
     }
 }
 
@@ -279,6 +283,15 @@ mod tests {
             line: "C01740".into(),
         };
         assert_eq!(records(&ended), []);
+        // A train's cancellation comes from the stop's list, not from a record.
+        let train = crate::trains::Train {
+            line: "C01740".into(),
+            mission: None,
+            destination: "Gare Centrale".into(),
+            from: "Les Aubépines".into(),
+            aimed: "2026-11-03T06:52:00Z".parse().unwrap(),
+        };
+        assert_eq!(records(&Notification::TrainBack { train }), []);
     }
 
     #[test]

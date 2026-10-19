@@ -17,14 +17,16 @@ use serde::de::DeserializeOwned;
 
 use crate::alerts::{Commute, Notification, State, WatchedLeg, decide};
 use crate::api;
-use crate::calendar::{Calendar, Direction, watched_direction};
+use crate::calendar::{Calendar, Direction, Phase, phase, watched_direction};
 use crate::config::Config;
-use crate::departures::NextDepartures;
+use crate::departures::{NextDepartures, leg_stops, monitoring_ref, one_way};
 use crate::history::{self, Entry, History};
 use crate::prim::Prim;
+use crate::prim::PrimError;
 use crate::profile::{Profile, Store};
 use crate::push::{self, PushError, Sender};
 use crate::relevance::{Leg, Route};
+use crate::trains::{Seen, Trains, follow};
 use crate::watch::{Cause, Health, LineStatus, Snapshot};
 
 const STATE_FILE: &str = "state.json";
@@ -34,6 +36,7 @@ const ROUTES_FILE: &str = "routes.json";
 const PROFILE_FILE: &str = "profile.json";
 const HEALTH_FILE: &str = "health.json";
 const HISTORY_FILE: &str = "history.json";
+const TRAINS_FILE: &str = "trains.json";
 
 pub struct Service {
     config: Config,
@@ -42,6 +45,7 @@ pub struct Service {
     store: Arc<Store>,
     data_dir: PathBuf,
     state: State,
+    trains: Trains,
     health: Health,
     status: Arc<Mutex<Snapshot>>,
     history: Arc<History>,
@@ -54,6 +58,8 @@ pub struct Service {
 pub enum Poll {
     /// Not an office day, or outside the watch windows.
     Idle,
+    /// Before a window: trains followed, nothing notified.
+    Observing,
     /// No device registered yet: nothing decided, so that a phone registering
     /// during a window still hears about what is under way.
     NoDevice,
@@ -63,6 +69,9 @@ pub enum Poll {
     Sent(usize),
     /// A send failed: the state stays as it was, so the next poll tries again.
     NotSent(String),
+    /// The line notifications decided were sent, but the trains could not be
+    /// read: the check is not complete.
+    TrainsUnavailable(usize, String),
 }
 
 /// What `main` runs: the poll loop, and the API that shares its profile.
@@ -84,6 +93,7 @@ impl Service {
             load(&data_dir.join(ROUTES_FILE)).unwrap_or_default();
         Self {
             state: load(&data_dir.join(STATE_FILE)).unwrap_or_default(),
+            trains: load(&data_dir.join(TRAINS_FILE)).unwrap_or_default(),
             health: load(&data_dir.join(HEALTH_FILE)).unwrap_or_default(),
             status: Arc::default(),
             history: Arc::new(History::open(&data_dir.join(HISTORY_FILE))),
@@ -191,7 +201,11 @@ impl Service {
         let time_zone = self.config.time_zone();
         let local = now.to_zoned(time_zone.clone()).datetime();
         let calendar = self.calendar(&profile.away_through);
-        let direction = watched_direction(now, &time_zone, &calendar, &self.config.windows);
+        let followed = phase(now, &time_zone, &calendar, &self.config.windows);
+        let direction = match followed {
+            Some((direction, Phase::Watching)) => Some(direction),
+            _ => None,
+        };
         let mut health = self.health.clone();
         let outcome = match direction {
             None => {
@@ -208,7 +222,12 @@ impl Service {
                 decide(&mut next, local, None, &self.commute(), &[]);
                 self.commit(next);
                 health.idle();
-                Poll::Idle
+                match followed {
+                    Some((direction, Phase::Observing)) => {
+                        self.observe(now, local, direction).await
+                    }
+                    _ => Poll::Idle,
+                }
             }
             Some(direction) => {
                 health.watching(now, local.date(), direction);
@@ -256,8 +275,16 @@ impl Service {
             &self.commute(),
             &disruptions,
         );
-        if health.recovering() {
-            notifications.insert(0, Notification::Recovered);
+        // Missing trains must not hold back what the lines say.
+        let seen = self.read_trains(direction, now).await;
+        let mut trains = self.trains.clone();
+        if let Ok(seen) = &seen {
+            let key = (local.date(), direction);
+            let window = self.window_bounds(local, direction);
+            notifications.extend(follow(&mut trains, key, window, now, seen, true));
+            if health.recovering() {
+                notifications.insert(0, Notification::Recovered);
+            }
         }
         if let Err(error) = self.send(now, until, profile, &notifications).await {
             self.failed(now, until, Cause::Firebase, profile, health)
@@ -265,22 +292,91 @@ impl Service {
             return Poll::NotSent(format!("{error:?}"));
         }
         self.commit(next);
-        health.checked(now);
-        Poll::Sent(notifications.len())
+        self.commit_trains(trains);
+        match seen {
+            Ok(_) => {
+                health.checked(now);
+                Poll::Sent(notifications.len())
+            }
+            Err(error) => {
+                self.failed(now, until, Cause::Prim, profile, health).await;
+                Poll::TrainsUnavailable(notifications.len(), format!("{error:?}"))
+            }
+        }
+    }
+
+    /// A poll before a window: trains are followed, nothing is notified.
+    async fn observe(&mut self, now: Timestamp, local: DateTime, direction: Direction) -> Poll {
+        self.refresh_routes(local.date()).await;
+        match self.read_trains(direction, now).await {
+            Ok(seen) => {
+                let mut trains = self.trains.clone();
+                let key = (local.date(), direction);
+                let window = self.window_bounds(local, direction);
+                follow(&mut trains, key, window, now, &seen, false);
+                self.commit_trains(trains);
+                Poll::Observing
+            }
+            Err(error) => Poll::Unavailable(format!("{error:?}")),
+        }
+    }
+
+    /// The stops of each train leg of `direction`: a station lists its trains one by one.
+    /// The metro's platforms list the next four trains only, without their timetable.
+    async fn read_trains(
+        &self,
+        direction: Direction,
+        now: Timestamp,
+    ) -> Result<Vec<Seen>, PrimError> {
+        let legs = match direction {
+            Direction::Outbound => &self.config.outbound,
+            Direction::Inbound => &self.config.inbound,
+        };
+        let mut seen = vec![];
+        for leg in legs {
+            let Some((board, alight)) = self
+                .routes
+                .get(&leg.line)
+                .and_then(|routes| leg_stops(leg, routes))
+            else {
+                continue;
+            };
+            let stops = monitoring_ref(&board.stop_point).zip(monitoring_ref(&alight.stop_point));
+            let Some((board_ref, alight_ref)) = stops.filter(|_| !one_way(&board.stop_point))
+            else {
+                continue;
+            };
+            seen.push(Seen {
+                line: leg.line.clone(),
+                from: board.name.clone(),
+                board: self.departures.read(&board_ref, now).await?,
+                arriving: self.departures.read(&alight_ref, now).await?,
+                alight: alight_ref,
+            });
+        }
+        Ok(seen)
     }
 
     /// When the window of `direction` ends on the day of `local`.
     fn window_end(&self, local: DateTime, direction: Direction) -> Timestamp {
+        self.window_bounds(local, direction).1
+    }
+
+    /// When the window of `direction` opens and ends on the day of `local`.
+    fn window_bounds(&self, local: DateTime, direction: Direction) -> (Timestamp, Timestamp) {
         let window = match direction {
             Direction::Outbound => self.config.windows.outbound,
             Direction::Inbound => self.config.windows.inbound,
         };
-        local
-            .date()
-            .to_datetime(window.end)
-            .to_zoned(self.config.time_zone())
-            .expect("a day's local time is within range")
-            .timestamp()
+        let at = |time| {
+            local
+                .date()
+                .to_datetime(time)
+                .to_zoned(self.config.time_zone())
+                .expect("a day's local time is within range")
+                .timestamp()
+        };
+        (at(window.start), at(window.end))
     }
 
     /// Tells the phone when polls have failed for too long.
@@ -389,6 +485,13 @@ impl Service {
         }
     }
 
+    fn commit_trains(&mut self, next: Trains) {
+        if next != self.trains {
+            self.trains = next;
+            save(&self.data_dir.join(TRAINS_FILE), &self.trains);
+        }
+    }
+
     /// Once a day, even after a failure: Navitia's daily quota must last.
     async fn refresh_routes(&mut self, today: Date) {
         if self.routes_day == Some(today) {
@@ -450,7 +553,7 @@ mod tests {
     use super::*;
     use crate::push::testing::account;
     use crate::watch::{Cause, LineStatus, Outage};
-    use wiremock::matchers::{body_string_contains, method, path};
+    use wiremock::matchers::{body_string_contains, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     const EXAMPLE: &str = include_str!("../config.example.toml");
@@ -1072,6 +1175,145 @@ mod tests {
         assert_eq!(service.poll(at(TWO_MINUTES_LATER)).await, Poll::Sent(0));
         let saved = std::fs::read_to_string(setup.dir.path().join("routes.json")).unwrap();
         assert!(saved.contains("stop_area:IDFM:71250"), "{saved}");
+    }
+
+    /// Line L between two train stations, which PRIM lists stop by stop; no route for the metro.
+    async fn train_routes_server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(path("/v2/navitia/lines/line%3AIDFM%3AC01740/routes"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "routes": [{ "id": "route:IDFM:A" }] })),
+            )
+            .mount(&server)
+            .await;
+        let rows: Vec<_> = [
+            ("100", "71100", "Les Aubépines"),
+            ("200", "71370", "Gare Centrale"),
+        ]
+        .iter()
+        .map(|(place, area, name)| {
+            serde_json::json!({ "stop_point": {
+                "id": format!("stop_point:IDFM:monomodalStopPlace:{place}"),
+                "name": name,
+                "stop_area": { "id": format!("stop_area:IDFM:{area}") }
+            } })
+        })
+        .collect();
+        Mock::given(path("/v2/navitia/routes/route%3AIDFM%3AA/route_schedules"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({ "route_schedules": [{ "table": { "rows": rows } }] }),
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(path("/v2/navitia/lines/line%3AIDFM%3AC02000/routes"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "routes": [] })),
+            )
+            .mount(&server)
+            .await;
+        server
+    }
+
+    /// A stop listing `journeys` of line L, leaving at 7:52 in Paris and ending at Gare Centrale.
+    fn stop_list(journeys: &[&str]) -> serde_json::Value {
+        let visits: Vec<_> = journeys
+            .iter()
+            .map(|journey| {
+                serde_json::json!({
+                    "RecordedAtTime": "2026-11-03T04:00:00Z",
+                    "MonitoredVehicleJourney": {
+                        "LineRef": { "value": "STIF:Line::C01740:" },
+                        "FramedVehicleJourneyRef": { "DatedVehicleJourneyRef": journey },
+                        "DestinationRef": { "value": "STIF:StopArea:SP:200:" },
+                        "DestinationName": [{ "value": "Gare Centrale" }],
+                        "MonitoredCall": {
+                            "AimedDepartureTime": "2026-11-03T06:52:00Z",
+                            "ExpectedDepartureTime": "2026-11-03T06:52:00Z",
+                            "DepartureStatus": "onTime"
+                        }
+                    }
+                })
+            })
+            .collect();
+        serde_json::json!({ "Siri": { "ServiceDelivery": { "StopMonitoringDelivery": [{ "MonitoredStopVisit": visits }] } } })
+    }
+
+    #[tokio::test]
+    async fn a_train_gone_before_the_window_is_notified_when_it_opens() {
+        let setup = Setup::with(train_routes_server().await).await;
+        setup.prim_answers(200, false, 2).await;
+        // The board stop lists the train once, then no more.
+        Mock::given(path("/stop-monitoring"))
+            .and(query_param("MonitoringRef", "STIF:StopArea:SP:100:"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(stop_list(&["j1"])))
+            .up_to_n_times(1)
+            .mount(&setup.server)
+            .await;
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(stop_list(&[])))
+            .mount(&setup.server)
+            .await;
+        setup.firebase_answers_to("train_cancelled", 200, 1).await;
+        let mut service = setup.service();
+        // From 5:30 in Paris, trains are followed without notifying.
+        for time in ["04:40", "04:42", "04:44", "04:46", "04:48"] {
+            assert_eq!(service.poll(tuesday(time)).await, Poll::Observing);
+        }
+        // 6:45 in Paris: the window opens.
+        assert_eq!(service.poll(tuesday("05:45")).await, Poll::Sent(1));
+        // Remembered across a restart: not said again.
+        assert_eq!(setup.service().poll(tuesday("05:47")).await, Poll::Sent(0));
+    }
+
+    #[tokio::test]
+    async fn trains_that_cannot_be_read_hold_no_alert_back_but_fail_the_check() {
+        let setup = Setup::with(train_routes_server().await).await;
+        setup.prim_answers(200, true, 2).await;
+        // The board stop fails once, then answers; the alight stop always fails.
+        let board = || {
+            Mock::given(path("/stop-monitoring"))
+                .and(query_param("MonitoringRef", "STIF:StopArea:SP:100:"))
+        };
+        board()
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .mount(&setup.server)
+            .await;
+        board()
+            .respond_with(ResponseTemplate::new(200).set_body_json(stop_list(&["j1"])))
+            .mount(&setup.server)
+            .await;
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&setup.server)
+            .await;
+        setup.firebase_answers(200, 1).await;
+        setup.firebase_answers_to("outage", 200, 1).await;
+        let mut service = setup.service();
+        // Before the window, nothing is watched yet: no outage counted.
+        assert_eq!(
+            service.poll(tuesday("04:40")).await,
+            Poll::Unavailable("Status(503)".into())
+        );
+        assert_eq!(
+            service.poll(tuesday("06:00")).await,
+            Poll::TrainsUnavailable(1, "Status(503)".into())
+        );
+        service.poll(tuesday("06:10")).await;
+        let outage = service
+            .status()
+            .lock()
+            .unwrap()
+            .view(tuesday("06:10"), None)
+            .outage;
+        assert_eq!(
+            outage,
+            Some(Outage {
+                since: tuesday("06:00"),
+                cause: Cause::Prim
+            })
+        );
     }
 
     #[tokio::test]

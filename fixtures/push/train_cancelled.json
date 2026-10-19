@@ -1,0 +1,11 @@
+{
+  "type": "train_cancelled",
+  "line": "L",
+  "mode": "train",
+  "reason": "missing",
+  "mission": "PALO",
+  "destination": "Gare Centrale",
+  "from": "Les Aubépines",
+  "aimed": "2026-11-03T06:52:00Z",
+  "until": "2026-11-03T06:52:00Z"
+}

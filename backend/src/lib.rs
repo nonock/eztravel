@@ -11,4 +11,5 @@ pub mod profile;
 pub mod push;
 pub mod relevance;
 pub mod service;
+pub mod trains;
 pub mod watch;

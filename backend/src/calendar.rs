@@ -55,6 +55,10 @@ fn weekdays<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Weekday>, 
 pub struct Window {
     pub start: Time,
     pub end: Time,
+    /// From then until `start`, trains are followed without notifying, so that
+    /// trains cancelled early are known when the window opens.
+    #[serde(default)]
+    pub trains_from: Option<Time>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -135,6 +139,26 @@ pub fn watched_direction(
     calendar: &Calendar,
     windows: &WatchWindows,
 ) -> Option<Direction> {
+    match phase(now, tz, calendar, windows) {
+        Some((direction, Phase::Watching)) => Some(direction),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    /// Before the window, from its `trains_from`: trains are followed, nothing is notified.
+    Observing,
+    Watching,
+}
+
+/// The direction followed at `now`, if any, and whether its window is open.
+pub fn phase(
+    now: Timestamp,
+    tz: &TimeZone,
+    calendar: &Calendar,
+    windows: &WatchWindows,
+) -> Option<(Direction, Phase)> {
     let local = now.to_zoned(tz.clone());
     if !calendar.is_office_day(local.date()) {
         return None;
@@ -145,8 +169,15 @@ pub fn watched_direction(
         (Direction::Inbound, windows.inbound),
     ]
     .into_iter()
-    .find(|(_, window)| window.start <= time && time < window.end)
-    .map(|(direction, _)| direction)
+    .find_map(|(direction, window)| {
+        if window.start <= time && time < window.end {
+            Some((direction, Phase::Watching))
+        } else if window.trains_from.is_some_and(|from| from <= time) && time < window.start {
+            Some((direction, Phase::Observing))
+        } else {
+            None
+        }
+    })
 }
 
 /// The configured calendar and watch windows, in their time zone.
@@ -213,10 +244,12 @@ mod tests {
             outbound: Window {
                 start: time(6, 45, 0, 0),
                 end: time(8, 15, 0, 0),
+                trains_from: None,
             },
             inbound: Window {
                 start: time(16, 0, 0, 0),
                 end: time(17, 30, 0, 0),
+                trains_from: None,
             },
         }
     }
@@ -358,6 +391,38 @@ mod tests {
         // Easter Monday and Ascension stay holidays.
         assert!(is_public_holiday(date(2027, 3, 29), false));
         assert!(is_public_holiday(date(2027, 5, 6), false));
+    }
+
+    #[test]
+    fn trains_are_observed_before_a_window_that_asks_for_it() {
+        let tz = paris();
+        let calendar = calendar();
+        let mut windows = windows();
+        // Without `trains_from`, nothing happens before the window.
+        assert_eq!(
+            phase(at("2026-11-03T05:30:00Z"), &tz, &calendar, &windows),
+            None
+        );
+        windows.outbound.trains_from = Some(time(5, 30, 0, 0));
+        let phase_at = |utc| phase(at(utc), &tz, &calendar, &windows);
+        let observing = Some((Direction::Outbound, Phase::Observing));
+        assert_eq!(phase_at("2026-11-03T04:29:59Z"), None);
+        assert_eq!(phase_at("2026-11-03T04:30:00Z"), observing);
+        assert_eq!(phase_at("2026-11-03T05:44:59Z"), observing);
+        assert_eq!(
+            phase_at("2026-11-03T05:45:00Z"),
+            Some((Direction::Outbound, Phase::Watching))
+        );
+        assert_eq!(phase_at("2026-11-03T07:15:00Z"), None);
+        assert_eq!(
+            phase_at("2026-11-03T15:00:00Z"),
+            Some((Direction::Inbound, Phase::Watching))
+        );
+        // Nothing on a day off.
+        assert_eq!(
+            phase(at("2026-11-02T04:30:00Z"), &tz, &calendar, &windows),
+            None
+        );
     }
 
     #[test]

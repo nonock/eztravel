@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::calendar::WatchWindows;
 use crate::config::Config;
-use crate::prim::Prim;
+use crate::prim::{Prim, PrimError};
 use crate::push::{self, LineLabel};
 use crate::relevance::{Leg, Route, RouteStop};
 
@@ -234,7 +234,7 @@ pub fn monitoring_ref(stop_point: &str) -> Option<String> {
 }
 
 /// Whether the stop lists one way only: a platform, not a whole station.
-fn one_way(stop_point: &str) -> bool {
+pub(crate) fn one_way(stop_point: &str) -> bool {
     monitoring_ref(stop_point).is_some_and(|stop| stop.starts_with("STIF:StopPoint:Q:"))
 }
 
@@ -282,17 +282,7 @@ pub fn select(
             }
             let arrival = match alight {
                 None => None,
-                Some((stop, visits)) => {
-                    let arrival = visits
-                        .iter()
-                        .find(|other| other.journey == visit.journey)
-                        .and_then(Visit::reaches)
-                        .filter(|arrival| *arrival > expected);
-                    if arrival.is_none() && visit.destination_ref.as_deref() != Some(stop) {
-                        return None;
-                    }
-                    arrival
-                }
+                Some(alight) => serves(visit, expected, alight)?,
             };
             Some(Departure {
                 aimed: visit.aimed_departure,
@@ -308,6 +298,25 @@ pub fn select(
     shown.sort_by_key(|departure| departure.expected);
     shown.truncate(SHOWN);
     shown
+}
+
+/// Whether `visit`, leaving at `departure`, takes the leg to the alight stop
+/// (its `MonitoringRef` and visits): it calls there later, or ends there.
+/// Gives its arrival time there, when listed.
+pub(crate) fn serves(
+    visit: &Visit,
+    departure: Timestamp,
+    (stop, visits): (&str, &[Visit]),
+) -> Option<Option<Timestamp>> {
+    let arrival = visits
+        .iter()
+        .find(|other| other.journey == visit.journey)
+        .and_then(Visit::reaches)
+        .filter(|arrival| *arrival > departure);
+    if arrival.is_none() && visit.destination_ref.as_deref() != Some(stop) {
+        return None;
+    }
+    Some(arrival)
 }
 
 /// The way shown: the morning one until its window ends, the evening one after.
@@ -356,6 +365,13 @@ struct Cache {
     stops: HashMap<String, (Timestamp, Vec<Visit>)>,
     /// Requests left on the UTC day of the last answer.
     quota: Option<(Date, u32)>,
+}
+
+impl Cache {
+    fn fresh(&self, stop: &str, now: Timestamp) -> Option<Vec<Visit>> {
+        let (read_at, visits) = self.stops.get(stop)?;
+        (now.duration_since(*read_at) < MAX_AGE).then(|| visits.clone())
+    }
 }
 
 impl NextDepartures {
@@ -454,6 +470,16 @@ impl NextDepartures {
         Some(select(line, &leaving, Some((&stop, &arriving)), now))
     }
 
+    /// For the poll loop: a stop's visits, read whatever quota is left, since the
+    /// windows come first. An answer under a minute old is used again.
+    pub async fn read(&self, stop: &str, now: Timestamp) -> Result<Vec<Visit>, PrimError> {
+        let mut cache = self.cache.lock().await;
+        match cache.fresh(stop, now) {
+            Some(visits) => Ok(visits),
+            None => self.fetch(&mut cache, stop, now).await,
+        }
+    }
+
     /// A stop's visits, read again when older than a minute.
     async fn visits(
         &self,
@@ -462,29 +488,32 @@ impl NextDepartures {
         stop: &str,
         now: Timestamp,
     ) -> Option<Vec<Visit>> {
-        if let Some((read_at, visits)) = cache.stops.get(stop)
-            && now.duration_since(*read_at) < MAX_AGE
-        {
-            return Some(visits.clone());
+        if let Some(visits) = cache.fresh(stop, now) {
+            return Some(visits);
         }
         if !may_read {
             return None;
         }
-        match self.prim.stop_visits(stop).await {
-            Ok(answer) => {
-                if let Some(left) = answer.remaining {
-                    cache.quota = Some((now.to_zoned(TimeZone::UTC).date(), left));
-                }
-                cache
-                    .stops
-                    .insert(stop.to_string(), (now, answer.visits.clone()));
-                Some(answer.visits)
-            }
-            Err(error) => {
-                eprintln!("departures at {stop} unavailable: {error:?}");
-                None
-            }
+        self.fetch(cache, stop, now)
+            .await
+            .inspect_err(|error| eprintln!("departures at {stop} unavailable: {error:?}"))
+            .ok()
+    }
+
+    async fn fetch(
+        &self,
+        cache: &mut Cache,
+        stop: &str,
+        now: Timestamp,
+    ) -> Result<Vec<Visit>, PrimError> {
+        let answer = self.prim.stop_visits(stop).await?;
+        if let Some(left) = answer.remaining {
+            cache.quota = Some((now.to_zoned(TimeZone::UTC).date(), left));
         }
+        cache
+            .stops
+            .insert(stop.to_string(), (now, answer.visits.clone()));
+        Ok(answer.visits)
     }
 }
 
@@ -859,6 +888,25 @@ mod tests {
         assert_eq!(departures.view(at("06:50:59")).await, first);
         departures.view(at("06:51:00")).await;
         // The mocks check their counts when the server drops.
+    }
+
+    #[tokio::test]
+    async fn the_poll_loop_uses_what_the_app_just_read() {
+        let server = MockServer::start().await;
+        answers(&server, "STIF:StopArea:SP:100:", morning_board(), 2).await;
+        answers(&server, "STIF:StopArea:SP:200:", morning_alight(), 1).await;
+        answers(&server, "STIF:StopPoint:Q:300:", morning_metro(), 1).await;
+        let departures = next_departures(&server, EXAMPLE);
+        departures.view(at("06:50:00")).await;
+        let read = departures
+            .read("STIF:StopArea:SP:100:", at("06:50:30"))
+            .await;
+        assert_eq!(read.unwrap().len(), 6);
+        // Older than a minute: read again, whatever the quota says.
+        departures
+            .read("STIF:StopArea:SP:100:", at("06:51:00"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

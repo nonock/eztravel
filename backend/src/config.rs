@@ -32,6 +32,14 @@ impl Config {
         let config: Self = toml::from_str(text).map_err(|error| error.to_string())?;
         TimeZone::get(&config.time_zone)
             .map_err(|error| format!("time_zone \"{}\": {error}", config.time_zone))?;
+        for (name, window) in [
+            ("outbound", config.windows.outbound),
+            ("inbound", config.windows.inbound),
+        ] {
+            if window.trains_from.is_some_and(|from| from > window.start) {
+                return Err(format!("windows.{name}: trains_from comes after start"));
+            }
+        }
         Ok(config)
     }
 
@@ -94,14 +102,16 @@ mod tests {
             config.windows.outbound,
             Window {
                 start: time(6, 45, 0, 0),
-                end: time(8, 15, 0, 0)
+                end: time(8, 15, 0, 0),
+                trains_from: Some(time(5, 30, 0, 0)),
             }
         );
         assert_eq!(
             config.windows.inbound,
             Window {
                 start: time(16, 0, 0, 0),
-                end: time(17, 30, 0, 0)
+                end: time(17, 30, 0, 0),
+                trains_from: None,
             }
         );
         assert_eq!(
@@ -174,6 +184,11 @@ away_through = 2026-12-31",
         let windows =
             Config::parse(&EXAMPLE.replace("inbound = { start", "evening = { start")).unwrap_err();
         assert!(windows.contains("evening"), "{windows}");
+        // Trains are followed before their window, not after it opens.
+        let late =
+            Config::parse(&EXAMPLE.replace("trains_from = \"05:30\"", "trains_from = \"07:00\""))
+                .unwrap_err();
+        assert!(late.contains("trains_from"), "{late}");
     }
 
     #[test]

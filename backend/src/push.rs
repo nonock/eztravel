@@ -18,6 +18,7 @@ use serde::{Deserialize, Deserializer};
 use crate::alerts::Notification;
 use crate::disruptions::{Disruption, Severity};
 use crate::http;
+use crate::trains::{Train, Why};
 
 /// Firebase caps the data of a message at 4 KB: titles and texts are cut well below.
 const TITLE_MAX_BYTES: usize = 300;
@@ -78,7 +79,7 @@ pub enum PushError {
 }
 
 /// The data of the message for `notification`. A line's message carries `until`, the end of
-/// the watch window: the phone removes it then.
+/// the watch window: the phone removes it then. A train's message goes away at the train's time.
 pub fn data(
     notification: &Notification,
     labels: &[LineLabel],
@@ -133,8 +134,37 @@ pub fn data(
         }
         Notification::Outage => put("type", "outage"),
         Notification::Recovered => put("type", "recovered"),
+        Notification::TrainCancelled { train, why } => {
+            put("type", "train_cancelled");
+            put(
+                "reason",
+                match why {
+                    Why::Missing => "missing",
+                    Why::Announced => "announced",
+                },
+            );
+            describe_train(train, labels, &mut put);
+        }
+        Notification::TrainBack { train } => {
+            put("type", "train_back");
+            describe_train(train, labels, &mut put);
+        }
     }
     data
+}
+
+fn describe_train(train: &Train, labels: &[LineLabel], put: &mut dyn FnMut(&str, &str)) {
+    let (name, mode) = label(&train.line, labels);
+    put("line", &name);
+    put("mode", mode);
+    if let Some(mission) = &train.mission {
+        put("mission", mission);
+    }
+    put("destination", &train.destination);
+    put("from", &train.from);
+    let aimed = train.aimed.to_string();
+    put("aimed", &aimed);
+    put("until", &aimed);
 }
 
 /// How the line `code` is named on screen, and its mode: `train`, `metro`, or `line` when unlabelled.
@@ -179,6 +209,13 @@ pub fn severity_name(severity: Severity) -> &'static str {
 pub fn message(device: &str, data: &BTreeMap<String, String>) -> serde_json::Value {
     // While the phone is offline, a newer message about the same line replaces the older one.
     let collapse_key = match (data.get("line"), data.get("type").map(String::as_str)) {
+        // A train's own: it must not replace its line's state, nor another train.
+        (Some(line), Some("train_cancelled" | "train_back")) => {
+            format!(
+                "train-{line}-{}",
+                data.get("aimed").map_or("", String::as_str)
+            )
+        }
         (Some(line), _) => format!("line-{line}"),
         (None, Some("planned")) => "planned".to_string(),
         // An outage and its end.
@@ -439,6 +476,7 @@ mod tests {
     use super::testing::{account, test_key};
     use super::*;
     use crate::disruptions::{Cause, Period};
+    use crate::trains::{Train, Why};
     use aws_lc_rs::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
     use base64::Engine;
     use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
@@ -653,6 +691,50 @@ mod tests {
             assert_eq!(
                 message("t", &fixture(name))["message"]["android"]["collapse_key"],
                 "watch"
+            );
+        }
+    }
+
+    fn train(mission: Option<&str>) -> Train {
+        Train {
+            line: "C01740".into(),
+            mission: mission.map(String::from),
+            destination: "Gare Centrale".into(),
+            from: "Les Aubépines".into(),
+            aimed: "2026-11-03T06:52:00Z".parse().unwrap(),
+        }
+    }
+
+    #[test]
+    fn a_train_is_named_by_its_line_mission_and_time_and_goes_away_then() {
+        let cancelled = |why| Notification::TrainCancelled {
+            train: train(Some("PALO")),
+            why,
+        };
+        assert_eq!(
+            data(&cancelled(Why::Missing), &labels(), until()),
+            fixture("train_cancelled")
+        );
+        assert_eq!(
+            data(&cancelled(Why::Announced), &labels(), until())["reason"],
+            "announced"
+        );
+        let back = |mission| Notification::TrainBack {
+            train: train(mission),
+        };
+        assert_eq!(
+            data(&back(Some("PALO")), &labels(), until()),
+            fixture("train_back")
+        );
+        assert!(!data(&back(None), &labels(), until()).contains_key("mission"));
+    }
+
+    #[test]
+    fn a_train_back_replaces_its_cancellation_only() {
+        for name in ["train_cancelled", "train_back"] {
+            assert_eq!(
+                message("t", &fixture(name))["message"]["android"]["collapse_key"],
+                "train-L-2026-11-03T06:52:00Z"
             );
         }
     }

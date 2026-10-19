@@ -21,6 +21,7 @@ Existing apps cover the whole network, for everyone. eztravel does the opposite:
 - when its severity changes (disrupted ↔ interrupted);
 - when it is back to normal, if its start was notified;
 - once a day, the planned disruptions (works, adapted service) that affect the commute;
+- when a train due to leave during the window is cancelled: it left its station's list before its time and stayed out for four checks in a row, or the operator says so; then again if it runs after all. Only train lines are followed this way: a metro platform lists its next four trains, without their timetable;
 - when no check has succeeded for ten minutes ("watching interrupted"), then when checks work again.
 
 A line's notification goes away by itself when its window ends. Every notification sent is kept in a history, with the PRIM records behind it.
@@ -49,7 +50,7 @@ You need a free [PRIM](https://prim.iledefrance-mobilites.fr) account and API ke
 
 ### 1. Describe your commute
 
-Copy [backend/config.example.toml](backend/config.example.toml) outside the repository and describe your own commute: the office-day calendar (two alternating weeks), the watch windows, the lines and the legs of each way. Lines and stops are Navitia ids (`line:IDFM:C01740` is written `C01740`; stops are `stop_area:IDFM:…`), which PRIM's Navitia API gives. Each line may have a color (`"#RRGGBB"`, Navitia's `color` field) for the home screen.
+Copy [backend/config.example.toml](backend/config.example.toml) outside the repository and describe your own commute: the office-day calendar (two alternating weeks), the watch windows, the lines and the legs of each way. Lines and stops are Navitia ids (`line:IDFM:C01740` is written `C01740`; stops are `stop_area:IDFM:…`), which PRIM's Navitia API gives. Each line may have a color (`"#RRGGBB"`, Navitia's `color` field) for the home screen. A window may start following trains earlier (`trains_from`): PRIM often drops a cancelled train half an hour or more before its time, and such trains are then notified when the window opens.
 
 ### 2. Firebase
 
