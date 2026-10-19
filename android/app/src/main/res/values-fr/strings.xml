@@ -33,6 +33,13 @@
     <string name="status_outage_prim">Surveillance interrompue depuis %1$s : les données d’Île-de-France Mobilités sont illisibles. Vérifiez le trafic ailleurs.</string>
     <string name="status_outage_firebase">Surveillance interrompue depuis %1$s : les notifications ne partent plus. Vérifiez le trafic ailleurs.</string>
     <string name="status_outage_server">Surveillance interrompue depuis %1$s : le serveur ne fait plus ses relevés. Vérifiez le trafic ailleurs.</string>
+    <string name="history_title">Historique des notifications</string>
+    <string name="history_back">Retour</string>
+    <string name="history_empty">Rien n’a encore été envoyé.</string>
+    <string name="history_today">Aujourd’hui</string>
+    <string name="history_yesterday">Hier</string>
+    <string name="history_closed_disrupted">%1$s : trafic encore perturbé à la fin de la surveillance</string>
+    <string name="history_closed_blocking">%1$s : trafic encore interrompu à la fin de la surveillance</string>
     <string name="away_title">Absence</string>
     <string name="away_loading">Chargement…</string>
     <string name="away_none">Aucune absence prévue : vous êtes prévenu les jours de bureau.</string>

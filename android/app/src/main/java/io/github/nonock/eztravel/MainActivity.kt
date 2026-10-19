@@ -3,10 +3,11 @@ package io.github.nonock.eztravel
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.Bundle
 import android.graphics.Color
+import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,19 +18,25 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import com.google.firebase.messaging.FirebaseMessaging
 import io.github.nonock.eztravel.backend.AppBackend
 import io.github.nonock.eztravel.home.CommuteStatus
+import io.github.nonock.eztravel.home.NotificationHistory
 import io.github.nonock.eztravel.notifications.Notifier
 import io.github.nonock.eztravel.settings.AwaySetting
 import io.github.nonock.eztravel.ui.theme.EztravelTheme
@@ -72,9 +79,18 @@ class MainActivity : ComponentActivity() {
 fun Home(modifier: Modifier = Modifier) {
     // Time away moves the next watch: the status is read again after each change.
     var saves by remember { mutableIntStateOf(0) }
+    var showingHistory by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = showingHistory) { showingHistory = false }
     Column(modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
-        CommuteStatus(AppBackend.current, refresh = saves)
-        Spacer(Modifier.height(24.dp))
-        AwaySetting(AppBackend.current, onSaved = { saves++ })
+        if (showingHistory) {
+            NotificationHistory(AppBackend.current, onBack = { showingHistory = false })
+        } else {
+            CommuteStatus(AppBackend.current, refresh = saves)
+            OutlinedButton(onClick = { showingHistory = true }, modifier = Modifier.padding(top = 12.dp)) {
+                Text(stringResource(R.string.history_title))
+            }
+            Spacer(Modifier.height(24.dp))
+            AwaySetting(AppBackend.current, onSaved = { saves++ })
+        }
     }
 }

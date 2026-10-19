@@ -65,6 +65,19 @@ class MainActivityTest {
     }
 
     @Test
+    fun theHistoryOpensFromTheHomeScreenAndBackLeavesIt() {
+        compose.onNodeWithText(text(R.string.history_title)).performClick()
+        compose.onNodeWithText(text(R.string.history_empty)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.history_back)).performClick()
+        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+        // The phone's own back gesture does the same.
+        compose.onNodeWithText(text(R.string.history_title)).performClick()
+        compose.onNodeWithText(text(R.string.history_empty)).assertIsDisplayed()
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+    }
+
+    @Test
     fun theStatusBarIconsAreLightOnTheNavyBackground() {
         compose.runOnUiThread {
             val window = compose.activity.window

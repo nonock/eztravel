@@ -15,6 +15,7 @@ class FakeBackend(
     var garbled: Boolean = false,
     /** Outside the windows, with nothing checked yet. */
     var status: Status = Status(null, null, null, null, emptyList(), emptyList()),
+    var history: List<HistoryEntry> = emptyList(),
 ) : Backend {
     val registered = CopyOnWriteArrayList<String>()
     val saved = CopyOnWriteArrayList<String>()
@@ -35,6 +36,12 @@ class FakeBackend(
         if (failing) throw IOException("unreachable")
         saved += date.toString()
         away = date
+    }
+
+    override suspend fun history(): List<HistoryEntry> {
+        if (failing) throw IOException("unreachable")
+        if (garbled) throw JSONException("not JSON")
+        return history
     }
 
     override suspend fun status(): Status {

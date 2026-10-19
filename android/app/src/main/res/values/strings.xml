@@ -33,6 +33,13 @@
     <string name="status_outage_prim">Watching interrupted since %1$s: Île-de-France Mobilités data cannot be read. Check the traffic elsewhere.</string>
     <string name="status_outage_firebase">Watching interrupted since %1$s: notifications cannot be sent. Check the traffic elsewhere.</string>
     <string name="status_outage_server">Watching interrupted since %1$s: the server has stopped checking. Check the traffic elsewhere.</string>
+    <string name="history_title">Notification history</string>
+    <string name="history_back">Back</string>
+    <string name="history_empty">Nothing sent yet.</string>
+    <string name="history_today">Today</string>
+    <string name="history_yesterday">Yesterday</string>
+    <string name="history_closed_disrupted">%1$s: still disrupted when watching ended</string>
+    <string name="history_closed_blocking">%1$s: still interrupted when watching ended</string>
     <string name="away_title">Time away</string>
     <string name="away_loading">Loading…</string>
     <string name="away_none">No time away planned: you are notified on office days.</string>

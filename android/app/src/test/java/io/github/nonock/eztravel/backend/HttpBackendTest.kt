@@ -75,6 +75,14 @@ class HttpBackendTest {
     }
 
     @Test
+    fun readsTheHistory() = runBlocking {
+        status = 200
+        answer = File("../../fixtures/api/history.json").readText()
+        assertEquals(HistoryEntry.parse(answer), backend.history())
+        assertEquals(listOf("GET /history"), received.map { "${it.method} ${it.path}" })
+    }
+
+    @Test
     fun aRefusalIsAnError() {
         status = 401
         try {
