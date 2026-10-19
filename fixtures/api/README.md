@@ -19,4 +19,4 @@ Times are UTC, in RFC 3339.
 - `legs`, in commute order: the line as in `/status`, `from` and `to` (stop names, `null` until the backend knows the line's routes) and `departures`, `null` when they cannot be read.
 - Each departure: `aimed` (the timetable's time, `null` on the metro, which only gives expected times), `expected`, `arrival` at the `to` stop when known, `mission` (a train's code), `destination`, `platform`, and `status`: `on_time`, `delayed` or `cancelled`, as the operator says. A train can be said `delayed` before its expected time moves.
 
-A train station lists both ways: a train is shown only if it also calls at the `to` stop, later. A metro platform lists one way and its next four trains.
+A train station lists both ways: a train is shown only if it also calls at the `to` stop, later, or ends there (a terminus drops trains from its arrivals during incidents; `arrival` is then `null`). A metro platform lists one way and its next four trains.

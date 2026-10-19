@@ -41,6 +41,8 @@ pub struct Visit {
     /// The mission code of a train ("PALO").
     pub mission: Option<String>,
     pub destination: String,
+    /// Where the journey ends, as a `MonitoringRef` for a train ("STIF:StopArea:SP:…:").
+    pub destination_ref: Option<String>,
     pub platform: Option<String>,
     pub aimed_departure: Option<Timestamp>,
     pub expected_departure: Option<Timestamp>,
@@ -116,6 +118,7 @@ struct RawVisit {
 struct Journey {
     line_ref: Text,
     framed_vehicle_journey_ref: Framed,
+    destination_ref: Option<Text>,
     #[serde(default)]
     destination_name: Vec<Text>,
     #[serde(default)]
@@ -179,6 +182,7 @@ impl RawVisit {
                 .next()
                 .map(|name| name.value)
                 .unwrap_or_default(),
+            destination_ref: journey.destination_ref.map(|stop| stop.value),
             platform: call
                 .departure_platform_name
                 .or(call.arrival_platform_name)
@@ -259,11 +263,12 @@ pub struct Departure {
 }
 
 /// The next departures of `line` from the board stop, soonest first. With the
-/// alight stop's visits, only those that call there afterwards.
+/// alight stop and its visits, only those that call there afterwards, or end there:
+/// during an incident, a terminus drops trains from its arrivals long before they come.
 pub fn select(
     line: &str,
     board: &[Visit],
-    alight: Option<&[Visit]>,
+    alight: Option<(&str, &[Visit])>,
     now: Timestamp,
 ) -> Vec<Departure> {
     let mut shown: Vec<Departure> = board
@@ -277,13 +282,17 @@ pub fn select(
             }
             let arrival = match alight {
                 None => None,
-                Some(alight) => Some(
-                    alight
+                Some((stop, visits)) => {
+                    let arrival = visits
                         .iter()
                         .find(|other| other.journey == visit.journey)
                         .and_then(Visit::reaches)
-                        .filter(|arrival| *arrival > expected)?,
-                ),
+                        .filter(|arrival| *arrival > expected);
+                    if arrival.is_none() && visit.destination_ref.as_deref() != Some(stop) {
+                        return None;
+                    }
+                    arrival
+                }
             };
             Some(Departure {
                 aimed: visit.aimed_departure,
@@ -437,13 +446,12 @@ impl NextDepartures {
         let leaving = self
             .visits(cache, may_read, &monitoring_ref(&board.stop_point)?, now)
             .await?;
-        let arriving = if one_way(&board.stop_point) {
-            None
-        } else {
-            let stop = monitoring_ref(&alight.stop_point)?;
-            Some(self.visits(cache, may_read, &stop, now).await?)
-        };
-        Some(select(line, &leaving, arriving.as_deref(), now))
+        if one_way(&board.stop_point) {
+            return Some(select(line, &leaving, None, now));
+        }
+        let stop = monitoring_ref(&alight.stop_point)?;
+        let arriving = self.visits(cache, may_read, &stop, now).await?;
+        Some(select(line, &leaving, Some((&stop, &arriving)), now))
     }
 
     /// A stop's visits, read again when older than a minute.
@@ -512,11 +520,17 @@ mod tests {
     ) -> Value {
         let mut call = call;
         call["DeparturePlatformName"] = json!({ "value": "2" });
+        let place = match destination {
+            "Gare Centrale" => 200,
+            "Les Aubépines" => 100,
+            _ => 50,
+        };
         json!({
             "RecordedAtTime": at(recorded).to_string(),
             "MonitoredVehicleJourney": {
                 "LineRef": { "value": "STIF:Line::C01740:" },
                 "FramedVehicleJourneyRef": { "DataFrameRef": { "value": "any" }, "DatedVehicleJourneyRef": journey },
+                "DestinationRef": { "value": format!("STIF:StopArea:SP:{place}:") },
                 "DestinationName": [{ "value": destination }],
                 "JourneyNote": [{ "value": mission }],
                 "MonitoredCall": call
@@ -986,6 +1000,7 @@ mod tests {
                 recorded_at: at("06:00:00"),
                 mission: None,
                 destination: String::new(),
+                destination_ref: None,
                 platform: None,
                 aimed_departure: Some(at("07:00:00")),
                 expected_departure: None,
@@ -1018,6 +1033,41 @@ mod tests {
         let shown = select("C01740", &visits, None, at("06:50:00"));
         assert_eq!(shown[0].expected, at("07:00:00"));
         assert_eq!(shown[0].aimed, Some(at("07:00:00")));
+    }
+
+    #[test]
+    fn a_train_ending_at_the_alight_stop_stays_when_that_stop_drops_it() {
+        // During an incident, a terminus drops trains from its arrivals long before they come.
+        let board = siri(vec![
+            train(
+                "j1",
+                "06:48:00",
+                "PALO",
+                "Gare Centrale",
+                departs("06:52:00", "06:52:00", "onTime"),
+            ),
+            train(
+                "j4",
+                "06:40:00",
+                "POLA",
+                "Les Peupliers",
+                departs("06:55:00", "06:55:00", "onTime"),
+            ),
+        ]);
+        let board = parse(&serde_json::to_vec(&board).unwrap()).unwrap();
+        let shown = select(
+            "C01740",
+            &board,
+            Some(("STIF:StopArea:SP:200:", &[])),
+            at("06:50:00"),
+        );
+        assert_eq!(
+            shown
+                .iter()
+                .map(|d| (d.mission.as_deref(), d.arrival))
+                .collect::<Vec<_>>(),
+            [(Some("PALO"), None)]
+        );
     }
 
     #[test]
