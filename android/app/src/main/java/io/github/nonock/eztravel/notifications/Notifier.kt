@@ -13,6 +13,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.github.nonock.eztravel.MainActivity
 import io.github.nonock.eztravel.R
+import java.time.Duration
+import java.time.Instant
 
 object Notifier {
     const val CHANNEL = "disruptions"
@@ -33,7 +35,10 @@ object Notifier {
         return true
     }
 
-    fun show(context: Context, message: PushMessage) {
+    /** `now` is when the message arrived: one whose window is over is not shown. */
+    fun show(context: Context, message: PushMessage, now: Instant = Instant.now()) {
+        val left = message.until?.let { Duration.between(now, it).toMillis() }
+        if (left != null && left <= 0) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -42,7 +47,7 @@ object Notifier {
         createChannel(context)
         val text = message.text(context.resources)
         val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val notification = NotificationCompat.Builder(context, CHANNEL)
+        val builder = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setColor(ContextCompat.getColor(context, R.color.brand_amber))
             .setContentTitle(text.title)
@@ -51,7 +56,8 @@ object Notifier {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(open)
             .setAutoCancel(true)
-            .build()
-        NotificationManagerCompat.from(context).notify(message.tag, ID, notification)
+        // Nothing stale on screen once the watch window is over.
+        if (left != null) builder.setTimeoutAfter(left)
+        NotificationManagerCompat.from(context).notify(message.tag, ID, builder.build())
     }
 }

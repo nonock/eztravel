@@ -2,7 +2,8 @@
 //!
 //!     cargo run --example send_test -- <service account key file> <device token file> [started|changed|ended|planned]
 //!
-//! The payload is taken from `fixtures/push/`. Both files stay out of the repository.
+//! The payload is taken from `fixtures/push/`, a line's window made to end in half an hour so
+//! that the phone shows it. Both files stay out of the repository.
 
 use std::collections::BTreeMap;
 
@@ -26,13 +27,14 @@ async fn main() {
         "{}/../fixtures/push/{kind}.json",
         env!("CARGO_MANIFEST_DIR")
     );
-    let data: BTreeMap<String, String> =
+    let mut data: BTreeMap<String, String> =
         serde_json::from_str(&std::fs::read_to_string(fixture).expect("payload")).expect("payload");
+    let now = jiff::Timestamp::now();
+    if let Some(until) = data.get_mut("until") {
+        *until = (now + jiff::SignedDuration::from_mins(30)).to_string();
+    }
     let mut sender = Sender::new(account, "https://fcm.googleapis.com");
-    match sender
-        .send(jiff::Timestamp::now(), device.trim(), &data)
-        .await
-    {
+    match sender.send(now, device.trim(), &data).await {
         Ok(()) => println!("sent: {kind}"),
         Err(error) => {
             eprintln!("not sent: {error:?}");

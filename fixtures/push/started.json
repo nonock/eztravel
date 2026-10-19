@@ -4,5 +4,6 @@
   "mode": "train",
   "severity": "blocking",
   "title": "Ligne L : Nanterre <-> Cergy trafic interrompu",
-  "text": "Le trafic est interrompu entre Nanterre et Cergy jusqu'à 20h.\nMotif : panne d'un train."
+  "text": "Le trafic est interrompu entre Nanterre et Cergy jusqu'à 20h.\nMotif : panne d'un train.",
+  "until": "2026-11-03T07:15:00Z"
 }

@@ -231,11 +231,13 @@ impl Service {
         let disruptions = match self.prim.disruptions(&codes).await {
             Ok(disruptions) => disruptions,
             Err(error) => {
-                self.failed(now, Cause::Prim, profile, health).await;
+                let until = self.window_end(local, direction);
+                self.failed(now, until, Cause::Prim, profile, health).await;
                 return Poll::Unavailable(format!("{error:?}"));
             }
         };
         let mut next = self.state.clone();
+        let until = self.window_end(local, direction);
         let mut notifications = decide(
             &mut next,
             local,
@@ -246,8 +248,9 @@ impl Service {
         if health.recovering() {
             notifications.insert(0, Notification::Recovered);
         }
-        if let Err(error) = self.send(now, profile, &notifications).await {
-            self.failed(now, Cause::Firebase, profile, health).await;
+        if let Err(error) = self.send(now, until, profile, &notifications).await {
+            self.failed(now, until, Cause::Firebase, profile, health)
+                .await;
             return Poll::NotSent(format!("{error:?}"));
         }
         self.commit(next);
@@ -255,17 +258,32 @@ impl Service {
         Poll::Sent(notifications.len())
     }
 
+    /// When the window of `direction` ends on the day of `local`.
+    fn window_end(&self, local: DateTime, direction: Direction) -> Timestamp {
+        let window = match direction {
+            Direction::Outbound => self.config.windows.outbound,
+            Direction::Inbound => self.config.windows.inbound,
+        };
+        local
+            .date()
+            .to_datetime(window.end)
+            .to_zoned(self.config.time_zone())
+            .expect("a day's local time is within range")
+            .timestamp()
+    }
+
     /// Tells the phone when polls have failed for too long.
     async fn failed(
         &mut self,
         now: Timestamp,
+        until: Timestamp,
         cause: Cause,
         profile: &Profile,
         health: &mut Health,
     ) {
         if health.failed(now, cause)
             && self
-                .send(now, profile, &[Notification::Outage])
+                .send(now, until, profile, &[Notification::Outage])
                 .await
                 .is_ok()
         {
@@ -277,11 +295,12 @@ impl Service {
     async fn send(
         &mut self,
         now: Timestamp,
+        until: Timestamp,
         profile: &Profile,
         notifications: &[Notification],
     ) -> Result<(), PushError> {
         for notification in notifications {
-            let data = push::data(notification, &self.config.lines);
+            let data = push::data(notification, &self.config.lines, until);
             let mut delivered = 0;
             for device in &profile.devices {
                 match self.sender.send(now, device, &data).await {
@@ -970,6 +989,8 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].at, at(MORNING));
         assert_eq!(entries[0].data["type"], "started");
+        // Gone from the phone when the window ends, 8:15 in Paris.
+        assert_eq!(entries[0].data["until"], "2026-11-03T07:15:00Z");
         assert_eq!(entries[0].delivered, 1);
         assert_eq!(entries[0].records[0].id, "d1");
     }

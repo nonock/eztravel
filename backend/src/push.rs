@@ -77,8 +77,14 @@ pub enum PushError {
     Status(u16, String),
 }
 
-/// The data of the message for `notification`.
-pub fn data(notification: &Notification, labels: &[LineLabel]) -> BTreeMap<String, String> {
+/// The data of the message for `notification`. A line's message carries `until`, the end of
+/// the watch window: the phone removes it then.
+pub fn data(
+    notification: &Notification,
+    labels: &[LineLabel],
+    until: Timestamp,
+) -> BTreeMap<String, String> {
+    let until = until.to_string();
     let mut data = BTreeMap::new();
     let mut put = |key: &str, value: &str| {
         data.insert(key.to_string(), value.to_string());
@@ -96,6 +102,7 @@ pub fn data(notification: &Notification, labels: &[LineLabel]) -> BTreeMap<Strin
         } => {
             put("type", "started");
             line(code, &mut put);
+            put("until", &until);
             describe(*severity, disruptions, &mut put);
         }
         Notification::Changed {
@@ -106,12 +113,14 @@ pub fn data(notification: &Notification, labels: &[LineLabel]) -> BTreeMap<Strin
         } => {
             put("type", "changed");
             line(code, &mut put);
+            put("until", &until);
             put("previous", severity_name(*from));
             describe(*to, disruptions, &mut put);
         }
         Notification::Ended { line: code } => {
             put("type", "ended");
             line(code, &mut put);
+            put("until", &until);
         }
         Notification::Planned { disruptions } => {
             put("type", "planned");
@@ -454,6 +463,11 @@ mod tests {
         ]
     }
 
+    /// The end of the example's morning window on Tuesday 3 November 2026: 8:15 in Paris.
+    fn until() -> Timestamp {
+        "2026-11-03T07:15:00Z".parse().unwrap()
+    }
+
     fn fixture(name: &str) -> BTreeMap<String, String> {
         let path = format!(
             "{}/../fixtures/push/{name}.json",
@@ -497,7 +511,7 @@ mod tests {
                 ),
             ],
         };
-        assert_eq!(data(&notification, &labels()), fixture("started"));
+        assert_eq!(data(&notification, &labels(), until()), fixture("started"));
     }
 
     #[test]
@@ -512,7 +526,7 @@ mod tests {
                 "Le trafic reprend mais reste perturbé sur toute la ligne.",
             )],
         };
-        assert_eq!(data(&notification, &labels()), fixture("changed"));
+        assert_eq!(data(&notification, &labels(), until()), fixture("changed"));
     }
 
     #[test]
@@ -522,7 +536,8 @@ mod tests {
                 &Notification::Ended {
                     line: "C01740".into()
                 },
-                &labels()
+                &labels(),
+                until()
             ),
             fixture("ended")
         );
@@ -536,7 +551,7 @@ mod tests {
                 record("Métro X : station fermée", Severity::Blocking, ""),
             ],
         };
-        assert_eq!(data(&notification, &labels()), fixture("planned"));
+        assert_eq!(data(&notification, &labels(), until()), fixture("planned"));
     }
 
     #[test]
@@ -546,7 +561,7 @@ mod tests {
             severity: Severity::Disrupted,
             disruptions: vec![],
         };
-        let sent = data(&started, &labels());
+        let sent = data(&started, &labels(), until());
         assert_eq!(sent["severity"], "disrupted");
         assert!(!sent.contains_key("title") && !sent.contains_key("text"));
     }
@@ -558,6 +573,7 @@ mod tests {
                 line: "C09999".into(),
             },
             &labels(),
+            until(),
         );
         assert_eq!(
             (ended["line"].as_str(), ended["mode"].as_str()),
@@ -573,7 +589,7 @@ mod tests {
             severity: Severity::Disrupted,
             disruptions: vec![record(&long, Severity::Disrupted, &long)],
         };
-        let sent = data(&notification, &labels());
+        let sent = data(&notification, &labels(), until());
         assert!(sent["title"].len() <= TITLE_MAX_BYTES);
         assert!(sent["text"].len() <= TEXT_MAX_BYTES);
         assert!(sent["text"].ends_with('…'));
@@ -643,9 +659,12 @@ mod tests {
 
     #[test]
     fn an_outage_and_its_end_carry_their_type_only() {
-        assert_eq!(data(&Notification::Outage, &labels()), fixture("outage"));
         assert_eq!(
-            data(&Notification::Recovered, &labels()),
+            data(&Notification::Outage, &labels(), until()),
+            fixture("outage")
+        );
+        assert_eq!(
+            data(&Notification::Recovered, &labels(), until()),
             fixture("recovered")
         );
     }

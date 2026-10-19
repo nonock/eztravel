@@ -15,6 +15,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.time.Duration
+import java.time.Instant
 
 @RunWith(AndroidJUnit4::class)
 class NotifierTest {
@@ -48,6 +50,23 @@ class NotifierTest {
         // The logo's amber, for the icon in the notification shade.
         assertEquals(context.getColor(io.github.nonock.eztravel.R.color.brand_amber), notification.color)
         assertEquals("Texte de l'opérateur", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    }
+
+    @Test
+    fun aLineMessageGoesAwayWhenTheWindowEnds() {
+        val now = Instant.now()
+        Notifier.show(context, started.copy(until = now.plus(Duration.ofMinutes(20))), now)
+        waitForTitle("line-L", started.text(context.resources).title)
+        assertEquals(Duration.ofMinutes(20).toMillis(), shown("line-L").single().notification.timeoutAfter)
+    }
+
+    @Test
+    fun aLineMessageArrivingAfterItsWindowIsNotShown() {
+        // Held by Firebase while the phone was offline: it is stale by now.
+        val now = Instant.now()
+        Notifier.show(context, started.copy(until = now.minus(Duration.ofMinutes(1))), now)
+        SystemClock.sleep(500)
+        assertEquals(emptyList<Any>(), shown("line-L"))
     }
 
     @Test

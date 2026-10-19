@@ -8,8 +8,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.File
+import java.time.Instant
 
 class PushMessageTest {
+    /** The window end in the fixtures: 8:15 in Paris on Tuesday 3 November 2026. */
+    private val windowEnd = Instant.parse("2026-11-03T07:15:00Z")
+
     /** The payloads the backend sends, shared with its own tests. */
     private fun fixture(name: String): Map<String, String> {
         val json = JSONObject(File("../../fixtures/push/$name.json").readText())
@@ -24,6 +28,7 @@ class PushMessageTest {
                 Severity.BLOCKING,
                 title = "Ligne L : Nanterre <-> Cergy trafic interrompu",
                 text = "Le trafic est interrompu entre Nanterre et Cergy jusqu'à 20h.\nMotif : panne d'un train.",
+                until = windowEnd,
             ),
             PushMessage.parse(fixture("started")),
         )
@@ -38,6 +43,7 @@ class PushMessageTest {
                 previous = Severity.BLOCKING,
                 title = "Métro X : Reprise progressive / trafic reste perturbé",
                 text = "Le trafic reprend mais reste perturbé sur toute la ligne.",
+                until = windowEnd,
             ),
             PushMessage.parse(fixture("changed")),
         )
@@ -45,7 +51,7 @@ class PushMessageTest {
 
     @Test
     fun readsAnEnd() {
-        assertEquals(PushMessage.Ended(Line("L", Mode.TRAIN)), PushMessage.parse(fixture("ended")))
+        assertEquals(PushMessage.Ended(Line("L", Mode.TRAIN), until = windowEnd), PushMessage.parse(fixture("ended")))
     }
 
     @Test
@@ -54,6 +60,21 @@ class PushMessageTest {
             PushMessage.Planned(2, "Ligne L : offre adaptée\nMétro X : station fermée"),
             PushMessage.parse(fixture("planned")),
         )
+    }
+
+    @Test
+    fun messagesAboutTheDayOrTheWatchDoNotEndWithTheWindow() {
+        assertNull(PushMessage.parse(fixture("planned"))!!.until)
+        assertNull(PushMessage.Outage.until)
+        assertNull(PushMessage.Recovered.until)
+    }
+
+    @Test
+    fun anUnreadableWindowEndKeepsTheMessage() {
+        // Better shown too long than not at all.
+        val message = PushMessage.parse(fixture("started") + ("until" to "soon"))
+        assertEquals(Severity.BLOCKING, (message as PushMessage.Started).severity)
+        assertNull(message.until)
     }
 
     @Test
