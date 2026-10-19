@@ -50,6 +50,7 @@ class MainActivityTest {
         compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > 0 }
         compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.departures_title)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.away_none)).assertIsDisplayed()
     }
 

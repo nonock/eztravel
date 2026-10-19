@@ -1,7 +1,6 @@
 package io.github.nonock.eztravel.backend
 
 import io.github.nonock.eztravel.notifications.PushMessage
-import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 
@@ -42,8 +41,8 @@ data class Status(
                     "inbound" -> Direction.INBOUND
                     else -> null
                 },
-                checkedAt = status.instant("checked_at"),
-                next = status.instant("next"),
+                checkedAt = status.instantOrNull("checked_at"),
+                next = status.instantOrNull("next"),
                 outage = if (status.isNull("outage")) {
                     null
                 } else {
@@ -65,23 +64,11 @@ data class Status(
                             line.getString("severity") == "blocking" -> PushMessage.Severity.BLOCKING
                             else -> PushMessage.Severity.DISRUPTED
                         },
-                        if (line.isNull("color")) null else hexColor(line.getString("color")),
+                        line.stringOrNull("color")?.let(::hexColor),
                     )
                 },
                 planned = status.getJSONArray("planned").let { titles -> List(titles.length()) { titles.getString(it) } },
             )
         }
-
-        // Android's org.json may read a null as the text "null": check for it first.
-        private fun JSONObject.instant(name: String): Instant? = if (isNull(name)) null else Instant.parse(getString(name))
-
-        private fun JSONArray.objects(): List<JSONObject> = List(length()) { getJSONObject(it) }
-
-        /** "#RRGGBB" as an opaque ARGB color; null when written otherwise. */
-        private fun hexColor(text: String): Int? = text
-            .takeIf { it.length == 7 && it.startsWith("#") }
-            ?.substring(1)
-            ?.toLongOrNull(16)
-            ?.let { (0xFF000000 or it).toInt() }
     }
 }

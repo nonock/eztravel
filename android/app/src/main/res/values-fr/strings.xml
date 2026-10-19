@@ -48,5 +48,16 @@
     <string name="away_clear">Annuler l’absence</string>
     <string name="away_unreachable">Le serveur est injoignable. Réessayez plus tard.</string>
     <string name="away_not_configured">Cette version de l’appli n’a ni adresse de serveur ni clé (voir local.properties).</string>
+    <string name="departures_title">Prochains départs</string>
+    <string name="departures_leg">%1$s → %2$s</string>
+    <string name="departures_unavailable">Les départs ne peuvent pas être lus pour l’instant.</string>
+    <string name="departures_none">Aucun départ dans les prochaines heures.</string>
+    <string name="departures_minutes">%1$d min</string>
+    <string name="departures_arriving">À l’approche</string>
+    <string name="departures_late">+%1$d min</string>
+    <string name="departures_delayed">Retardé</string>
+    <string name="departures_cancelled">Supprimé</string>
+    <string name="departures_platform">Voie %1$s</string>
+    <string name="departures_arrival">arrivée %1$s</string>
     <string name="cancel">Annuler</string>
 </resources>

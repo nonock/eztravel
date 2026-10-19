@@ -48,6 +48,17 @@
     <string name="away_clear">Cancel the time away</string>
     <string name="away_unreachable">The server cannot be reached. Try again later.</string>
     <string name="away_not_configured">This build of the app has no server address or key (see local.properties).</string>
+    <string name="departures_title">Next departures</string>
+    <string name="departures_leg">%1$s → %2$s</string>
+    <string name="departures_unavailable">Departures cannot be read right now.</string>
+    <string name="departures_none">No departure in the coming hours.</string>
+    <string name="departures_minutes">%1$d min</string>
+    <string name="departures_arriving">Arriving</string>
+    <string name="departures_late">+%1$d min</string>
+    <string name="departures_delayed">Delayed</string>
+    <string name="departures_cancelled">Cancelled</string>
+    <string name="departures_platform">Platform %1$s</string>
+    <string name="departures_arrival">arrives %1$s</string>
     <string name="ok" translatable="false">OK</string>
     <string name="cancel">Cancel</string>
 </resources>

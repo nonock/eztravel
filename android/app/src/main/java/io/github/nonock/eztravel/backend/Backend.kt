@@ -26,6 +26,9 @@ interface Backend {
 
     /** What the backend sent, newest first. */
     suspend fun history(): List<HistoryEntry>
+
+    /** The next departures on the way shown. */
+    suspend fun departures(): Departures
 }
 
 class BackendError(val status: Int) : IOException("the backend answered $status")
@@ -55,6 +58,10 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
 
     override suspend fun history(): List<HistoryEntry> = withContext(Dispatchers.IO) {
         HistoryEntry.parse(request("GET", "/history", null))
+    }
+
+    override suspend fun departures(): Departures = withContext(Dispatchers.IO) {
+        Departures.parse(request("GET", "/departures", null))
     }
 
     private fun request(method: String, path: String, body: JSONObject?): String {

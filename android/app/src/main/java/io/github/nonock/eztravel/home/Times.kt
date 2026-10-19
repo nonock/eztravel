@@ -1,5 +1,6 @@
 package io.github.nonock.eztravel.home
 
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -21,3 +22,10 @@ fun Instant.shown(
     }
     return format.withLocale(locale).format(local)
 }
+
+/** The time alone, whatever the day: departures are a few hours ahead at most. */
+fun Instant.clock(zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()): String =
+    DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale).format(atZone(zone))
+
+/** Whole minutes from [now] to this time, rounded down; 0 once it is past. */
+fun Instant.minutesFrom(now: Instant): Long = Duration.between(now, this).toMinutes().coerceAtLeast(0)

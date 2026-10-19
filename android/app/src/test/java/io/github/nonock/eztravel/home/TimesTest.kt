@@ -26,6 +26,20 @@ class TimesTest {
     }
 
     @Test
+    fun aClockTimeHasNoDateEvenTomorrow() {
+        assertEquals("07:42", Instant.parse("2026-11-03T06:42:00Z").clock(paris, Locale.FRANCE))
+        assertEquals("00:10", Instant.parse("2026-11-03T23:10:00Z").clock(paris, Locale.FRANCE))
+    }
+
+    @Test
+    fun minutesLeftAreRoundedDown() {
+        val now = Instant.parse("2026-11-03T06:50:00Z")
+        assertEquals(3L, Instant.parse("2026-11-03T06:53:30Z").minutesFrom(now))
+        assertEquals(0L, Instant.parse("2026-11-03T06:50:59Z").minutesFrom(now))
+        assertEquals(0L, Instant.parse("2026-11-03T06:49:00Z").minutesFrom(now))
+    }
+
+    @Test
     fun theDayIsTheOneOfThePhoneTimeZone() {
         // 23:30 UTC on Monday is already Tuesday in Paris.
         assertEquals("00:30", shown("2026-11-02T23:30:00Z"))

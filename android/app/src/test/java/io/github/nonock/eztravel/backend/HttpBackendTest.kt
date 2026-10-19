@@ -83,6 +83,14 @@ class HttpBackendTest {
     }
 
     @Test
+    fun readsTheDepartures() = runBlocking {
+        status = 200
+        answer = File("../../fixtures/api/departures.json").readText()
+        assertEquals(Departures.parse(answer), backend.departures())
+        assertEquals(listOf("GET /departures"), received.map { "${it.method} ${it.path}" })
+    }
+
+    @Test
     fun aRefusalIsAnError() {
         status = 401
         try {

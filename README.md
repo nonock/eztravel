@@ -25,7 +25,7 @@ Existing apps cover the whole network, for everyone. eztravel does the opposite:
 
 A line's notification goes away by itself when its window ends. Every notification sent is kept in a history, with the PRIM records behind it.
 
-**The app** shows the notifications, titled in English or French, with the operator's text as published. Its home screen shows the lines being watched, each with its color and current state, the last check and the next watch window. It also holds the time away ("away until…"), the history of notifications, and a splash screen with the logo.
+**The app** shows the notifications, titled in English or French, with the operator's text as published. Its home screen shows the lines being watched, each with its color and current state, the last check and the next watch window. Below come the next departures on each leg of the way, with their delay or cancellation, platform and arrival time; the backend reads them from PRIM when the app asks, at most once a minute per stop. The app also holds the time away ("away until…"), the history of notifications, and a splash screen with the logo.
 
 ## Architecture
 
@@ -104,6 +104,7 @@ All requests carry `Authorization: Bearer <APP_KEY>`.
 | `GET /settings`, `PUT /settings` `{"away_through": "2026-12-24"}` | The last day away, or `null` |
 | `GET /status` | What the backend sees: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /history` | What it sent, newest first: [fixtures/api/history.json](fixtures/api/history.json) |
+| `GET /departures` | The next departures on each leg: [fixtures/api/README.md](fixtures/api/README.md) |
 
 Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md).
 

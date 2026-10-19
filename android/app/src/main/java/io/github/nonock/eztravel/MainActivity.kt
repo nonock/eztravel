@@ -36,6 +36,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.firebase.messaging.FirebaseMessaging
 import io.github.nonock.eztravel.backend.AppBackend
 import io.github.nonock.eztravel.home.CommuteStatus
+import io.github.nonock.eztravel.home.NextDepartures
 import io.github.nonock.eztravel.home.NotificationHistory
 import io.github.nonock.eztravel.notifications.Notifier
 import io.github.nonock.eztravel.settings.AwaySetting
@@ -86,6 +87,7 @@ fun Home(modifier: Modifier = Modifier) {
             NotificationHistory(AppBackend.current, onBack = { showingHistory = false })
         } else {
             CommuteStatus(AppBackend.current, refresh = saves)
+            NextDepartures(AppBackend.current, Modifier.padding(top = 24.dp))
             OutlinedButton(onClick = { showingHistory = true }, modifier = Modifier.padding(top = 12.dp)) {
                 Text(stringResource(R.string.history_title))
             }
