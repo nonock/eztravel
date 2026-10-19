@@ -24,6 +24,15 @@
     <string name="notification_train_announced">%1$s to %2$s, from %3$s: announced as cancelled.</string>
     <string name="notification_train_route">%1$s to %2$s, from %3$s.</string>
     <string name="notification_train_unnamed">Train</string>
+    <string name="notification_leave">%1$s: leave at %2$s</string>
+    <string name="notification_leave_train">%1$s at %2$s to %3$s</string>
+    <string name="notification_leave_train_platform">%1$s at %2$s to %3$s, platform %4$s</string>
+    <string name="notification_sentences">%1$s. %2$s</string>
+    <string name="notification_leave_on_time">Announced on time.</string>
+    <string name="notification_leave_late">Announced %1$d min late.</string>
+    <string name="notification_leave_scheduled">Still scheduled, not followed live yet.</string>
+    <string name="notification_train_late_title">%1$s: your %2$s train runs late</string>
+    <string name="notification_train_late">%1$s to %2$s: now leaving at %3$s, %4$d min late.</string>
     <string name="status_title">Your commute</string>
     <string name="status_unreachable">The server cannot be reached: whether your lines are watched is unknown.</string>
     <string name="status_watching_outbound">Watching the way to work.</string>
@@ -65,6 +74,9 @@
     <string name="departures_cancelled">Cancelled</string>
     <string name="departures_platform">Platform %1$s</string>
     <string name="departures_arrival">arrives %1$s</string>
+    <string name="departures_leave_in">Leave in %1$d min</string>
+    <string name="departures_leave_now">Leave now</string>
+    <string name="departures_too_late">Too late to catch</string>
     <string name="ok" translatable="false">OK</string>
     <string name="cancel">Cancel</string>
 </resources>

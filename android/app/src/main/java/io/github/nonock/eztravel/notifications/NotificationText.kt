@@ -5,6 +5,8 @@ import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
 import io.github.nonock.eztravel.notifications.PushMessage.Severity
+import java.time.Duration
+import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -45,14 +47,49 @@ fun PushMessage.text(resources: Resources, zone: ZoneId = ZoneId.systemDefault()
         resources.getString(R.string.notification_train_back, train.line.label(resources), train.time(resources, zone)),
         train.describe(resources, R.string.notification_train_route),
     )
+    is PushMessage.Leave -> NotificationText(
+        resources.getString(R.string.notification_leave, train.line.label(resources), leave.clock(resources, zone)),
+        resources.getString(
+            R.string.notification_sentences,
+            if (platform == null) {
+                resources.getString(R.string.notification_leave_train, train.name(resources), train.time(resources, zone), train.destination)
+            } else {
+                resources.getString(R.string.notification_leave_train_platform, train.name(resources), train.time(resources, zone), train.destination, platform)
+            },
+            when {
+                !live -> resources.getString(R.string.notification_leave_scheduled)
+                train.lateMinutes > 0 -> resources.getString(R.string.notification_leave_late, train.lateMinutes)
+                else -> resources.getString(R.string.notification_leave_on_time)
+            },
+        ),
+    )
+    is PushMessage.TrainLate -> NotificationText(
+        resources.getString(R.string.notification_train_late_title, train.line.label(resources), train.time(resources, zone)),
+        resources.getString(
+            R.string.notification_train_late,
+            train.name(resources),
+            train.destination,
+            (train.expected ?: train.aimed).clock(resources, zone),
+            train.lateMinutes,
+        ),
+    )
 }
 
-private fun PushMessage.Train.time(resources: Resources, zone: ZoneId): String =
-    DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(resources.configuration.locales[0]).format(aimed.atZone(zone))
+private fun Instant.clock(resources: Resources, zone: ZoneId): String =
+    DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(resources.configuration.locales[0]).format(atZone(zone))
+
+/** Its mission code, or just "Train". */
+private fun PushMessage.Train.name(resources: Resources): String = mission ?: resources.getString(R.string.notification_train_unnamed)
+
+/** Whole minutes late, 0 when on time or when not known. */
+private val PushMessage.Train.lateMinutes: Long
+    get() = expected?.let { Duration.between(aimed, it).toMinutes().coerceAtLeast(0) } ?: 0
+
+private fun PushMessage.Train.time(resources: Resources, zone: ZoneId): String = aimed.clock(resources, zone)
 
 /** "PALO to Gare Centrale, from Les Aubépines", in the words of [format]. */
 private fun PushMessage.Train.describe(resources: Resources, format: Int): String =
-    resources.getString(format, mission ?: resources.getString(R.string.notification_train_unnamed), destination, from)
+    resources.getString(format, name(resources), destination, from)
 
 fun Line.label(resources: Resources): String = resources.getString(
     when (mode) {

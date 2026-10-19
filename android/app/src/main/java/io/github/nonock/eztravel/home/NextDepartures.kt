@@ -33,6 +33,7 @@ import io.github.nonock.eztravel.backend.Departures.State
 import kotlinx.coroutines.delay
 import org.json.JSONException
 import java.io.IOException
+import java.time.Duration
 import java.time.Instant
 
 /** The backend reads each stop at most once a minute. */
@@ -94,13 +95,16 @@ private fun LegDepartures(leg: Departures.Leg, now: Instant) {
     when {
         departures == null -> Text(stringResource(R.string.departures_unavailable), color = MaterialTheme.colorScheme.error)
         departures.isEmpty() -> Text(stringResource(R.string.departures_none))
-        else -> for (departure in departures) DepartureRow(departure, now)
+        else -> for (departure in departures) DepartureRow(departure, now, leg.reach)
     }
 }
 
-/** One departure, read as one: "07:07, +4 min, Gare Centrale, PILO, Platform 2, arrives 07:23". */
+/**
+ * One departure, read as one: "07:07, +4 min, Gare Centrale, PILO, Platform 2,
+ * arrives 07:23, leave in 9 min". [reach] is the time to its platform, if known.
+ */
 @Composable
-private fun DepartureRow(departure: Departure, now: Instant) {
+private fun DepartureRow(departure: Departure, now: Instant, reach: Duration?) {
     Row(
         Modifier.padding(top = 8.dp).semantics(mergeDescendants = true) {},
         verticalAlignment = Alignment.Top,
@@ -132,6 +136,14 @@ private fun DepartureRow(departure: Departure, now: Instant) {
                 departure.mission?.let { Text(it, style = details, color = muted) }
                 departure.platform?.let { Text(stringResource(R.string.departures_platform, it), style = details, color = muted) }
                 departure.arrival?.let { Text(stringResource(R.string.departures_arrival, it.clock()), style = details, color = muted) }
+            }
+            if (reach != null && departure.state != State.CANCELLED) {
+                val left = Duration.between(now, departure.expected.minus(reach))
+                when {
+                    left.isNegative -> Text(stringResource(R.string.departures_too_late), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    left.toMinutes() == 0L -> Text(stringResource(R.string.departures_leave_now), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    else -> Text(stringResource(R.string.departures_leave_in, left.toMinutes()), color = MaterialTheme.colorScheme.primary)
+                }
             }
         }
     }

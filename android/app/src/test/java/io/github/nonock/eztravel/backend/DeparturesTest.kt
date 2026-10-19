@@ -8,8 +8,10 @@ import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.File
+import java.time.Duration
 import java.time.Instant
 
 class DeparturesTest {
@@ -26,6 +28,7 @@ class DeparturesTest {
         assertEquals(Line("L", Mode.TRAIN), train.line)
         assertEquals(0xFF7B61C9.toInt(), train.color)
         assertEquals("Les Aubépines" to "Gare Centrale", train.from to train.to)
+        assertEquals(Duration.ofMinutes(12), train.reach)
         assertEquals(
             listOf(
                 Departure(at("06:52:00"), at("06:52:00"), at("07:04:00"), "PALO", "Gare Centrale", "2", State.ON_TIME),
@@ -35,6 +38,7 @@ class DeparturesTest {
             train.departures,
         )
         assertEquals(Line("X", Mode.METRO), metro.line)
+        assertNull(metro.reach)
         assertEquals(
             Departure(null, at("06:53:30"), null, null, "Porte Nord", null, State.ON_TIME),
             metro.departures?.first(),
@@ -48,7 +52,7 @@ class DeparturesTest {
         assertEquals(
             listOf(
                 Leg(Line("X", Mode.METRO), 0xFFE07A1F.toInt(), from = null, to = null, departures = null),
-                Leg(Line("L", Mode.TRAIN), color = null, "Gare Centrale", "Les Aubépines", emptyList()),
+                Leg(Line("L", Mode.TRAIN), color = null, "Gare Centrale", "Les Aubépines", emptyList(), Duration.ofMinutes(25)),
             ),
             departures.legs,
         )
@@ -74,5 +78,8 @@ class DeparturesTest {
         assertEquals(Direction.OUTBOUND, departures.direction)
         // Unknown, it is shown by its times alone.
         assertEquals(State.ON_TIME, departures.legs[0].departures?.first()?.state)
+        // An older backend says nothing of the time to the platform.
+        json.getJSONArray("legs").getJSONObject(0).remove("reach")
+        assertNull(Departures.parse(json.toString()).legs[0].reach)
     }
 }

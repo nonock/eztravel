@@ -24,6 +24,15 @@
     <string name="notification_train_announced">%1$s vers %2$s, depuis %3$s : annoncé supprimé.</string>
     <string name="notification_train_route">%1$s vers %2$s, depuis %3$s.</string>
     <string name="notification_train_unnamed">Train</string>
+    <string name="notification_leave">%1$s : partir à %2$s</string>
+    <string name="notification_leave_train">%1$s de %2$s vers %3$s</string>
+    <string name="notification_leave_train_platform">%1$s de %2$s vers %3$s, voie %4$s</string>
+    <string name="notification_sentences">%1$s. %2$s</string>
+    <string name="notification_leave_on_time">Annoncé à l’heure.</string>
+    <string name="notification_leave_late">Annoncé avec %1$d min de retard.</string>
+    <string name="notification_leave_scheduled">Toujours au programme, pas encore suivi en direct.</string>
+    <string name="notification_train_late_title">%1$s : votre train de %2$s a du retard</string>
+    <string name="notification_train_late">%1$s vers %2$s : départ annoncé à %3$s, %4$d min de retard.</string>
     <string name="status_title">Votre trajet</string>
     <string name="status_unreachable">Le serveur est injoignable : impossible de savoir si vos lignes sont surveillées.</string>
     <string name="status_watching_outbound">Surveillance du trajet aller.</string>
@@ -65,5 +74,8 @@
     <string name="departures_cancelled">Supprimé</string>
     <string name="departures_platform">Voie %1$s</string>
     <string name="departures_arrival">arrivée %1$s</string>
+    <string name="departures_leave_in">Partir dans %1$d min</string>
+    <string name="departures_leave_now">Partir maintenant</string>
+    <string name="departures_too_late">Trop tard pour celui-ci</string>
     <string name="cancel">Annuler</string>
 </resources>

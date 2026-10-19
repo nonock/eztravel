@@ -41,8 +41,18 @@ sealed interface PushMessage {
     /** Checks work again, after an outage. */
     data object Recovered : PushMessage
 
-    /** A train by its timetable departure from the stop it leaves; `mission` is its code, when known. */
-    data class Train(val line: Line, val mission: String?, val destination: String, val from: String, val aimed: Instant)
+    /**
+     * A train by its timetable departure from the stop it leaves; `mission` is
+     * its code, when known, and `expected` its departure as last listed.
+     */
+    data class Train(
+        val line: Line,
+        val mission: String?,
+        val destination: String,
+        val from: String,
+        val aimed: Instant,
+        val expected: Instant? = null,
+    )
 
     /** How the backend knows a train is cancelled. */
     enum class Reason {
@@ -59,6 +69,21 @@ sealed interface PushMessage {
     /** A train notified as cancelled runs after all. */
     data class TrainBack(val train: Train, override val until: Instant?) : PushMessage
 
+    /**
+     * Time to [leave] for [train]. [live] when PRIM follows the train live: a
+     * train that has not set off yet is only still scheduled.
+     */
+    data class Leave(
+        val train: Train,
+        val leave: Instant,
+        val platform: String?,
+        val live: Boolean,
+        override val until: Instant?,
+    ) : PushMessage
+
+    /** The train of the reminder now runs late, to leave at its `expected` time. */
+    data class TrainLate(val train: Train, override val until: Instant?) : PushMessage
+
     /** When the watch window ends, or the train's time: the message goes away then. Null for the others. */
     val until: Instant?
         get() = null
@@ -74,6 +99,8 @@ sealed interface PushMessage {
             // A train's own: neither its line's state nor another train.
             is TrainCancelled -> "train-${train.line.name}-${train.aimed}"
             is TrainBack -> "train-${train.line.name}-${train.aimed}"
+            is Leave -> "train-${train.line.name}-${train.aimed}"
+            is TrainLate -> "train-${train.line.name}-${train.aimed}"
         }
 
     companion object {
@@ -112,6 +139,17 @@ sealed interface PushMessage {
                     until,
                 )
                 "train_back" -> TrainBack(train(data, line) ?: return null, until)
+                "leave" -> Leave(
+                    train(data, line) ?: return null,
+                    instant(data["leave"]) ?: return null,
+                    data["platform"],
+                    data["live"] == "true",
+                    until,
+                )
+                "train_late" -> TrainLate(
+                    train(data, line)?.takeIf { it.expected != null } ?: return null,
+                    until,
+                )
                 else -> null
             }
         }
@@ -122,9 +160,12 @@ sealed interface PushMessage {
                 data["mission"],
                 data["destination"] ?: return null,
                 data["from"] ?: return null,
-                data["aimed"]?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return null,
+                instant(data["aimed"]) ?: return null,
+                instant(data["expected"]),
             )
         }
+
+        private fun instant(text: String?): Instant? = text?.let { runCatching { Instant.parse(it) }.getOrNull() }
 
         /** `train`, `metro`, or any other mode, as named by the backend. */
         fun mode(name: String?) = when (name) {

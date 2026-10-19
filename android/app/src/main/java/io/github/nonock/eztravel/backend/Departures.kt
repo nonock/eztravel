@@ -13,7 +13,8 @@ import java.time.Instant
 data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
     /**
      * `from` and `to` are null until the backend knows the line's stops;
-     * `departures` is null when they cannot be read.
+     * `departures` is null when they cannot be read. `reach` is the time from
+     * leaving home, or work, to the platform, when configured.
      */
     data class Leg(
         val line: PushMessage.Line,
@@ -21,6 +22,7 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
         val from: String?,
         val to: String?,
         val departures: List<Departure>?,
+        val reach: Duration? = null,
     )
 
     data class Departure(
@@ -54,6 +56,7 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
                         leg.stringOrNull("from"),
                         leg.stringOrNull("to"),
                         if (leg.isNull("departures")) null else leg.getJSONArray("departures").objects().map(::departure),
+                        if (leg.isNull("reach")) null else Duration.ofMinutes(leg.getLong("reach")),
                     )
                 },
             )

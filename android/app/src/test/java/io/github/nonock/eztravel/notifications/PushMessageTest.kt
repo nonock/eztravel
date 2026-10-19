@@ -89,6 +89,7 @@ class PushMessageTest {
         destination = "Gare Centrale",
         from = "Les Aubépines",
         aimed = Instant.parse("2026-11-03T06:52:00Z"),
+        expected = Instant.parse("2026-11-03T06:52:00Z"),
     )
 
     /** Ten minutes after the train was due. */
@@ -115,6 +116,33 @@ class PushMessageTest {
     }
 
     @Test
+    fun readsAReminderToLeave() {
+        val late = train.copy(expected = Instant.parse("2026-11-03T06:54:00Z"))
+        assertEquals(
+            PushMessage.Leave(late, Instant.parse("2026-11-03T06:42:00Z"), "2", live = true, until = Instant.parse("2026-11-03T07:04:00Z")),
+            PushMessage.parse(fixture("leave")),
+        )
+        val unknown = PushMessage.parse(fixture("leave") - "platform" - "live") as PushMessage.Leave
+        assertNull(unknown.platform)
+        assertEquals(false, unknown.live)
+        assertNull(PushMessage.parse(fixture("leave") - "leave"))
+        assertNull(PushMessage.parse(fixture("leave") - "line"))
+        // An older backend sent no expected time: the timetable's stands for it.
+        assertNull((PushMessage.parse(fixture("leave") - "expected") as PushMessage.Leave).train.expected)
+    }
+
+    @Test
+    fun readsALateTrain() {
+        assertEquals(
+            PushMessage.TrainLate(train.copy(expected = Instant.parse("2026-11-03T06:56:00Z")), until = Instant.parse("2026-11-03T07:06:00Z")),
+            PushMessage.parse(fixture("train_late")),
+        )
+        // Late by how much, it must say.
+        assertNull(PushMessage.parse(fixture("train_late") - "expected"))
+        assertNull(PushMessage.parse(fixture("train_late") - "from"))
+    }
+
+    @Test
     fun aTrainWithoutWhatNamesItIsIgnored() {
         for (missing in listOf("line", "destination", "from", "aimed")) {
             assertNull(missing, PushMessage.parse(fixture("train_cancelled") - missing))
@@ -128,6 +156,8 @@ class PushMessageTest {
         // The same tag as the backend's collapse key: neither a line's state nor another train.
         assertEquals("train-L-2026-11-03T06:52:00Z", PushMessage.parse(fixture("train_cancelled"))!!.tag)
         assertEquals("train-L-2026-11-03T06:52:00Z", PushMessage.parse(fixture("train_back"))!!.tag)
+        assertEquals("train-L-2026-11-03T06:52:00Z", PushMessage.parse(fixture("leave"))!!.tag)
+        assertEquals("train-L-2026-11-03T06:52:00Z", PushMessage.parse(fixture("train_late"))!!.tag)
     }
 
     @Test

@@ -86,6 +86,48 @@ class NotificationTextTest {
         assertEquals("PALO to Gare Centrale, from Les Aubépines: announced as cancelled.", announced.text(english, paris).body)
     }
 
+    private fun clock(instant: Instant, locale: Locale) =
+        DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale).format(instant.atZone(paris))
+
+    @Test
+    fun theReminderSaysWhenToLeaveAndOnlyWhatIsKnownOfTheTrain() {
+        val leave = Instant.parse("2026-11-03T06:40:00Z")
+        val onTime = PushMessage.Leave(palo.copy(expected = palo.aimed), leave, "2", live = true, until = null)
+        assertEquals(
+            NotificationText("Ligne L : partir à 07:40", "PALO de 07:52 vers Gare Centrale, voie 2. Annoncé à l’heure."),
+            onTime.text(french, paris),
+        )
+        assertEquals(
+            NotificationText(
+                "Line L: leave at ${clock(leave, Locale.ENGLISH)}",
+                "PALO at ${clock(palo.aimed, Locale.ENGLISH)} to Gare Centrale, platform 2. Announced on time.",
+            ),
+            onTime.text(english, paris),
+        )
+        val late = onTime.copy(train = palo.copy(expected = Instant.parse("2026-11-03T06:54:00Z")))
+        assertEquals("PALO de 07:52 vers Gare Centrale, voie 2. Annoncé avec 2 min de retard.", late.text(french, paris).body)
+        assertEquals("Announced 2 min late.", late.text(english, paris).body.substringAfter(". "))
+        val scheduled = PushMessage.Leave(palo.copy(mission = null, expected = null), leave, null, live = false, until = null)
+        assertEquals("Train de 07:52 vers Gare Centrale. Toujours au programme, pas encore suivi en direct.", scheduled.text(french, paris).body)
+        assertEquals("Still scheduled, not followed live yet.", scheduled.text(english, paris).body.substringAfter(". "))
+    }
+
+    @Test
+    fun aLateTrainSaysWhenItNowLeaves() {
+        val late = PushMessage.TrainLate(palo.copy(expected = Instant.parse("2026-11-03T06:56:00Z")), null)
+        assertEquals(
+            NotificationText("Ligne L : votre train de 07:52 a du retard", "PALO vers Gare Centrale : départ annoncé à 07:56, 4 min de retard."),
+            late.text(french, paris),
+        )
+        assertEquals(
+            NotificationText(
+                "Line L: your ${clock(palo.aimed, Locale.ENGLISH)} train runs late",
+                "PALO to Gare Centrale: now leaving at ${clock(late.train.expected!!, Locale.ENGLISH)}, 4 min late.",
+            ),
+            late.text(english, paris),
+        )
+    }
+
     @Test
     fun aTrainBackSaysItRunsAfterAll() {
         val back = PushMessage.TrainBack(palo.copy(mission = null), null)

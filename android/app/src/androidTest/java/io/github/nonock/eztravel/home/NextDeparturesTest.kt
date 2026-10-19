@@ -1,7 +1,9 @@
 package io.github.nonock.eztravel.home
 
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.filter
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -20,6 +22,7 @@ import io.github.nonock.eztravel.notifications.PushMessage.Mode
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.time.Duration
 import java.time.Instant
 
 @RunWith(AndroidJUnit4::class)
@@ -60,11 +63,13 @@ class NextDeparturesTest {
                 "Gare Centrale",
                 listOf(
                     Departure(at("06:52:00"), at("06:52:00"), at("07:04:00"), "PALO", "Gare Centrale", "2", State.ON_TIME),
+                    Departure(at("07:02:00"), at("07:02:00"), at("07:14:00"), "PILO", "Gare Centrale", "2", State.ON_TIME),
                     Departure(at("07:07:00"), at("07:11:00"), at("07:23:00"), "PILO", "Gare Centrale", "2", State.DELAYED),
                     Departure(at("07:22:00"), at("07:22:00"), at("07:34:00"), "PALO", "Gare Centrale", "2", State.CANCELLED),
                     // Said late, with no time yet.
                     Departure(at("07:37:00"), at("07:37:00"), null, null, "Les Tilleuls", null, State.DELAYED),
                 ),
+                reach = Duration.ofMinutes(12),
             ),
             Leg(
                 metro,
@@ -97,6 +102,21 @@ class NextDeparturesTest {
         waitFor(hasContentDescription(text(R.string.line_metro, "X")) and hasText(text(R.string.departures_leg, "Gare Centrale", "Mairie")))
         waitFor(hasText(text(R.string.departures_arriving)) and hasText("Porte Nord"))
         waitFor(hasText(text(R.string.departures_minutes, 3)) and hasText("Porte Nord"))
+    }
+
+    @Test
+    fun aLegWithItsTimeToThePlatformSaysWhenToLeave() {
+        show(FakeBackend(departures = morning))
+        // Twelve minutes to the platform, at 6:50.
+        waitFor(hasText(at("06:52:00").clock()) and hasText(text(R.string.departures_too_late)))
+        waitFor(hasText(at("07:02:00").clock()) and hasText(text(R.string.departures_leave_now)))
+        waitFor(hasText(at("07:07:00").clock()) and hasText(text(R.string.departures_leave_in, 9)))
+        waitFor(hasText(at("07:37:00").clock()) and hasText(text(R.string.departures_leave_in, 35)))
+        // Nothing to leave for: a cancelled train, or the metro without a time to its platform.
+        compose.onNode(hasText(at("07:22:00").clock()) and hasText(text(R.string.departures_leave_in, 20))).assertDoesNotExist()
+        compose.onAllNodes(hasText(text(R.string.departures_leave_in, 3).substringBefore("3"), substring = true))
+            .filter(hasText("Porte Nord"))
+            .assertCountEquals(0)
     }
 
     @Test
