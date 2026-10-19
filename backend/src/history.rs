@@ -91,7 +91,9 @@ pub fn records(notification: &Notification) -> Vec<Record> {
         | Notification::Outage
         | Notification::Recovered
         | Notification::TrainCancelled { .. }
-        | Notification::TrainBack { .. } => vec![],
+        | Notification::TrainBack { .. }
+        | Notification::Leave { .. }
+        | Notification::Late { .. } => vec![],
     }
 }
 
@@ -292,7 +294,13 @@ mod tests {
             aimed: "2026-11-03T06:52:00Z".parse().unwrap(),
             expected: "2026-11-03T06:52:00Z".parse().unwrap(),
         };
-        assert_eq!(records(&Notification::TrainBack { train }), []);
+        assert_eq!(
+            records(&Notification::TrainBack {
+                train: train.clone()
+            }),
+            []
+        );
+        assert_eq!(records(&Notification::Late { train }), []);
     }
 
     #[test]

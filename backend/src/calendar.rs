@@ -68,6 +68,15 @@ pub struct WatchWindows {
     pub inbound: Window,
 }
 
+/// When each way is usually set off on, if said: a reminder tells when to
+/// leave for the first train that can be caught then.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Leave {
+    pub outbound: Option<Time>,
+    pub inbound: Option<Time>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
     Outbound,

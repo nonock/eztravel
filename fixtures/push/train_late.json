@@ -1,0 +1,11 @@
+{
+  "type": "train_late",
+  "line": "L",
+  "mode": "train",
+  "mission": "PALO",
+  "destination": "Gare Centrale",
+  "from": "Les Aubépines",
+  "aimed": "2026-11-03T06:52:00Z",
+  "expected": "2026-11-03T06:56:00Z",
+  "until": "2026-11-03T07:06:00Z"
+}

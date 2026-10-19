@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use jiff::Timestamp;
 use jiff::civil::{Date, DateTime};
+use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -21,6 +21,7 @@ use crate::calendar::{Calendar, Direction, Phase, phase, watched_direction};
 use crate::config::Config;
 use crate::departures::{NextDepartures, leg_stops, monitoring_ref, one_way};
 use crate::history::{self, Entry, History};
+use crate::leaving::{Leaving, remind};
 use crate::prim::Prim;
 use crate::prim::PrimError;
 use crate::profile::{Profile, Store};
@@ -37,6 +38,7 @@ const PROFILE_FILE: &str = "profile.json";
 const HEALTH_FILE: &str = "health.json";
 const HISTORY_FILE: &str = "history.json";
 const TRAINS_FILE: &str = "trains.json";
+const LEAVING_FILE: &str = "leaving.json";
 
 pub struct Service {
     config: Config,
@@ -46,6 +48,7 @@ pub struct Service {
     data_dir: PathBuf,
     state: State,
     trains: Trains,
+    leaving: Leaving,
     health: Health,
     status: Arc<Mutex<Snapshot>>,
     history: Arc<History>,
@@ -94,6 +97,7 @@ impl Service {
         Self {
             state: load(&data_dir.join(STATE_FILE)).unwrap_or_default(),
             trains: load(&data_dir.join(TRAINS_FILE)).unwrap_or_default(),
+            leaving: load(&data_dir.join(LEAVING_FILE)).unwrap_or_default(),
             health: load(&data_dir.join(HEALTH_FILE)).unwrap_or_default(),
             status: Arc::default(),
             history: Arc::new(History::open(&data_dir.join(HISTORY_FILE))),
@@ -278,10 +282,12 @@ impl Service {
         // Missing trains must not hold back what the lines say.
         let seen = self.read_trains(direction, now).await;
         let mut trains = self.trains.clone();
+        let mut leaving = self.leaving.clone();
         if let Ok(seen) = &seen {
             let key = (local.date(), direction);
             let window = self.window_bounds(local, direction);
             notifications.extend(follow(&mut trains, key, window, now, seen, true));
+            notifications.extend(self.reminders(&mut leaving, key, now, local, seen));
             if health.recovering() {
                 notifications.insert(0, Notification::Recovered);
             }
@@ -293,6 +299,10 @@ impl Service {
         }
         self.commit(next);
         self.commit_trains(trains);
+        if leaving != self.leaving {
+            self.leaving = leaving;
+            save(&self.data_dir.join(LEAVING_FILE), &self.leaving);
+        }
         match seen {
             Ok(_) => {
                 health.checked(now);
@@ -355,6 +365,45 @@ impl Service {
             });
         }
         Ok(seen)
+    }
+
+    /// The reminder to leave, when the way has a usual time to set off: for the
+    /// first ride with its time to the platform, if its station's trains are read.
+    fn reminders(
+        &self,
+        leaving: &mut Leaving,
+        key: (Date, Direction),
+        now: Timestamp,
+        local: DateTime,
+        seen: &[Seen],
+    ) -> Vec<Notification> {
+        let (legs, usual) = match key.1 {
+            Direction::Outbound => (&self.config.outbound, self.config.leave.outbound),
+            Direction::Inbound => (&self.config.inbound, self.config.leave.inbound),
+        };
+        let reached = legs
+            .iter()
+            .find_map(|leg| Some((leg, leg.reach?)))
+            .and_then(|(leg, reach)| {
+                Some((seen.iter().find(|seen| seen.line == leg.line)?, reach))
+            });
+        let (Some(usual), Some((seen, reach))) = (usual, reached) else {
+            return vec![];
+        };
+        let usual = local
+            .date()
+            .to_datetime(usual)
+            .to_zoned(self.config.time_zone())
+            .expect("a day's local time is within range")
+            .timestamp();
+        remind(
+            leaving,
+            key,
+            now,
+            seen,
+            SignedDuration::from_mins(i64::from(reach)),
+            usual,
+        )
     }
 
     /// When the window of `direction` ends on the day of `local`.
@@ -1264,6 +1313,24 @@ mod tests {
         assert_eq!(service.poll(tuesday("05:45")).await, Poll::Sent(1));
         // Remembered across a restart: not said again.
         assert_eq!(setup.service().poll(tuesday("05:47")).await, Poll::Sent(0));
+    }
+
+    #[tokio::test]
+    async fn the_reminder_to_leave_comes_a_few_minutes_before() {
+        let setup = Setup::with(train_routes_server().await).await;
+        setup.prim_answers(200, false, 3).await;
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(stop_list(&["j1"])))
+            .mount(&setup.server)
+            .await;
+        setup.firebase_answers_to("leave", 200, 1).await;
+        let mut service = setup.service();
+        // Leaving at 7:30 in Paris or later, the 7:52 is the train: twelve minutes to its
+        // platform, so leave at 7:40, and hear about it from 7:35.
+        assert_eq!(service.poll(tuesday("06:34")).await, Poll::Sent(0));
+        assert_eq!(service.poll(tuesday("06:36")).await, Poll::Sent(1));
+        // Remembered across a restart.
+        assert_eq!(setup.service().poll(tuesday("06:38")).await, Poll::Sent(0));
     }
 
     #[tokio::test]

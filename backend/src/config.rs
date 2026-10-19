@@ -6,7 +6,7 @@
 use jiff::tz::TimeZone;
 use serde::Deserialize;
 
-use crate::calendar::{Calendar, Schedule, WatchWindows};
+use crate::calendar::{Calendar, Leave, Schedule, WatchWindows};
 use crate::push::LineLabel;
 use crate::relevance::Leg;
 
@@ -17,6 +17,8 @@ pub struct Config {
     pub time_zone: String,
     pub calendar: Calendar,
     pub windows: WatchWindows,
+    #[serde(default)]
+    pub leave: Leave,
     #[serde(default)]
     pub lines: Vec<LineLabel>,
     pub outbound: Vec<Leg>,
@@ -38,6 +40,29 @@ impl Config {
         ] {
             if window.trains_from.is_some_and(|from| from > window.start) {
                 return Err(format!("windows.{name}: trains_from comes after start"));
+            }
+        }
+        for (name, leave, window, legs) in [
+            (
+                "outbound",
+                config.leave.outbound,
+                config.windows.outbound,
+                &config.outbound,
+            ),
+            (
+                "inbound",
+                config.leave.inbound,
+                config.windows.inbound,
+                &config.inbound,
+            ),
+        ] {
+            let Some(leave) = leave else { continue };
+            // Outside the window, no poll would ever send the reminder.
+            if leave < window.start || leave >= window.end {
+                return Err(format!("leave.{name}: {leave} is outside its window"));
+            }
+            if !legs.iter().any(|leg| leg.reach.is_some()) {
+                return Err(format!("leave.{name}: no ride of the way has a reach"));
             }
         }
         Ok(config)
@@ -133,6 +158,13 @@ mod tests {
             }
         );
         assert_eq!(config.inbound.len(), 2);
+        assert_eq!(
+            config.leave,
+            Leave {
+                outbound: Some(time(7, 30, 0, 0)),
+                inbound: None
+            }
+        );
         assert_eq!(config.outbound[1].reach, None);
         assert_eq!(config.time_zone(), TimeZone::get("Europe/Paris").unwrap());
         assert_eq!(config.line_codes(), ["C01740", "C02000"]);
@@ -186,6 +218,18 @@ away_through = 2026-12-31",
         let windows =
             Config::parse(&EXAMPLE.replace("inbound = { start", "evening = { start")).unwrap_err();
         assert!(windows.contains("evening"), "{windows}");
+        // A usual time to leave needs a ride with its time to the platform, during the window.
+        let unreachable = Config::parse(&EXAMPLE.replace("reach = 12", "")).unwrap_err();
+        assert!(unreachable.contains("leave.outbound"), "{unreachable}");
+        let late = Config::parse(&EXAMPLE.replace("outbound = \"07:30\"", "outbound = \"08:15\""))
+            .unwrap_err();
+        assert!(late.contains("leave.outbound"), "{late}");
+        let early = Config::parse(&EXAMPLE.replace("outbound = \"07:30\"", "outbound = \"06:44\""))
+            .unwrap_err();
+        assert!(early.contains("leave.outbound"), "{early}");
+        let evening =
+            Config::parse(&EXAMPLE.replace("outbound = \"07:30\"", "inbound = \"16:30\"")).unwrap();
+        assert_eq!(evening.leave.inbound, Some(time(16, 30, 0, 0)));
         // Trains are followed before their window, not after it opens.
         let late =
             Config::parse(&EXAMPLE.replace("trains_from = \"05:30\"", "trains_from = \"07:00\""))

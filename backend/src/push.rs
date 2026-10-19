@@ -151,6 +151,24 @@ pub fn data(
             put("type", "train_back");
             describe_train(train, labels, &mut put);
         }
+        Notification::Leave {
+            train,
+            at,
+            platform,
+            live,
+        } => {
+            put("type", "leave");
+            describe_train(train, labels, &mut put);
+            put("leave", &at.to_string());
+            if let Some(platform) = platform {
+                put("platform", platform);
+            }
+            put("live", if *live { "true" } else { "false" });
+        }
+        Notification::Late { train } => {
+            put("type", "train_late");
+            describe_train(train, labels, &mut put);
+        }
     }
     data
 }
@@ -165,6 +183,7 @@ fn describe_train(train: &Train, labels: &[LineLabel], put: &mut dyn FnMut(&str,
     put("destination", &train.destination);
     put("from", &train.from);
     put("aimed", &train.aimed.to_string());
+    put("expected", &train.expected.to_string());
     let until = train.aimed.max(train.expected) + TRAIN_SHOWN_AFTER;
     put("until", &until.to_string());
 }
@@ -210,16 +229,12 @@ pub fn severity_name(severity: Severity) -> &'static str {
 /// The body of an FCM v1 `messages:send` request.
 pub fn message(device: &str, data: &BTreeMap<String, String>) -> serde_json::Value {
     // While the phone is offline, a newer message about the same line replaces the older one.
-    let collapse_key = match (data.get("line"), data.get("type").map(String::as_str)) {
+    let kind = data.get("type").map(String::as_str);
+    let collapse_key = match (data.get("line"), data.get("aimed"), kind) {
         // A train's own: it must not replace its line's state, nor another train.
-        (Some(line), Some("train_cancelled" | "train_back")) => {
-            format!(
-                "train-{line}-{}",
-                data.get("aimed").map_or("", String::as_str)
-            )
-        }
-        (Some(line), _) => format!("line-{line}"),
-        (None, Some("planned")) => "planned".to_string(),
+        (Some(line), Some(aimed), _) => format!("train-{line}-{aimed}"),
+        (Some(line), None, _) => format!("line-{line}"),
+        (None, _, Some("planned")) => "planned".to_string(),
         // An outage and its end.
         _ => "watch".to_string(),
     };
@@ -749,8 +764,37 @@ mod tests {
     }
 
     #[test]
+    fn the_reminder_says_when_to_leave_and_how_the_train_runs() {
+        let at = |time: &str| -> Timestamp { format!("2026-11-03T{time}:00Z").parse().unwrap() };
+        let leave = |platform: Option<&str>, live| Notification::Leave {
+            train: Train {
+                expected: at("06:54"),
+                ..train(Some("PALO"))
+            },
+            at: at("06:42"),
+            platform: platform.map(String::from),
+            live,
+        };
+        assert_eq!(
+            data(&leave(Some("2"), true), &labels(), until()),
+            fixture("leave")
+        );
+        let unknown = data(&leave(None, false), &labels(), until());
+        assert_eq!(unknown["live"], "false");
+        assert!(!unknown.contains_key("platform"));
+        let late = Notification::Late {
+            train: Train {
+                expected: at("06:56"),
+                ..train(Some("PALO"))
+            },
+        };
+        assert_eq!(data(&late, &labels(), until()), fixture("train_late"));
+    }
+
+    #[test]
     fn a_train_back_replaces_its_cancellation_only() {
-        for name in ["train_cancelled", "train_back"] {
+        // And a reminder or a delay replaces what was said of the same train.
+        for name in ["train_cancelled", "train_back", "leave", "train_late"] {
             assert_eq!(
                 message("t", &fixture(name))["message"]["android"]["collapse_key"],
                 "train-L-2026-11-03T06:52:00Z"

@@ -10,8 +10,8 @@
 //! Planned disruptions (works, adapted timetables over several days) would
 //! keep a line "disrupted" all day: they are announced once a day instead.
 
-use jiff::SignedDuration;
 use jiff::civil::{Date, DateTime};
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::calendar::Direction;
@@ -60,6 +60,17 @@ pub enum Notification {
     },
     /// A train notified as cancelled runs after all.
     TrainBack {
+        train: Train,
+    },
+    /// Time to leave for `train` `at` the given time. `live` when PRIM follows it live.
+    Leave {
+        train: Train,
+        at: Timestamp,
+        platform: Option<String>,
+        live: bool,
+    },
+    /// The train of the reminder now runs late.
+    Late {
         train: Train,
     },
 }
