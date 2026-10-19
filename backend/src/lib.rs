@@ -2,6 +2,7 @@ pub mod alerts;
 pub mod api;
 pub mod calendar;
 pub mod config;
+pub mod departures;
 pub mod disruptions;
 pub mod history;
 pub mod http;

@@ -5,14 +5,22 @@ use std::time::Duration;
 use jiff::civil::DateTime;
 use serde::Deserialize;
 
+use crate::departures::{self, Visit};
 use crate::disruptions::{Disruption, parse};
 use crate::http;
 use crate::relevance::{Route, parse_route};
 
+#[derive(Clone)]
 pub struct Prim {
     http: reqwest::Client,
     base_url: String,
     key: String,
+}
+
+/// A stop's visits, and how many requests the daily quota still allows.
+pub struct Visits {
+    pub visits: Vec<Visit>,
+    pub remaining: Option<u32>,
 }
 
 #[derive(Debug)]
@@ -42,6 +50,15 @@ impl Prim {
         parse(&body, lines).map_err(PrimError::Format)
     }
 
+    /// The calls of the coming hours at a stop (`STIF:StopArea:SP:…:` or `STIF:StopPoint:Q:…:`).
+    pub async fn stop_visits(&self, monitoring_ref: &str) -> Result<Visits, PrimError> {
+        let (body, remaining) = self
+            .counted_get(&format!("/stop-monitoring?MonitoringRef={monitoring_ref}"))
+            .await?;
+        let visits = departures::parse(&body).map_err(PrimError::Format)?;
+        Ok(Visits { visits, remaining })
+    }
+
     /// The routes of a line, with their stops in travel order, as run from `from`.
     ///
     /// All or nothing: on any failure the caller keeps its previous routes.
@@ -67,6 +84,11 @@ impl Prim {
     }
 
     async fn get(&self, path: &str) -> Result<Vec<u8>, PrimError> {
+        Ok(self.counted_get(path).await?.0)
+    }
+
+    /// The body, and the requests the daily quota still allows when PRIM says.
+    async fn counted_get(&self, path: &str) -> Result<(Vec<u8>, Option<u32>), PrimError> {
         let response = self
             .http
             .get(format!("{}{path}", self.base_url))
@@ -77,12 +99,18 @@ impl Prim {
         if !response.status().is_success() {
             return Err(PrimError::Status(response.status().as_u16()));
         }
+        let remaining = response
+            .headers()
+            .get("x-ratelimit-remaining-day")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse().ok());
         // A body cut short does not parse: it still ends as an error, never as an empty list.
-        Ok(response
+        let body = response
             .bytes()
             .await
             .map(|bytes| bytes.to_vec())
-            .unwrap_or_default())
+            .unwrap_or_default();
+        Ok((body, remaining))
     }
 }
 
@@ -215,6 +243,72 @@ mod tests {
             .await;
         let prim = Prim::with_timeout(&server.uri(), KEY, std::time::Duration::from_millis(100));
         assert_eq!(outcome(prim.disruptions(&["C01740"]).await), "http");
+    }
+
+    fn stop_answer() -> serde_json::Value {
+        serde_json::json!({ "Siri": { "ServiceDelivery": { "StopMonitoringDelivery": [{ "MonitoredStopVisit": [{
+            "RecordedAtTime": "2026-11-03T06:48:00.000Z",
+            "MonitoredVehicleJourney": {
+                "LineRef": { "value": "STIF:Line::C01740:" },
+                "FramedVehicleJourneyRef": { "DatedVehicleJourneyRef": "j1" },
+                "DestinationName": [{ "value": "Gare Centrale" }],
+                "MonitoredCall": { "ExpectedDepartureTime": "2026-11-03T06:52:00.000Z", "DepartureStatus": "onTime" }
+            }
+        }] }] } } })
+    }
+
+    #[tokio::test]
+    async fn reads_the_visits_of_a_stop_and_the_quota_left() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/stop-monitoring"))
+            .and(query_param("MonitoringRef", "STIF:StopArea:SP:100:"))
+            .and(header("apikey", KEY))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(stop_answer())
+                    .insert_header("x-ratelimit-remaining-day", "994"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(path("/stop-monitoring"))
+            .and(query_param("MonitoringRef", "STIF:StopPoint:Q:300:"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(stop_answer()))
+            .mount(&server)
+            .await;
+        let prim = Prim::new(&server.uri(), KEY);
+        let station = prim.stop_visits("STIF:StopArea:SP:100:").await.unwrap();
+        assert_eq!(
+            station
+                .visits
+                .iter()
+                .map(|v| v.journey.as_str())
+                .collect::<Vec<_>>(),
+            ["j1"]
+        );
+        assert_eq!(station.remaining, Some(994));
+        let platform = prim.stop_visits("STIF:StopPoint:Q:300:").await.unwrap();
+        assert_eq!(platform.remaining, None);
+    }
+
+    #[tokio::test]
+    async fn a_stop_that_cannot_be_read_is_an_error() {
+        let server = MockServer::start().await;
+        Mock::given(path("/stop-monitoring"))
+            .and(query_param("MonitoringRef", "STIF:StopArea:SP:100:"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+        let prim = Prim::new(&server.uri(), KEY);
+        assert_eq!(
+            outcome(prim.stop_visits("STIF:StopArea:SP:100:").await),
+            "format"
+        );
+        // No mock for this one: a 404.
+        assert_eq!(
+            outcome(prim.stop_visits("STIF:StopArea:SP:200:").await),
+            "Status(404)"
+        );
     }
 
     async fn navitia() -> MockServer {

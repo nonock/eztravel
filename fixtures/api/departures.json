@@ -1,0 +1,68 @@
+{
+  "direction": "outbound",
+  "legs": [
+    {
+      "line": "L",
+      "mode": "train",
+      "color": "#7B61C9",
+      "from": "Les Aubépines",
+      "to": "Gare Centrale",
+      "departures": [
+        {
+          "aimed": "2026-11-03T06:52:00Z",
+          "expected": "2026-11-03T06:52:00Z",
+          "arrival": "2026-11-03T07:04:00Z",
+          "mission": "PALO",
+          "destination": "Gare Centrale",
+          "platform": "2",
+          "status": "on_time"
+        },
+        {
+          "aimed": "2026-11-03T07:07:00Z",
+          "expected": "2026-11-03T07:11:00Z",
+          "arrival": "2026-11-03T07:23:00Z",
+          "mission": "PILO",
+          "destination": "Gare Centrale",
+          "platform": "2",
+          "status": "delayed"
+        },
+        {
+          "aimed": "2026-11-03T07:22:00Z",
+          "expected": "2026-11-03T07:22:00Z",
+          "arrival": "2026-11-03T07:34:00Z",
+          "mission": "PALO",
+          "destination": "Gare Centrale",
+          "platform": "2",
+          "status": "cancelled"
+        }
+      ]
+    },
+    {
+      "line": "X",
+      "mode": "metro",
+      "color": "#E07A1F",
+      "from": "Gare Centrale",
+      "to": "Mairie",
+      "departures": [
+        {
+          "aimed": null,
+          "expected": "2026-11-03T06:53:30Z",
+          "arrival": null,
+          "mission": null,
+          "destination": "Porte Nord",
+          "platform": null,
+          "status": "on_time"
+        },
+        {
+          "aimed": null,
+          "expected": "2026-11-03T06:58:10Z",
+          "arrival": null,
+          "mission": null,
+          "destination": "Porte Nord",
+          "platform": null,
+          "status": "on_time"
+        }
+      ]
+    }
+  ]
+}

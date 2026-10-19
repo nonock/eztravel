@@ -19,6 +19,7 @@ use crate::alerts::{Commute, Notification, State, WatchedLeg, decide};
 use crate::api;
 use crate::calendar::{Calendar, Direction, watched_direction};
 use crate::config::Config;
+use crate::departures::NextDepartures;
 use crate::history::{self, Entry, History};
 use crate::prim::Prim;
 use crate::profile::{Profile, Store};
@@ -44,6 +45,7 @@ pub struct Service {
     health: Health,
     status: Arc<Mutex<Snapshot>>,
     history: Arc<History>,
+    departures: Arc<NextDepartures>,
     routes: BTreeMap<String, Vec<Route>>,
     routes_day: Option<Date>,
 }
@@ -78,12 +80,15 @@ impl Service {
         store: Arc<Store>,
         data_dir: &Path,
     ) -> Self {
+        let routes: BTreeMap<String, Vec<Route>> =
+            load(&data_dir.join(ROUTES_FILE)).unwrap_or_default();
         Self {
             state: load(&data_dir.join(STATE_FILE)).unwrap_or_default(),
             health: load(&data_dir.join(HEALTH_FILE)).unwrap_or_default(),
             status: Arc::default(),
             history: Arc::new(History::open(&data_dir.join(HISTORY_FILE))),
-            routes: load(&data_dir.join(ROUTES_FILE)).unwrap_or_default(),
+            departures: Arc::new(NextDepartures::new(&config, prim.clone(), routes.clone())),
+            routes,
             routes_day: None,
             config,
             prim,
@@ -130,6 +135,7 @@ impl Service {
                 service.status(),
                 schedule,
                 service.history(),
+                service.departures(),
                 app_key,
             ),
             service,
@@ -139,6 +145,11 @@ impl Service {
     /// What was sent, and windows that closed on a disruption.
     pub fn history(&self) -> Arc<History> {
         self.history.clone()
+    }
+
+    /// The next departures, read when the app asks, on the stops of the routes.
+    pub fn departures(&self) -> Arc<NextDepartures> {
+        self.departures.clone()
     }
 
     /// What the last poll saw, updated after each poll.
@@ -395,6 +406,7 @@ impl Service {
             }
         }
         save(&self.data_dir.join(ROUTES_FILE), &self.routes);
+        self.departures.set_routes(self.routes.clone());
         for leg in self.config.outbound.iter().chain(&self.config.inbound) {
             let has =
                 |route: &Route, area: &str| route.stops.iter().any(|stop| stop.stop_area == area);
@@ -1060,6 +1072,20 @@ mod tests {
         assert_eq!(service.poll(at(TWO_MINUTES_LATER)).await, Poll::Sent(0));
         let saved = std::fs::read_to_string(setup.dir.path().join("routes.json")).unwrap();
         assert!(saved.contains("stop_area:IDFM:71250"), "{saved}");
+    }
+
+    #[tokio::test]
+    async fn the_departures_follow_the_routes_saved_then_read() {
+        let setup = Setup::with(routes_server(200, 1).await).await;
+        setup.prim_answers(200, false, 1).await;
+        let saved = r#"{"C01740":[{"stops":[{"stop_point":"sp:1","stop_area":"stop_area:IDFM:71100","name":"Saved"},{"stop_point":"sp:2","stop_area":"stop_area:IDFM:71370","name":"Saved too"}]}]}"#;
+        std::fs::write(setup.dir.path().join("routes.json"), saved).unwrap();
+        let mut service = setup.service();
+        let departures = service.departures();
+        let from = async |now| departures.view(at(now)).await.legs[0].from.clone();
+        assert_eq!(from(MORNING).await.as_deref(), Some("Saved"));
+        service.poll(at(MORNING)).await;
+        assert_eq!(from(TWO_MINUTES_LATER).await.as_deref(), Some("71100"));
     }
 
     #[tokio::test]

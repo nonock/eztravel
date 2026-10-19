@@ -1,5 +1,5 @@
 //! The API the app calls: register the phone, read and set the time away,
-//! and see what the backend sees.
+//! see what the backend sees, and the next departures.
 //!
 //! Every request carries the app key (`Authorization: Bearer …`), compiled
 //! into the user's own build of the app and kept out of the repository.
@@ -20,6 +20,7 @@ use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 
 use crate::calendar::Schedule;
+use crate::departures::{self, NextDepartures};
 use crate::history::History;
 use crate::profile::Store;
 use crate::watch::{Snapshot, View};
@@ -48,6 +49,7 @@ struct Shared {
     status: Arc<Mutex<Snapshot>>,
     schedule: Arc<Schedule>,
     history: Arc<History>,
+    departures: Arc<NextDepartures>,
 }
 
 impl FromRef<Shared> for Arc<Store> {
@@ -74,11 +76,18 @@ impl FromRef<Shared> for Arc<Schedule> {
     }
 }
 
+impl FromRef<Shared> for Arc<NextDepartures> {
+    fn from_ref(shared: &Shared) -> Self {
+        shared.departures.clone()
+    }
+}
+
 pub fn router(
     store: Arc<Store>,
     status: Arc<Mutex<Snapshot>>,
     schedule: Schedule,
     history: Arc<History>,
+    departures: Arc<NextDepartures>,
     key: String,
 ) -> Router {
     Router::new()
@@ -86,12 +95,14 @@ pub fn router(
         .route("/settings", get(settings).put(set_settings))
         .route("/status", get(status_now))
         .route("/history", get(sent))
+        .route("/departures", get(next_departures))
         .layer(middleware::from_fn_with_state(Arc::new(key), authorize))
         .with_state(Shared {
             store,
             status,
             schedule: Arc::new(schedule),
             history,
+            departures,
         })
 }
 
@@ -168,6 +179,11 @@ async fn sent(State(history): State<Arc<History>>) -> Json<Sent> {
     Json(Sent { entries })
 }
 
+/// Read from PRIM when asked, at most once a minute per stop.
+async fn next_departures(State(departures): State<Arc<NextDepartures>>) -> Json<departures::View> {
+    Json(departures.view(Timestamp::now()).await)
+}
+
 async fn set_settings(
     State(store): State<Arc<Store>>,
     Json(settings): Json<Settings>,
@@ -181,6 +197,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::history::History;
+    use crate::prim::Prim;
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode};
     use http_body_util::BodyExt;
@@ -194,6 +211,7 @@ mod tests {
         store: Arc<Store>,
         status: Arc<Mutex<Snapshot>>,
         history: Arc<History>,
+        departures: Arc<NextDepartures>,
         _dir: tempfile::TempDir,
     }
 
@@ -201,10 +219,17 @@ mod tests {
         fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
             let store = Arc::new(Store::open(&dir.path().join("profile.json"), &[]));
+            // No routes yet: the stops of the legs are unknown, and PRIM is not called.
+            let departures = NextDepartures::new(
+                &Config::parse(include_str!("../config.example.toml")).unwrap(),
+                Prim::new("http://127.0.0.1:9", "key"),
+                Default::default(),
+            );
             Api {
                 store,
                 status: Arc::default(),
                 history: Arc::new(History::open(&dir.path().join("history.json"))),
+                departures: Arc::new(departures),
                 _dir: dir,
             }
         }
@@ -234,6 +259,7 @@ mod tests {
                 self.status.clone(),
                 schedule,
                 self.history.clone(),
+                self.departures.clone(),
                 KEY.into(),
             )
             .oneshot(request)
@@ -264,6 +290,7 @@ mod tests {
             (Method::PUT, "/settings", Some(r#"{"away_through":null}"#)),
             (Method::GET, "/status", None),
             (Method::GET, "/history", None),
+            (Method::GET, "/departures", None),
         ] {
             for authorization in [
                 None,
@@ -430,6 +457,17 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&body).unwrap(),
             fixture
         );
+    }
+
+    #[tokio::test]
+    async fn the_departures_are_read_when_asked() {
+        let api = Api::new();
+        let (status, body) = api.authorized(Method::GET, "/departures", None).await;
+        assert_eq!(status, StatusCode::OK);
+        let view: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let legs = view["legs"].as_array().unwrap();
+        assert_eq!(legs.len(), 2);
+        assert!(legs.iter().all(|leg| leg["departures"].is_null()), "{body}");
     }
 
     #[tokio::test]

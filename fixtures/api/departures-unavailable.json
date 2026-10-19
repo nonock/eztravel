@@ -1,0 +1,21 @@
+{
+  "direction": "inbound",
+  "legs": [
+    {
+      "line": "X",
+      "mode": "metro",
+      "color": "#E07A1F",
+      "from": null,
+      "to": null,
+      "departures": null
+    },
+    {
+      "line": "L",
+      "mode": "train",
+      "color": null,
+      "from": "Gare Centrale",
+      "to": "Les Aubépines",
+      "departures": []
+    }
+  ]
+}

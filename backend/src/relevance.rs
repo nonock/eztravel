@@ -32,7 +32,7 @@ pub struct Leg {
 }
 
 impl Route {
-    fn area_index(&self, stop_area: &str) -> Option<usize> {
+    pub(crate) fn area_index(&self, stop_area: &str) -> Option<usize> {
         self.stops
             .iter()
             .position(|stop| stop.stop_area == stop_area)
