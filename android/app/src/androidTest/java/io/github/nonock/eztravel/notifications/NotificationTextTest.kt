@@ -10,6 +10,10 @@ import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Locale
 
 @RunWith(AndroidJUnit4::class)
@@ -60,6 +64,33 @@ class NotificationTextTest {
         assertEquals("Métro X : reprise, trafic encore perturbé", better.text(french).title)
         val untitled = PushMessage.Changed(metro, Severity.DISRUPTED, Severity.BLOCKING, operatorTitle, null)
         assertEquals(operatorTitle, untitled.text(french).body)
+    }
+
+    private val paris = ZoneId.of("Europe/Paris")
+    private val palo = PushMessage.Train(train, "PALO", "Gare Centrale", "Les Aubépines", Instant.parse("2026-11-03T06:52:00Z"))
+
+    @Test
+    fun aCancelledTrainIsNamedByItsTimeAndSaysHowItIsKnown() {
+        val missing = PushMessage.TrainCancelled(palo, PushMessage.Reason.MISSING, null)
+        assertEquals(
+            NotificationText("Ligne L : train de 07:52 supprimé", "PALO vers Gare Centrale, depuis Les Aubépines : il n’est plus annoncé."),
+            missing.text(french, paris),
+        )
+        val sevenFiftyTwo = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(Locale.ENGLISH).format(palo.aimed.atZone(paris))
+        assertEquals(
+            NotificationText("Line L: $sevenFiftyTwo train cancelled", "PALO to Gare Centrale, from Les Aubépines: no longer announced."),
+            missing.text(english, paris),
+        )
+        val announced = PushMessage.TrainCancelled(palo, PushMessage.Reason.ANNOUNCED, null)
+        assertEquals("PALO vers Gare Centrale, depuis Les Aubépines : annoncé supprimé.", announced.text(french, paris).body)
+        assertEquals("PALO to Gare Centrale, from Les Aubépines: announced as cancelled.", announced.text(english, paris).body)
+    }
+
+    @Test
+    fun aTrainBackSaysItRunsAfterAll() {
+        val back = PushMessage.TrainBack(palo.copy(mission = null), null)
+        assertEquals(NotificationText("Ligne L : train de 07:52 finalement maintenu", "Train vers Gare Centrale, depuis Les Aubépines."), back.text(french, paris))
+        assertEquals("Train to Gare Centrale, from Les Aubépines.", back.text(english, paris).body)
     }
 
     @Test

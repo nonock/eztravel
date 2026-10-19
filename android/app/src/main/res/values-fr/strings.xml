@@ -18,6 +18,12 @@
     <string name="notification_outage_text">Aucun relevé réussi depuis 10 minutes : sans notification, rien ne garantit que le trafic est normal. Vérifiez-le ailleurs.</string>
     <string name="notification_recovered">Surveillance rétablie</string>
     <string name="notification_recovered_text">Les relevés fonctionnent de nouveau.</string>
+    <string name="notification_train_cancelled">%1$s : train de %2$s supprimé</string>
+    <string name="notification_train_back">%1$s : train de %2$s finalement maintenu</string>
+    <string name="notification_train_missing">%1$s vers %2$s, depuis %3$s : il n’est plus annoncé.</string>
+    <string name="notification_train_announced">%1$s vers %2$s, depuis %3$s : annoncé supprimé.</string>
+    <string name="notification_train_route">%1$s vers %2$s, depuis %3$s.</string>
+    <string name="notification_train_unnamed">Train</string>
     <string name="status_title">Votre trajet</string>
     <string name="status_unreachable">Le serveur est injoignable : impossible de savoir si vos lignes sont surveillées.</string>
     <string name="status_watching_outbound">Surveillance du trajet aller.</string>

@@ -5,11 +5,17 @@ import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
 import io.github.nonock.eztravel.notifications.PushMessage.Severity
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 data class NotificationText(val title: String, val body: String)
 
-/** The title in the phone's language; the body is the operator's text, as published. */
-fun PushMessage.text(resources: Resources): NotificationText = when (this) {
+/**
+ * The title in the phone's language; the body is the operator's text, as
+ * published. Train times are given in [zone], the phone's own.
+ */
+fun PushMessage.text(resources: Resources, zone: ZoneId = ZoneId.systemDefault()): NotificationText = when (this) {
     is PushMessage.Started -> NotificationText(
         resources.getString(
             if (severity == Severity.BLOCKING) R.string.notification_started_blocking else R.string.notification_started_disrupted,
@@ -28,7 +34,25 @@ fun PushMessage.text(resources: Resources): NotificationText = when (this) {
     is PushMessage.Planned -> NotificationText(resources.getQuantityString(R.plurals.notification_planned, count, count), titles)
     PushMessage.Outage -> NotificationText(resources.getString(R.string.notification_outage), resources.getString(R.string.notification_outage_text))
     PushMessage.Recovered -> NotificationText(resources.getString(R.string.notification_recovered), resources.getString(R.string.notification_recovered_text))
+    is PushMessage.TrainCancelled -> NotificationText(
+        resources.getString(R.string.notification_train_cancelled, train.line.label(resources), train.time(resources, zone)),
+        train.describe(
+            resources,
+            if (reason == PushMessage.Reason.ANNOUNCED) R.string.notification_train_announced else R.string.notification_train_missing,
+        ),
+    )
+    is PushMessage.TrainBack -> NotificationText(
+        resources.getString(R.string.notification_train_back, train.line.label(resources), train.time(resources, zone)),
+        train.describe(resources, R.string.notification_train_route),
+    )
 }
+
+private fun PushMessage.Train.time(resources: Resources, zone: ZoneId): String =
+    DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(resources.configuration.locales[0]).format(aimed.atZone(zone))
+
+/** "PALO to Gare Centrale, from Les Aubépines", in the words of [format]. */
+private fun PushMessage.Train.describe(resources: Resources, format: Int): String =
+    resources.getString(format, mission ?: resources.getString(R.string.notification_train_unnamed), destination, from)
 
 fun Line.label(resources: Resources): String = resources.getString(
     when (mode) {

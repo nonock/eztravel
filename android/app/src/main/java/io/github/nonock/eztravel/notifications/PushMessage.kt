@@ -41,7 +41,25 @@ sealed interface PushMessage {
     /** Checks work again, after an outage. */
     data object Recovered : PushMessage
 
-    /** When the watch window ends: a line's message goes away then. Null for the others. */
+    /** A train by its timetable departure from the stop it leaves; `mission` is its code, when known. */
+    data class Train(val line: Line, val mission: String?, val destination: String, val from: String, val aimed: Instant)
+
+    /** How the backend knows a train is cancelled. */
+    enum class Reason {
+        /** It left its station's list before its time, and stayed out. */
+        MISSING,
+
+        /** The operator says so. */
+        ANNOUNCED,
+    }
+
+    /** A train of the window will not run. */
+    data class TrainCancelled(val train: Train, val reason: Reason, override val until: Instant?) : PushMessage
+
+    /** A train notified as cancelled runs after all. */
+    data class TrainBack(val train: Train, override val until: Instant?) : PushMessage
+
+    /** When the watch window ends, or the train's time: the message goes away then. Null for the others. */
     val until: Instant?
         get() = null
 
@@ -53,6 +71,9 @@ sealed interface PushMessage {
             is Ended -> "line-${line.name}"
             is Planned -> "planned"
             Outage, Recovered -> "watch"
+            // A train's own: neither its line's state nor another train.
+            is TrainCancelled -> "train-${train.line.name}-${train.aimed}"
+            is TrainBack -> "train-${train.line.name}-${train.aimed}"
         }
 
     companion object {
@@ -84,8 +105,25 @@ sealed interface PushMessage {
                 )
                 "outage" -> Outage
                 "recovered" -> Recovered
+                "train_cancelled" -> TrainCancelled(
+                    train(data, line) ?: return null,
+                    // Whatever a newer backend's reason, the train is still cancelled.
+                    if (data["reason"] == "announced") Reason.ANNOUNCED else Reason.MISSING,
+                    until,
+                )
+                "train_back" -> TrainBack(train(data, line) ?: return null, until)
                 else -> null
             }
+        }
+
+        private fun train(data: Map<String, String>, line: Line?): Train? {
+            return Train(
+                line ?: return null,
+                data["mission"],
+                data["destination"] ?: return null,
+                data["from"] ?: return null,
+                data["aimed"]?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return null,
+            )
         }
 
         /** `train`, `metro`, or any other mode, as named by the backend. */

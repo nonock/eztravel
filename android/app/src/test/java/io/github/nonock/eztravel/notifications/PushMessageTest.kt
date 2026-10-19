@@ -83,6 +83,53 @@ class PushMessageTest {
         assertEquals(PushMessage.Recovered, PushMessage.parse(fixture("recovered")))
     }
 
+    private val train = PushMessage.Train(
+        Line("L", Mode.TRAIN),
+        mission = "PALO",
+        destination = "Gare Centrale",
+        from = "Les Aubépines",
+        aimed = Instant.parse("2026-11-03T06:52:00Z"),
+    )
+
+    /** Ten minutes after the train was due. */
+    private val trainGone = Instant.parse("2026-11-03T07:02:00Z")
+
+    @Test
+    fun readsACancelledTrainThatGoesAwayAfterItsTime() {
+        assertEquals(
+            PushMessage.TrainCancelled(train, PushMessage.Reason.MISSING, until = trainGone),
+            PushMessage.parse(fixture("train_cancelled")),
+        )
+        val announced = PushMessage.parse(fixture("train_cancelled") + ("reason" to "announced"))
+        assertEquals(PushMessage.Reason.ANNOUNCED, (announced as PushMessage.TrainCancelled).reason)
+        // Whatever a newer backend's reason, the train is still cancelled.
+        val other = PushMessage.parse(fixture("train_cancelled") + ("reason" to "something-new"))
+        assertEquals(PushMessage.Reason.MISSING, (other as PushMessage.TrainCancelled).reason)
+    }
+
+    @Test
+    fun readsATrainBack() {
+        assertEquals(PushMessage.TrainBack(train, until = trainGone), PushMessage.parse(fixture("train_back")))
+        val unnamed = PushMessage.parse(fixture("train_back") - "mission") as PushMessage.TrainBack
+        assertNull(unnamed.train.mission)
+    }
+
+    @Test
+    fun aTrainWithoutWhatNamesItIsIgnored() {
+        for (missing in listOf("line", "destination", "from", "aimed")) {
+            assertNull(missing, PushMessage.parse(fixture("train_cancelled") - missing))
+            assertNull(missing, PushMessage.parse(fixture("train_back") - missing))
+        }
+        assertNull(PushMessage.parse(fixture("train_back") + ("aimed" to "soon")))
+    }
+
+    @Test
+    fun aTrainBackReplacesItsCancellationOnly() {
+        // The same tag as the backend's collapse key: neither a line's state nor another train.
+        assertEquals("train-L-2026-11-03T06:52:00Z", PushMessage.parse(fixture("train_cancelled"))!!.tag)
+        assertEquals("train-L-2026-11-03T06:52:00Z", PushMessage.parse(fixture("train_back"))!!.tag)
+    }
+
     @Test
     fun aLineOfAnotherModeIsJustALine() {
         assertEquals(

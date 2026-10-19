@@ -18,6 +18,12 @@
     <string name="notification_outage_text">No successful check for 10 minutes: no notification no longer means no disruption. Check the traffic elsewhere.</string>
     <string name="notification_recovered">Watching restored</string>
     <string name="notification_recovered_text">Checks are working again.</string>
+    <string name="notification_train_cancelled">%1$s: %2$s train cancelled</string>
+    <string name="notification_train_back">%1$s: %2$s train runs after all</string>
+    <string name="notification_train_missing">%1$s to %2$s, from %3$s: no longer announced.</string>
+    <string name="notification_train_announced">%1$s to %2$s, from %3$s: announced as cancelled.</string>
+    <string name="notification_train_route">%1$s to %2$s, from %3$s.</string>
+    <string name="notification_train_unnamed">Train</string>
     <string name="status_title">Your commute</string>
     <string name="status_unreachable">The server cannot be reached: whether your lines are watched is unknown.</string>
     <string name="status_watching_outbound">Watching the way to work.</string>
