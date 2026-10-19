@@ -19,6 +19,7 @@ use crate::alerts::{Commute, Notification, State, WatchedLeg, decide};
 use crate::api;
 use crate::calendar::{Calendar, Direction, watched_direction};
 use crate::config::Config;
+use crate::history::{self, Entry, History};
 use crate::prim::Prim;
 use crate::profile::{Profile, Store};
 use crate::push::{self, PushError, Sender};
@@ -31,6 +32,7 @@ const FCM_URL: &str = "https://fcm.googleapis.com";
 const ROUTES_FILE: &str = "routes.json";
 const PROFILE_FILE: &str = "profile.json";
 const HEALTH_FILE: &str = "health.json";
+const HISTORY_FILE: &str = "history.json";
 
 pub struct Service {
     config: Config,
@@ -41,6 +43,7 @@ pub struct Service {
     state: State,
     health: Health,
     status: Arc<Mutex<Snapshot>>,
+    history: Arc<History>,
     routes: BTreeMap<String, Vec<Route>>,
     routes_day: Option<Date>,
 }
@@ -79,6 +82,7 @@ impl Service {
             state: load(&data_dir.join(STATE_FILE)).unwrap_or_default(),
             health: load(&data_dir.join(HEALTH_FILE)).unwrap_or_default(),
             status: Arc::default(),
+            history: Arc::new(History::open(&data_dir.join(HISTORY_FILE))),
             routes: load(&data_dir.join(ROUTES_FILE)).unwrap_or_default(),
             routes_day: None,
             config,
@@ -121,9 +125,20 @@ impl Service {
         let schedule = config.schedule();
         let service = Self::new(config, prim, sender, store.clone(), &data_dir);
         Ok(Startup {
-            api: api::router(store, service.status(), schedule, app_key),
+            api: api::router(
+                store,
+                service.status(),
+                schedule,
+                service.history(),
+                app_key,
+            ),
             service,
         })
+    }
+
+    /// What was sent, and windows that closed on a disruption.
+    pub fn history(&self) -> Arc<History> {
+        self.history.clone()
     }
 
     /// What the last poll saw, updated after each poll.
@@ -169,6 +184,15 @@ impl Service {
         let mut health = self.health.clone();
         let outcome = match direction {
             None => {
+                // No "ended" will follow for lines still disrupted: the history says so.
+                for (line, severity) in self.state.lines() {
+                    self.history.record(Entry {
+                        at: now,
+                        data: history::window_closed(line, *severity, &self.config.lines),
+                        delivered: 0,
+                        records: vec![],
+                    });
+                }
                 let mut next = self.state.clone();
                 decide(&mut next, local, None, &self.commute(), &[]);
                 self.commit(next);
@@ -258,9 +282,10 @@ impl Service {
     ) -> Result<(), PushError> {
         for notification in notifications {
             let data = push::data(notification, &self.config.lines);
+            let mut delivered = 0;
             for device in &profile.devices {
                 match self.sender.send(now, device, &data).await {
-                    Ok(()) => {}
+                    Ok(()) => delivered += 1,
                     Err(PushError::Unregistered) => {
                         eprintln!(
                             "Firebase no longer knows a device: forgotten until the app registers again"
@@ -270,6 +295,12 @@ impl Service {
                     Err(error) => return Err(error),
                 }
             }
+            self.history.record(Entry {
+                at: now,
+                data,
+                delivered,
+                records: history::records(notification),
+            });
         }
         Ok(())
     }
@@ -922,6 +953,81 @@ mod tests {
             status.lock().unwrap().planned,
             ["Ligne L : trafic interrompu"]
         );
+    }
+
+    fn history(service: &Service) -> Vec<crate::history::Entry> {
+        service.history().latest(usize::MAX)
+    }
+
+    #[tokio::test]
+    async fn each_notification_sent_is_recorded_with_its_records() {
+        let setup = Setup::new().await;
+        setup.prim_answers(200, true, 1).await;
+        setup.firebase_answers(200, 1).await;
+        let mut service = setup.service();
+        assert_eq!(service.poll(at(MORNING)).await, Poll::Sent(1));
+        let entries = history(&service);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].at, at(MORNING));
+        assert_eq!(entries[0].data["type"], "started");
+        assert_eq!(entries[0].delivered, 1);
+        assert_eq!(entries[0].records[0].id, "d1");
+    }
+
+    #[tokio::test]
+    async fn a_notification_no_phone_accepted_is_recorded_as_such() {
+        // A silent loss is exactly what the history must show.
+        let setup = Setup::new().await;
+        setup.prim_answers(200, true, 1).await;
+        setup.firebase_answers(404, 1).await;
+        let mut service = setup.service();
+        service.poll(at(MORNING)).await;
+        assert_eq!(history(&service)[0].delivered, 0);
+    }
+
+    #[tokio::test]
+    async fn a_notification_that_failed_is_not_recorded() {
+        let setup = Setup::new().await;
+        setup.prim_answers(200, true, 1).await;
+        setup.firebase_answers(500, 1).await;
+        let mut service = setup.service();
+        service.poll(at(MORNING)).await;
+        assert_eq!(history(&service), []);
+    }
+
+    #[tokio::test]
+    async fn a_window_closing_on_a_disrupted_line_is_recorded() {
+        // No "ended" follows: the history says the window closed on it.
+        let setup = Setup::new().await;
+        setup.prim_answers(200, true, 1).await;
+        setup.firebase_answers(200, 1).await;
+        let mut service = setup.service();
+        service.poll(at(MORNING)).await;
+        service.poll(at(LATE_MORNING)).await;
+        service
+            .poll(at(LATE_MORNING) + jiff::SignedDuration::from_mins(2))
+            .await;
+        let entries = history(&service);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].at, at(LATE_MORNING));
+        assert_eq!(
+            entries[0].data,
+            crate::history::window_closed(
+                "C01740",
+                crate::disruptions::Severity::Blocking,
+                &service.config.lines
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_window_closing_on_lines_running_normally_is_not_recorded() {
+        let setup = Setup::new().await;
+        setup.prim_answers(200, false, 1).await;
+        let mut service = setup.service();
+        service.poll(at(MORNING)).await;
+        service.poll(at(LATE_MORNING)).await;
+        assert_eq!(history(&service), []);
     }
 
     #[tokio::test]

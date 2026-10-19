@@ -72,6 +72,11 @@ impl State {
             .map(|(_, severity)| *severity)
     }
 
+    /// The lines disrupted in the current window, as last notified.
+    pub fn lines(&self) -> &[(String, Severity)] {
+        &self.lines
+    }
+
     /// The planned disruptions announced on `today`.
     pub fn planned(&self, today: Date) -> &[String] {
         if self.planned_day == Some(today) {

@@ -4,6 +4,7 @@
 //! Every request carries the app key (`Authorization: Bearer …`), compiled
 //! into the user's own build of the app and kept out of the repository.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use aws_lc_rs::constant_time::verify_slices_are_equal;
@@ -19,6 +20,7 @@ use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 
 use crate::calendar::Schedule;
+use crate::history::History;
 use crate::profile::Store;
 use crate::watch::{Snapshot, View};
 
@@ -45,6 +47,7 @@ struct Shared {
     store: Arc<Store>,
     status: Arc<Mutex<Snapshot>>,
     schedule: Arc<Schedule>,
+    history: Arc<History>,
 }
 
 impl FromRef<Shared> for Arc<Store> {
@@ -59,6 +62,12 @@ impl FromRef<Shared> for Arc<Mutex<Snapshot>> {
     }
 }
 
+impl FromRef<Shared> for Arc<History> {
+    fn from_ref(shared: &Shared) -> Self {
+        shared.history.clone()
+    }
+}
+
 impl FromRef<Shared> for Arc<Schedule> {
     fn from_ref(shared: &Shared) -> Self {
         shared.schedule.clone()
@@ -69,17 +78,20 @@ pub fn router(
     store: Arc<Store>,
     status: Arc<Mutex<Snapshot>>,
     schedule: Schedule,
+    history: Arc<History>,
     key: String,
 ) -> Router {
     Router::new()
         .route("/devices", post(register))
         .route("/settings", get(settings).put(set_settings))
         .route("/status", get(status_now))
+        .route("/history", get(sent))
         .layer(middleware::from_fn_with_state(Arc::new(key), authorize))
         .with_state(Shared {
             store,
             status,
             schedule: Arc::new(schedule),
+            history,
         })
 }
 
@@ -129,6 +141,33 @@ async fn status_now(
     )
 }
 
+/// How many entries `GET /history` gives, newest first.
+const HISTORY_SHOWN: usize = 200;
+
+/// `GET /history`, in the shape fixed by `fixtures/api/history.json`.
+#[derive(Serialize)]
+struct Sent {
+    entries: Vec<SentEntry>,
+}
+
+#[derive(Serialize)]
+struct SentEntry {
+    at: Timestamp,
+    data: BTreeMap<String, String>,
+}
+
+async fn sent(State(history): State<Arc<History>>) -> Json<Sent> {
+    let entries = history
+        .latest(HISTORY_SHOWN)
+        .into_iter()
+        .map(|entry| SentEntry {
+            at: entry.at,
+            data: entry.data,
+        })
+        .collect();
+    Json(Sent { entries })
+}
+
 async fn set_settings(
     State(store): State<Arc<Store>>,
     Json(settings): Json<Settings>,
@@ -141,6 +180,7 @@ async fn set_settings(
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::history::History;
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode};
     use http_body_util::BodyExt;
@@ -153,6 +193,7 @@ mod tests {
     struct Api {
         store: Arc<Store>,
         status: Arc<Mutex<Snapshot>>,
+        history: Arc<History>,
         _dir: tempfile::TempDir,
     }
 
@@ -163,6 +204,7 @@ mod tests {
             Api {
                 store,
                 status: Arc::default(),
+                history: Arc::new(History::open(&dir.path().join("history.json"))),
                 _dir: dir,
             }
         }
@@ -191,6 +233,7 @@ mod tests {
                 self.store.clone(),
                 self.status.clone(),
                 schedule,
+                self.history.clone(),
                 KEY.into(),
             )
             .oneshot(request)
@@ -220,6 +263,7 @@ mod tests {
             (Method::GET, "/settings", None),
             (Method::PUT, "/settings", Some(r#"{"away_through":null}"#)),
             (Method::GET, "/status", None),
+            (Method::GET, "/history", None),
         ] {
             for authorization in [
                 None,
@@ -360,6 +404,32 @@ mod tests {
         api.authorized(Method::PUT, "/settings", Some(&away)).await;
         let after = next_watch(&api).await;
         assert!(after.date() > before.date(), "{before} then {after}");
+    }
+
+    #[tokio::test]
+    async fn the_history_answers_as_in_the_fixture() {
+        let api = Api::new();
+        let path = format!(
+            "{}/../fixtures/api/history.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        // Recorded oldest first, as the poll loop would.
+        for entry in fixture["entries"].as_array().unwrap().iter().rev() {
+            api.history.record(crate::history::Entry {
+                at: entry["at"].as_str().unwrap().parse().unwrap(),
+                data: serde_json::from_value(entry["data"].clone()).unwrap(),
+                delivered: 1,
+                records: vec![],
+            });
+        }
+        let (status, body) = api.authorized(Method::GET, "/history", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+            fixture
+        );
     }
 
     #[tokio::test]

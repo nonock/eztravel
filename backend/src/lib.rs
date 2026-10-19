@@ -3,6 +3,7 @@ pub mod api;
 pub mod calendar;
 pub mod config;
 pub mod disruptions;
+pub mod history;
 pub mod http;
 pub mod prim;
 pub mod profile;

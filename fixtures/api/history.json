@@ -1,0 +1,38 @@
+{
+  "entries": [
+    {
+      "at": "2026-11-03T07:15:00Z",
+      "data": { "type": "window_closed", "line": "X", "mode": "metro", "severity": "disrupted" }
+    },
+    {
+      "at": "2026-11-03T06:40:00Z",
+      "data": {
+        "type": "started",
+        "line": "X",
+        "mode": "metro",
+        "severity": "disrupted",
+        "title": "Métro X : trafic perturbé",
+        "text": "Le trafic est perturbé sur l'ensemble de la ligne."
+      }
+    },
+    {
+      "at": "2026-11-03T06:20:00Z",
+      "data": { "type": "ended", "line": "L", "mode": "train" }
+    },
+    {
+      "at": "2026-11-03T06:00:00Z",
+      "data": {
+        "type": "started",
+        "line": "L",
+        "mode": "train",
+        "severity": "blocking",
+        "title": "Ligne L : Nanterre <-> Cergy trafic interrompu",
+        "text": "Le trafic est interrompu entre Nanterre et Cergy jusqu'à 20h.\nMotif : panne d'un train."
+      }
+    },
+    {
+      "at": "2026-11-03T05:46:00Z",
+      "data": { "type": "planned", "count": "1", "titles": "Ligne L : offre adaptée" }
+    }
+  ]
+}
