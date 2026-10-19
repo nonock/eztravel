@@ -29,6 +29,9 @@ pub struct Leg {
     pub line: String,
     pub board: String,
     pub alight: String,
+    /// Minutes from leaving home, or work, to the platform of this ride.
+    #[serde(default)]
+    pub reach: Option<u32>,
 }
 
 impl Route {
@@ -186,6 +189,7 @@ mod tests {
             line: LINE.into(),
             board: format!("sa:{board}"),
             alight: format!("sa:{alight}"),
+            reach: None,
         }
     }
 

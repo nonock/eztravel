@@ -229,6 +229,7 @@ mod tests {
                 line: line.into(),
                 board: "sa:A".into(),
                 alight: "sa:B".into(),
+                reach: None,
             },
             routes: vec![],
         }

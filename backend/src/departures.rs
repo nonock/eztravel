@@ -343,6 +343,8 @@ pub struct LegView {
     /// Stop names, unknown until the line's routes are.
     pub from: Option<String>,
     pub to: Option<String>,
+    /// Minutes from leaving to the platform, when configured: the app counts down from it.
+    pub reach: Option<u32>,
     /// None when they cannot be read.
     pub departures: Option<Vec<Departure>>,
 }
@@ -441,6 +443,7 @@ impl NextDepartures {
                     .and_then(|label| label.color.clone()),
                 from: stops.as_ref().map(|(board, _)| board.name.clone()),
                 to: stops.map(|(_, alight)| alight.name),
+                reach: leg.reach,
                 departures,
             });
         }
@@ -972,6 +975,7 @@ mod tests {
             line: "C02000".into(),
             board: board.into(),
             alight: alight.into(),
+            reach: None,
         };
         let names = |stops: Option<(&RouteStop, &RouteStop)>| {
             stops.map(|(board, alight)| (board.stop_point.clone(), alight.stop_point.clone()))

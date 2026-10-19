@@ -7,6 +7,7 @@
       "color": "#7B61C9",
       "from": "Les Aubépines",
       "to": "Gare Centrale",
+      "reach": 12,
       "departures": [
         {
           "aimed": "2026-11-03T06:52:00Z",
@@ -43,6 +44,7 @@
       "color": "#E07A1F",
       "from": "Gare Centrale",
       "to": "Mairie",
+      "reach": null,
       "departures": [
         {
           "aimed": null,

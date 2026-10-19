@@ -128,10 +128,12 @@ mod tests {
             Leg {
                 line: "C01740".into(),
                 board: "stop_area:IDFM:71100".into(),
-                alight: "stop_area:IDFM:71370".into()
+                alight: "stop_area:IDFM:71370".into(),
+                reach: Some(12),
             }
         );
         assert_eq!(config.inbound.len(), 2);
+        assert_eq!(config.outbound[1].reach, None);
         assert_eq!(config.time_zone(), TimeZone::get("Europe/Paris").unwrap());
         assert_eq!(config.line_codes(), ["C01740", "C02000"]);
         assert_eq!(config.line_color("C01740"), Some("#7B61C9"));

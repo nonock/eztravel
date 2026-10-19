@@ -32,11 +32,14 @@ name = "X"
 mode = "metro"
 color = "#E07A1F"
 
-# The rides of each way, in order. Stops are Navitia stop areas.
+# The rides of each way, in order. Stops are Navitia stop areas. `reach`
+# (optional) is how many minutes it takes from leaving home, or work, to the
+# platform of the ride: the app counts down to when to leave for each train.
 [[outbound]]
 line = "C01740"
 board = "stop_area:IDFM:71100"
 alight = "stop_area:IDFM:71370"
+reach = 12
 
 [[outbound]]
 line = "C02000"
@@ -52,3 +55,4 @@ alight = "stop_area:IDFM:71380"
 line = "C01740"
 board = "stop_area:IDFM:71370"
 alight = "stop_area:IDFM:71100"
+reach = 25
