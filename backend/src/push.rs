@@ -75,8 +75,11 @@ pub enum PushError {
     /// The service account's private key cannot be used.
     Key,
     Http(reqwest::Error),
-    /// Firebase no longer knows the device: the app was uninstalled or its token renewed.
+    /// Firebase does not know the device: the app was uninstalled, its token
+    /// renewed, or the token is not one.
     Unregistered,
+    /// Firebase refuses the message itself: sent again, it would be refused again.
+    Refused(String),
     Status(u16, String),
 }
 
@@ -410,6 +413,14 @@ impl Sender {
         if status.as_u16() == 404 && body.contains("UNREGISTERED") {
             return Err(PushError::Unregistered);
         }
+        if status.as_u16() == 400 {
+            // The same answer for a token that is not one, and for a message never to be taken.
+            return Err(if faults_token(&body) {
+                PushError::Unregistered
+            } else {
+                PushError::Refused(body)
+            });
+        }
         Err(PushError::Status(status.as_u16(), body))
     }
 
@@ -443,6 +454,20 @@ impl Sender {
         self.token = Some((granted.access_token.clone(), expires));
         Ok(granted.access_token)
     }
+}
+
+/// Whether Firebase's answer faults the device token rather than the message.
+fn faults_token(body: &str) -> bool {
+    let Ok(answer) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    answer["error"]["details"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|detail| detail["fieldViolations"].as_array())
+        .flatten()
+        .any(|violation| violation["field"] == "message.token")
 }
 
 #[derive(Deserialize)]
@@ -964,13 +989,50 @@ mod tests {
     async fn other_failures_keep_their_status() {
         let server = token_server(1).await;
         Mock::given(path("/v1/projects/demo-project/messages:send"))
-            .respond_with(ResponseTemplate::new(400).set_body_string("INVALID_ARGUMENT"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("INTERNAL"))
             .mount(&server)
             .await;
         assert_eq!(
             send_to(&server, &server.uri()).await,
-            r#"Status(400, "INVALID_ARGUMENT")"#
+            r#"Status(500, "INTERNAL")"#
         );
+    }
+
+    /// Firebase's answer to a request it will never take, faulting `field`.
+    fn invalid(field: &str) -> String {
+        serde_json::json!({ "error": {
+            "code": 400,
+            "status": "INVALID_ARGUMENT",
+            "details": [
+                { "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", "errorCode": "INVALID_ARGUMENT" },
+                { "@type": "type.googleapis.com/google.rpc.BadRequest",
+                  "fieldViolations": [{ "field": field, "description": "invalid" }] }
+            ]
+        } })
+        .to_string()
+    }
+
+    async fn answered_400(body: String) -> String {
+        let server = token_server(1).await;
+        Mock::given(path("/v1/projects/demo-project/messages:send"))
+            .respond_with(ResponseTemplate::new(400).set_body_string(body))
+            .mount(&server)
+            .await;
+        send_to(&server, &server.uri()).await
+    }
+
+    #[tokio::test]
+    async fn a_message_firebase_will_never_take_is_refused() {
+        let body = invalid("message.data");
+        assert_eq!(
+            answered_400(body.clone()).await,
+            format!("Refused({body:?})")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_token_that_is_not_one_is_a_device_firebase_does_not_know() {
+        assert_eq!(answered_400(invalid("message.token")).await, "Unregistered");
     }
 
     #[tokio::test]

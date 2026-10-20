@@ -465,9 +465,16 @@ impl Service {
                     Ok(()) => delivered += 1,
                     Err(PushError::Unregistered) => {
                         eprintln!(
-                            "Firebase no longer knows a device: forgotten until the app registers again"
+                            "Firebase does not know a device: forgotten until the app registers again"
                         );
                         self.store.update(|profile| profile.forget(device));
+                    }
+                    // Tried again, it would hold back every poll to come.
+                    Err(PushError::Refused(reason)) => {
+                        eprintln!(
+                            "Firebase refuses a {:?} notification, not sent again: {reason}",
+                            data.get("type")
+                        );
                     }
                     Err(error) => return Err(error),
                 }
@@ -1190,6 +1197,18 @@ mod tests {
         setup.firebase_answers(404, 1).await;
         let mut service = setup.service();
         service.poll(at(MORNING)).await;
+        assert_eq!(history(&service)[0].delivered, 0);
+    }
+
+    #[tokio::test]
+    async fn a_notification_firebase_refuses_holds_nothing_back_and_is_not_tried_again() {
+        let setup = Setup::new().await;
+        setup.prim_answers(200, true, 2).await;
+        // Refused for good: the message itself is at fault.
+        setup.firebase_answers(400, 1).await;
+        let mut service = setup.service();
+        assert_eq!(service.poll(tuesday("06:00")).await, Poll::Sent(1));
+        assert_eq!(service.poll(tuesday("06:02")).await, Poll::Sent(0));
         assert_eq!(history(&service)[0].delivered, 0);
     }
 
