@@ -6,9 +6,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.Card
@@ -32,6 +34,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -52,19 +55,23 @@ import java.time.Instant
 /** The backend reads each stop at most once a minute. */
 private const val REFRESH_MS = 60_000L
 
+/** The countdowns move between reads. */
+private const val TICK_MS = 15_000L
+
 /**
  * The next departures on each leg of the way shown, read when the screen
- * shows and every minute while it does. A train of the first leg with a time
- * to its platform can be picked for the reminder to leave.
+ * shows and every minute while it does, the train to catch first and in big.
+ * A train of the first leg with a time to its platform can be picked for the
+ * reminder to leave. The countdowns move every [tickMs].
  */
 @Composable
-fun NextDepartures(backend: Backend, modifier: Modifier = Modifier, now: () -> Instant = Instant::now) {
+fun NextDepartures(backend: Backend, modifier: Modifier = Modifier, now: () -> Instant = Instant::now, tickMs: Long = TICK_MS) {
     // The time away section already says that this build has no server.
     if (!backend.configured) return
     // Null until read, or when it cannot be.
     var departures by remember { mutableStateOf<Departures?>(null) }
     var unreadable by remember { mutableStateOf(false) }
-    var readAt by remember { mutableStateOf(now()) }
+    var clock by remember { mutableStateOf(now()) }
     // Why the last pick was not saved.
     var refused by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
@@ -93,22 +100,98 @@ fun NextDepartures(backend: Backend, modifier: Modifier = Modifier, now: () -> I
                 } catch (_: JSONException) {
                     unreadable = true
                 }
-                readAt = now()
+                clock = now()
                 delay(REFRESH_MS)
             }
         }
     }
+    LaunchedEffect(tickMs) {
+        while (true) {
+            delay(tickMs)
+            clock = now()
+        }
+    }
 
     Column(modifier) {
-        Text(stringResource(R.string.departures_title), style = MaterialTheme.typography.titleMedium)
         val current = departures
+        val featured = if (unreadable) null else current?.featured(clock)
+        featured?.let { NextTrain(it, clock) }
+        Text(
+            stringResource(R.string.departures_title),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(top = if (featured == null) 0.dp else 24.dp),
+        )
         when {
             unreadable -> Text(stringResource(R.string.departures_unavailable), color = MaterialTheme.colorScheme.error)
             current == null -> Text(stringResource(R.string.away_loading))
             else -> {
                 val reminded = current.reminded
                 for (leg in current.legs) {
-                    if (leg === reminded) LegDepartures(leg, readAt, refused, pick) else LegDepartures(leg, readAt)
+                    if (leg === reminded) LegDepartures(leg, clock, refused, pick) else LegDepartures(leg, clock)
+                }
+            }
+        }
+    }
+}
+
+/** The train to catch, picked or next, in big: when to leave for it, read as one. */
+@Composable
+private fun NextTrain(featured: Departures.Featured, now: Instant) {
+    val departure = featured.departure
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+    ) {
+        Column(Modifier.padding(16.dp).semantics(mergeDescendants = true) {}) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (departure.picked) {
+                    Icon(Icons.Filled.Notifications, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    stringResource(if (departure.picked) R.string.departures_hero_picked else R.string.departures_hero_next),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+            Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                LineBadge(featured.leg.line, featured.leg.color)
+                Spacer(Modifier.width(12.dp))
+                Text(departure.knownBy.clock(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                if (departure.delayMinutes > 0) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        stringResource(R.string.departures_late, departure.delayMinutes),
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                departure.platform?.let { Tag(stringResource(R.string.departures_platform, it)) }
+            }
+            Text(departure.destination, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 4.dp))
+            val left = Duration.between(now, featured.leave)
+            Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.Bottom) {
+                when {
+                    left.isNegative -> Text(stringResource(R.string.departures_hero_too_late), style = MaterialTheme.typography.titleLarge)
+                    left.toMinutes() == 0L -> Text(
+                        stringResource(R.string.departures_hero_now),
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    else -> {
+                        Text(stringResource(R.string.departures_hero_leave_in), style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.departures_minutes, left.toMinutes()),
+                            style = MaterialTheme.typography.displaySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
         }
@@ -131,12 +214,19 @@ private fun LegDepartures(leg: Departures.Leg, now: Instant, refused: Int? = nul
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            // Read as one: "Line J, Les Aubépines → Gare Centrale".
+            // Read as one: "Line J, Les Aubépines to Gare Centrale".
             Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
                 LineBadge(leg.line, leg.color)
                 if (leg.from != null && leg.to != null) {
                     Spacer(Modifier.width(12.dp))
-                    Text(stringResource(R.string.departures_leg, leg.from, leg.to), style = MaterialTheme.typography.titleSmall)
+                    StopName(leg.from, Modifier.weight(1f, fill = false))
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = stringResource(R.string.departures_leg_to),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp).size(16.dp),
+                    )
+                    StopName(leg.to, Modifier.weight(1f, fill = false))
                 }
             }
             refused?.let {
@@ -170,18 +260,19 @@ private fun DepartureRow(leg: Departures.Leg, departure: Departure, now: Instant
     val pickable = onPick != null && departure.journey != null && (departure.picked || leg.catchable(departure, now))
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.weight(1f).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.Top) {
-            Column(Modifier.width(72.dp)) {
+            Column(Modifier.width(96.dp)) {
                 val cancelled = departure.state == State.CANCELLED
+                // The metro gives no timetable: the minutes left say more.
+                val arriving = departure.aimed == null && departure.expected.minutesFrom(now) == 0L
                 Text(
                     when {
-                        // The metro gives no timetable: the minutes left say more.
-                        departure.aimed == null -> departure.expected.minutesFrom(now).let { minutes ->
-                            if (minutes == 0L) stringResource(R.string.departures_arriving) else stringResource(R.string.departures_minutes, minutes)
-                        }
+                        arriving -> stringResource(R.string.departures_arriving)
+                        departure.aimed == null -> stringResource(R.string.departures_minutes, departure.expected.minutesFrom(now))
                         else -> departure.aimed.clock()
                     },
-                    style = MaterialTheme.typography.titleMedium,
+                    style = if (arriving) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
                     textDecoration = if (cancelled) TextDecoration.LineThrough else null,
                 )
                 when {
@@ -219,6 +310,12 @@ private fun DepartureRow(leg: Departures.Leg, departure: Departure, now: Instant
         }
         if (pickable) Bell(departure, onPick)
     }
+}
+
+/** A stop's name on one line: a long one ends with "…". */
+@Composable
+private fun StopName(name: String, modifier: Modifier) {
+    Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
 }
 
 /** A small label on its own ground, such as the platform. */

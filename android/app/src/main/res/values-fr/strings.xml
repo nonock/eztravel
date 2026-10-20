@@ -40,6 +40,12 @@
     <string name="status_state_normal">Trafic normal</string>
     <string name="status_state_disrupted">Trafic perturbé</string>
     <string name="status_state_blocking">Trafic interrompu</string>
+    <string name="status_fine">Tout roule</string>
+    <string name="status_headline_blocking">%1$s : trafic interrompu</string>
+    <string name="status_headline_disrupted">%1$s : trafic perturbé</string>
+    <string name="status_headline_outage">Surveillance interrompue</string>
+    <string name="status_headline_unreachable">Serveur injoignable</string>
+    <string name="status_checking">Relevé en cours…</string>
     <string name="status_not_watching">Pas de surveillance en ce moment.</string>
     <string name="status_next">Prochaine surveillance : %1$s.</string>
     <string name="status_no_next">Aucun jour de bureau à venir : rien ne sera surveillé.</string>
@@ -64,7 +70,7 @@
     <string name="away_unreachable">Le serveur est injoignable. Réessayez plus tard.</string>
     <string name="away_not_configured">Cette version de l’appli n’a ni adresse de serveur ni clé (voir local.properties).</string>
     <string name="departures_title">Prochains départs</string>
-    <string name="departures_leg">%1$s → %2$s</string>
+    <string name="departures_leg_to">vers</string>
     <string name="departures_unavailable">Les départs ne peuvent pas être lus pour l’instant.</string>
     <string name="departures_none">Aucun départ dans les prochaines heures.</string>
     <string name="departures_minutes">%1$d min</string>
@@ -78,6 +84,11 @@
     <string name="departures_leave_now">Partir maintenant</string>
     <string name="departures_too_late">Trop tard pour celui-ci</string>
     <string name="departures_picked">Rappel prévu</string>
+    <string name="departures_hero_next">Prochain train à prendre</string>
+    <string name="departures_hero_picked">Votre train</string>
+    <string name="departures_hero_leave_in">Partir dans</string>
+    <string name="departures_hero_now">C’est l’heure de partir</string>
+    <string name="departures_hero_too_late">Trop tard pour ce train</string>
     <string name="departures_pick">Me rappeler de partir pour le train de %1$s</string>
     <string name="departures_unpick">Annuler le rappel du train de %1$s</string>
     <string name="departures_refused_too_late">Trop tard pour partir prendre ce train.</string>

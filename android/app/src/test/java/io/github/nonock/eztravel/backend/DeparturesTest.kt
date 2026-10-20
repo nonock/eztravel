@@ -124,6 +124,29 @@ class DeparturesTest {
     }
 
     @Test
+    fun theTrainShownFirstIsThePickedOneOrElseTheNextToCatch() {
+        val departures = Departures.parse(fixture("departures"))
+        // The 8:07 is picked, 4 minutes late: leave at 7:59.
+        assertEquals(
+            Departures.Featured(departures.legs[0], departures.legs[0].departures!![1], at("06:59:00")),
+            departures.featured(at("06:50:00")),
+        )
+        // Even too late to catch, a pick stays first: it says so.
+        assertEquals("j2", departures.featured(at("07:05:00"))?.departure?.journey)
+        // Without a pick, the next one to catch: the 7:52 until 7:40, then the 8:07.
+        val none = departures.picking(null)
+        assertEquals("j1", none.featured(at("06:40:00"))?.departure?.journey)
+        assertEquals("j2", none.featured(at("06:41:00"))?.departure?.journey)
+        // A cancelled pick gives way; the 8:22 is cancelled too.
+        assertEquals("j2", departures.picking("j3").featured(at("06:41:00"))?.departure?.journey)
+        assertNull(none.featured(at("07:00:00")))
+        // No ride with a time to the platform, or no departure read.
+        assertNull(Departures(Direction.OUTBOUND, listOf(departures.legs[1])).featured(at("06:00:00")))
+        val unread = departures.copy(legs = listOf(departures.legs[0].copy(departures = null)))
+        assertNull(unread.featured(at("06:00:00")))
+    }
+
+    @Test
     fun aPickMarksItsTrainOnly() {
         val departures = Departures.parse(fixture("departures"))
         fun picked(of: Departures) = of.legs.flatMap { it.departures.orEmpty() }.filter { it.picked }.map { it.journey }

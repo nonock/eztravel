@@ -84,6 +84,33 @@ class CommuteStatusTest {
     }
 
     @Test
+    fun theHeadlineSaysAllIsFineOnlyWhenItIsKnown() {
+        show(FakeBackend(status = watching(Direction.OUTBOUND, LineState(train, null), LineState(metro, null))))
+        waitFor(text(R.string.status_fine))
+    }
+
+    @Test
+    fun theHeadlineNamesTheLineInTrouble() {
+        show(FakeBackend(status = watching(Direction.INBOUND, LineState(metro, Severity.DISRUPTED), LineState(train, Severity.BLOCKING))))
+        waitFor(text(R.string.status_headline_blocking, text(R.string.line_train, "L")))
+        compose.onNodeWithText(text(R.string.status_fine)).assertDoesNotExist()
+    }
+
+    @Test
+    fun aLineSlowedIsTheHeadlineWhenNoneIsStopped() {
+        show(FakeBackend(status = watching(Direction.INBOUND, LineState(metro, Severity.DISRUPTED))))
+        waitFor(text(R.string.status_headline_disrupted, text(R.string.line_metro, "X")))
+    }
+
+    @Test
+    fun aCheckNotYetMadeIsNoGoodNews() {
+        val stale = Status(Direction.OUTBOUND, now.minus(Duration.ofMinutes(20)), null, null, listOf(LineState(train, null)), emptyList())
+        show(FakeBackend(status = stale))
+        waitFor(text(R.string.status_checking))
+        compose.onNodeWithText(text(R.string.status_fine)).assertDoesNotExist()
+    }
+
+    @Test
     fun theWayHomeIsSaidToo() {
         show(FakeBackend(status = watching(Direction.INBOUND, LineState(metro, Severity.DISRUPTED))))
         waitFor(text(R.string.status_watching_inbound))
@@ -97,6 +124,7 @@ class CommuteStatusTest {
         val tomorrow = now.plus(Duration.ofDays(1))
         show(FakeBackend(status = Status(null, yesterday, tomorrow, null, emptyList(), emptyList())))
         waitFor(text(R.string.status_not_watching))
+        compose.onNodeWithText(text(R.string.status_fine)).assertDoesNotExist()
         waitFor(text(R.string.status_next, tomorrow.shown()))
         waitFor(text(R.string.status_checked, yesterday.shown()))
     }
@@ -116,6 +144,7 @@ class CommuteStatusTest {
         val backend = FakeBackend(status = watching(Direction.OUTBOUND, outage = Outage(since, Cause.PRIM)))
         show(backend)
         waitFor(text(R.string.status_outage_prim, since.shown()))
+        waitFor(text(R.string.status_headline_outage))
         backend.status = watching(Direction.OUTBOUND, outage = Outage(since, Cause.FIREBASE))
         refresh++
         waitFor(text(R.string.status_outage_firebase, since.shown()))
@@ -129,6 +158,7 @@ class CommuteStatusTest {
     fun anUnreachableServerIsSaid() {
         show(FakeBackend(failing = true))
         waitFor(text(R.string.status_unreachable))
+        waitFor(text(R.string.status_headline_unreachable))
     }
 
     @Test

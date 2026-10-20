@@ -15,6 +15,25 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
     val reminded: Leg?
         get() = legs.firstOrNull { it.reach != null }
 
+    /** The train shown first, on [leg], the ride reminded, and when to leave for it. */
+    data class Featured(val leg: Leg, val departure: Departure, val leave: Instant)
+
+    /**
+     * The train shown first on the ride reminded: the one picked, unless
+     * cancelled, or else the next one that can be caught at [now].
+     */
+    fun featured(now: Instant): Featured? {
+        for (leg in legs) {
+            val reach = leg.reach ?: continue
+            val departures = leg.departures.orEmpty()
+            val departure = departures.firstOrNull { it.picked && it.state != State.CANCELLED }
+                ?: departures.firstOrNull { leg.catchable(it, now) }
+                ?: return null
+            return Featured(leg, departure, departure.expected.minus(reach))
+        }
+        return null
+    }
+
     /** The same departures, with [journey] as the one picked, or none. */
     fun picking(journey: String?) = copy(
         legs = legs.map { leg ->

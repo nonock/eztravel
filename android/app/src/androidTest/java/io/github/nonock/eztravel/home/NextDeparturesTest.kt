@@ -54,6 +54,9 @@ class NextDeparturesTest {
 
     private fun waitFor(text: String) = waitFor(hasText(text))
 
+    /** A leg's header: from one stop to the other. */
+    private fun leg(from: String, to: String) = hasText(from) and hasContentDescription(text(R.string.departures_leg_to)) and hasText(to)
+
     private val train = Line("L", Mode.TRAIN)
     private val metro = Line("X", Mode.METRO)
 
@@ -92,7 +95,7 @@ class NextDeparturesTest {
     fun eachLegShowsItsNextDepartures() {
         show(FakeBackend(departures = morning))
         waitFor(text(R.string.departures_title))
-        waitFor(hasContentDescription(text(R.string.line_train, "L")) and hasText(text(R.string.departures_leg, "Les Aubépines", "Gare Centrale")))
+        waitFor(hasContentDescription(text(R.string.line_train, "L")) and leg("Les Aubépines", "Gare Centrale"))
         // On time: its time, where it goes, its mission, platform and arrival.
         waitFor(
             hasText(at("06:52:00").clock()) and hasText("Gare Centrale") and hasText("PALO") and
@@ -103,7 +106,7 @@ class NextDeparturesTest {
         waitFor(hasText(at("07:22:00").clock()) and hasText(text(R.string.departures_cancelled)))
         waitFor(hasText(at("07:37:00").clock()) and hasText(text(R.string.departures_delayed)) and hasText("Les Tilleuls"))
         // The metro gives minutes left.
-        waitFor(hasContentDescription(text(R.string.line_metro, "X")) and hasText(text(R.string.departures_leg, "Gare Centrale", "Mairie")))
+        waitFor(hasContentDescription(text(R.string.line_metro, "X")) and leg("Gare Centrale", "Mairie"))
         waitFor(hasText(text(R.string.departures_arriving)) and hasText("Porte Nord"))
         waitFor(hasText(text(R.string.departures_minutes, 3)) and hasText("Porte Nord"))
     }
@@ -205,6 +208,53 @@ class NextDeparturesTest {
         compose.onNode(hasText(text(R.string.departures_picked))).assertDoesNotExist()
     }
 
+    /** The card on top, about the train shown first: read as one. */
+    private fun hero(label: Int) = hasText(text(label))
+
+    @Test
+    fun theNextTrainToCatchComesFirstInBig() {
+        show(FakeBackend(departures = morning))
+        // At 7:50, the 7:52 is gone for whoever is not at the platform: the 8:02 it is, now.
+        waitFor(hero(R.string.departures_hero_next) and hasText(at("07:02:00").clock()) and hasText(text(R.string.departures_hero_now)))
+        compose.onNode(hero(R.string.departures_hero_picked)).assertDoesNotExist()
+    }
+
+    @Test
+    fun thePickedTrainComesFirstWithItsCountdown() {
+        val picked = morning.picking("j3")
+        show(FakeBackend(departures = picked))
+        // The 8:07, 4 minutes late, leaves at 8:11: leave at 7:59, in 9 minutes.
+        waitFor(
+            hero(R.string.departures_hero_picked) and hasText(at("07:07:00").clock()) and hasText(text(R.string.departures_late, 4)) and
+                hasText(text(R.string.departures_hero_leave_in)) and hasText(text(R.string.departures_minutes, 9)) and
+                hasText("Gare Centrale") and hasText(text(R.string.departures_platform, "2")),
+        )
+    }
+
+    @Test
+    fun theCountdownMovesBetweenReads() {
+        var clock = at("06:50:00")
+        compose.setContent { NextDepartures(FakeBackend(departures = morning.picking("j3")), now = { clock }, tickMs = 50) }
+        waitFor(hero(R.string.departures_hero_picked) and hasText(text(R.string.departures_minutes, 9)))
+        clock = at("06:54:00")
+        waitFor(hero(R.string.departures_hero_picked) and hasText(text(R.string.departures_minutes, 5)))
+    }
+
+    @Test
+    fun aPickedTrainTooLateToCatchSaysSo() {
+        val late = morning.picking("j1")
+        show(FakeBackend(departures = late))
+        waitFor(hero(R.string.departures_hero_picked) and hasText(at("06:52:00").clock()) and hasText(text(R.string.departures_hero_too_late)))
+    }
+
+    @Test
+    fun noTrainToCatchLeavesTheCardOut() {
+        val metroOnly = morning.copy(legs = morning.legs.drop(1))
+        show(FakeBackend(departures = metroOnly))
+        waitFor(leg("Gare Centrale", "Mairie"))
+        compose.onNode(hero(R.string.departures_hero_next)).assertDoesNotExist()
+    }
+
     @Test
     fun aLegWithoutDeparturesSaysWhy() {
         val evening = Departures(
@@ -217,7 +267,7 @@ class NextDeparturesTest {
             ),
         )
         show(FakeBackend(departures = evening))
-        waitFor(hasText(text(R.string.departures_leg, "Mairie", "Gare Centrale")))
+        waitFor(leg("Mairie", "Gare Centrale"))
         waitFor(text(R.string.departures_none))
         waitFor(hasContentDescription(text(R.string.line_metro, "Y")))
         compose.waitUntil(timeoutMillis = 5_000) {

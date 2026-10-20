@@ -40,6 +40,12 @@
     <string name="status_state_normal">Normal service</string>
     <string name="status_state_disrupted">Disrupted</string>
     <string name="status_state_blocking">Interrupted</string>
+    <string name="status_fine">All fine</string>
+    <string name="status_headline_blocking">%1$s: interrupted</string>
+    <string name="status_headline_disrupted">%1$s: disrupted</string>
+    <string name="status_headline_outage">Watching interrupted</string>
+    <string name="status_headline_unreachable">Server unreachable</string>
+    <string name="status_checking">Checking…</string>
     <string name="status_not_watching">Not watching right now.</string>
     <string name="status_next">Next watch: %1$s.</string>
     <string name="status_no_next">No office day ahead: nothing will be watched.</string>
@@ -64,7 +70,7 @@
     <string name="away_unreachable">The server cannot be reached. Try again later.</string>
     <string name="away_not_configured">This build of the app has no server address or key (see local.properties).</string>
     <string name="departures_title">Next departures</string>
-    <string name="departures_leg">%1$s → %2$s</string>
+    <string name="departures_leg_to">to</string>
     <string name="departures_unavailable">Departures cannot be read right now.</string>
     <string name="departures_none">No departure in the coming hours.</string>
     <string name="departures_minutes">%1$d min</string>
@@ -78,6 +84,11 @@
     <string name="departures_leave_now">Leave now</string>
     <string name="departures_too_late">Too late to catch</string>
     <string name="departures_picked">Reminder set</string>
+    <string name="departures_hero_next">Next train to catch</string>
+    <string name="departures_hero_picked">Your train</string>
+    <string name="departures_hero_leave_in">Leave in</string>
+    <string name="departures_hero_now">Time to go</string>
+    <string name="departures_hero_too_late">Too late for this train</string>
     <string name="departures_pick">Remind me to leave for the %1$s train</string>
     <string name="departures_unpick">Cancel the reminder for the %1$s train</string>
     <string name="departures_refused_too_late">Too late to leave for this train.</string>

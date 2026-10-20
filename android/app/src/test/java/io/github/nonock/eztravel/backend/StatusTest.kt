@@ -20,6 +20,35 @@ class StatusTest {
 
     private fun at(instant: String) = Instant.parse(instant)
 
+    private val train = LineState(Line("L", Mode.TRAIN), null)
+    private val metro = LineState(Line("X", Mode.METRO), null)
+    private val now = at("2026-11-03T06:45:00Z")
+
+    private fun watching(vararg lines: LineState, checkedAt: Instant? = now.minusSeconds(60), outage: Outage? = null) =
+        Status(Direction.OUTBOUND, checkedAt, null, outage, lines.toList(), emptyList())
+
+    @Test
+    fun fineOnlyWhenWatchedJustCheckedAndEveryLineRuns() {
+        assertEquals(Status.Headline.Fine, watching(train, metro).headline(now))
+        // Not checked in this window yet, or a while ago: nothing to vouch for.
+        assertEquals(Status.Headline.Checking, watching(train, checkedAt = null).headline(now))
+        assertEquals(Status.Headline.Checking, watching(train, checkedAt = now.minusSeconds(600)).headline(now))
+        // Outside the windows.
+        assertEquals(Status.Headline.Idle, Status(null, now, null, null, emptyList(), emptyList()).headline(now))
+    }
+
+    @Test
+    fun troubleNamesTheWorstLineAndAnOutageComesFirst() {
+        val slowed = metro.copy(severity = Severity.DISRUPTED)
+        val stopped = train.copy(severity = Severity.BLOCKING)
+        assertEquals(Status.Headline.Trouble(slowed), watching(train, slowed).headline(now))
+        assertEquals(Status.Headline.Trouble(stopped), watching(slowed, stopped).headline(now))
+        val outage = Outage(now.minusSeconds(720), Cause.PRIM)
+        assertEquals(Status.Headline.Out(outage), watching(stopped, outage = outage).headline(now))
+        // Even outside the windows: the server stopped checking.
+        assertEquals(Status.Headline.Out(outage), Status(null, null, null, outage, emptyList(), emptyList()).headline(now))
+    }
+
     @Test
     fun readsTheStatusWhileWatching() {
         assertEquals(

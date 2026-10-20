@@ -29,6 +29,9 @@ class ThemeTest {
                 Triple("button", onPrimary, primary),
                 Triple("amber text", primary, background),
                 Triple("outage", error, background),
+                Triple("all fine", Good, surfaceContainerLow),
+                Triple("next train", onPrimaryContainer, primaryContainer),
+                Triple("amber on the next train", primary, primaryContainer),
                 Triple("date picker", onSurface, surfaceContainerHigh),
             )) {
                 assertTrue("$name: ${contrast(text, ground)}", contrast(text, ground) >= 4.5f)
