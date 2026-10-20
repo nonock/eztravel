@@ -124,11 +124,12 @@ Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md
 | 0 | PRIM data check against the lines' X accounts | done |
 | 1 | Disruption alerts on office days: backend, calendar, push, app | done |
 | 2 | Next departures, cancelled trains, "leave in X min" countdown, notification before departure | |
-| 3 | Widget | |
-| 4 | Preconfigured backup routes | |
-| 5 | Statistics | |
+| 3 | Shorter notifications: one line built from the data (where, until when), the whole record in the app on tap; the links in operators' texts (the line's X account, its blog) open from the app | |
+| 4 | Live trip, from the reminder to leave: an ongoing notification (a Live Update where Android allows it) and a widget with the train to catch, its countdown, platform and delay, pushed by the backend only when something changes. At a terminus PRIM gives the platform only minutes before departure: it is shown as soon as it is known | |
+| 5 | Preconfigured backup routes | |
+| 6 | Statistics | |
 
-Later: free route planning, several saved commutes.
+Later: location, to start the live trip on leaving home or work or on reaching the station (it may add a notification, never silence one); free route planning, several saved commutes.
 
 ## Project rules
 
