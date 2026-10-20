@@ -119,15 +119,27 @@ Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md
 
 ## Roadmap
 
-| Milestone | Content | |
-|---|---|---|
-| 0 | PRIM data check against the lines' X accounts | done |
-| 1 | Disruption alerts on office days: backend, calendar, push, app | done |
-| 2 | Next departures, cancelled trains, "leave in X min" countdown, notification before departure | |
-| 3 | Shorter notifications: one line built from the data (where, until when), the whole record in the app on tap; the links in operators' texts (the line's X account, its blog) open from the app | |
-| 4 | Live trip, from the reminder to leave: an ongoing notification (a Live Update where Android allows it) and a widget with the train to catch, its countdown, platform and delay, pushed by the backend only when something changes. At a terminus PRIM gives the platform only minutes before departure: it is shown as soon as it is known | |
-| 5 | Preconfigured backup routes | |
-| 6 | Statistics | |
+0. **Done.** PRIM data checked against the lines' X accounts.
+1. **Done.** Disruption alerts on office days: backend, calendar, push, app.
+2. Next departures, cancelled trains, "leave in X min" countdown, notification before departure.
+3. Trust and calendar:
+   - when a window opens, the phone checks the backend itself and says so if it does not answer or has stopped checking, since the backend cannot report its own failure;
+   - a month calendar in the app, with office days, remote-work days and time away each in their own color, where a tap switches a single day;
+   - school holidays on that calendar, from the French open data: some lines run fewer trains then, and the app says so on those days (what PRIM shows of it is to be checked);
+   - each day's trains recorded (delay, cancelled) for the statistics, kept beyond the history;
+   - continuous integration on GitHub: backend and app tests, lint.
+4. Shorter notifications: one line built from the data (where, until when), and the whole record in the app on tap. The links in operators' texts (the line's X account, its blog) open from the app. Plus an accessibility check of the screens.
+5. Sharper alerts:
+   - trains that never show up in real time, found against the timetable, which also stands in when real time is missing;
+   - disruptions placed on the branches more finely;
+   - the evening before, the planned works or strikes of the next day, with a "remote work tomorrow" button.
+6. Live trip, from the reminder to leave:
+   - an ongoing notification (a Live Update where Android allows it) and a widget, with the train to catch, its countdown, platform and delay;
+   - updates pushed by the backend only when something changes;
+   - at a terminus PRIM gives the platform only minutes before departure, so it is shown as soon as it is known;
+   - a train can be picked further ahead than the next five departures.
+7. Preconfigured backup routes.
+8. Statistics, from the days recorded since milestone 3.
 
 Later: location, to start the live trip on leaving home or work or on reaching the station (it may add a notification, never silence one); free route planning, several saved commutes.
 
