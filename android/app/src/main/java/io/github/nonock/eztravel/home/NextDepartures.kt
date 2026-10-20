@@ -1,6 +1,11 @@
 package io.github.nonock.eztravel.home
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,10 +68,18 @@ private const val TICK_MS = 15_000L
  * The next departures on each leg of the way shown, read when the screen
  * shows and every minute while it does, the train to catch first and in big.
  * A train of the first leg with a time to its platform can be picked for the
- * reminder to leave. The countdowns move every [tickMs].
+ * reminder to leave. The countdowns move every [tickMs]. Read again when
+ * [refresh] changes; [onRead] follows each read, readable or not.
  */
 @Composable
-fun NextDepartures(backend: Backend, modifier: Modifier = Modifier, now: () -> Instant = Instant::now, tickMs: Long = TICK_MS) {
+fun NextDepartures(
+    backend: Backend,
+    modifier: Modifier = Modifier,
+    now: () -> Instant = Instant::now,
+    tickMs: Long = TICK_MS,
+    refresh: Int = 0,
+    onRead: () -> Unit = {},
+) {
     // The time away section already says that this build has no server.
     if (!backend.configured) return
     // Null until read, or when it cannot be.
@@ -89,7 +103,7 @@ fun NextDepartures(backend: Backend, modifier: Modifier = Modifier, now: () -> I
         }
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(backend) {
+    LaunchedEffect(backend, refresh) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
                 try {
@@ -100,6 +114,7 @@ fun NextDepartures(backend: Backend, modifier: Modifier = Modifier, now: () -> I
                 } catch (_: JSONException) {
                     unreadable = true
                 }
+                onRead()
                 clock = now()
                 delay(REFRESH_MS)
             }
@@ -134,69 +149,81 @@ fun NextDepartures(backend: Backend, modifier: Modifier = Modifier, now: () -> I
     }
 }
 
-/** The train to catch, picked or next, in big: when to leave for it, read as one. */
+/**
+ * The train to catch, picked or next, in big: when to leave for it, read as
+ * one. Raised navy with an amber edge, as a platform's painted edge: amber is
+ * kept for what to act on, and the lines' own colors stay readable on it.
+ */
 @Composable
 private fun NextTrain(featured: Departures.Featured, now: Instant) {
     val departure = featured.departure
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
     ) {
-        Column(Modifier.padding(16.dp).semantics(mergeDescendants = true) {}) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (departure.picked) {
-                    Icon(Icons.Filled.Notifications, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                }
+        Row(Modifier.height(IntrinsicSize.Min)) {
+            Box(Modifier.width(6.dp).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
+            NextTrainContent(featured, departure, now)
+        }
+    }
+}
+
+@Composable
+private fun NextTrainContent(featured: Departures.Featured, departure: Departure, now: Instant) {
+    Column(Modifier.padding(16.dp).semantics(mergeDescendants = true) {}) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (departure.picked) {
+                Icon(Icons.Filled.Notifications, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(
+                stringResource(if (departure.picked) R.string.departures_hero_picked else R.string.departures_hero_next),
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            LineBadge(featured.leg.line, featured.leg.color)
+            Spacer(Modifier.width(12.dp))
+            Text(departure.knownBy.clock(), style = MaterialTheme.typography.headlineSmall.tabular(), fontWeight = FontWeight.Bold)
+            if (departure.delayMinutes > 0) {
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    stringResource(if (departure.picked) R.string.departures_hero_picked else R.string.departures_hero_next),
-                    style = MaterialTheme.typography.labelLarge,
+                    stringResource(R.string.departures_late, departure.delayMinutes),
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
                 )
             }
-            Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                LineBadge(featured.leg.line, featured.leg.color)
-                Spacer(Modifier.width(12.dp))
-                Text(departure.knownBy.clock(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                if (departure.delayMinutes > 0) {
+            Spacer(Modifier.weight(1f))
+            departure.platform?.let { Tag(stringResource(R.string.departures_platform, it)) }
+        }
+        Text(departure.destination, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 4.dp))
+        val left = Duration.between(now, featured.leave)
+        Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.Bottom) {
+            when {
+                left.isNegative -> Text(stringResource(R.string.departures_hero_too_late), style = MaterialTheme.typography.titleLarge)
+                left.toMinutes() == 0L -> Text(
+                    stringResource(R.string.departures_hero_now),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                else -> {
+                    Text(stringResource(R.string.departures_hero_leave_in), style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        stringResource(R.string.departures_late, departure.delayMinutes),
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                departure.platform?.let { Tag(stringResource(R.string.departures_platform, it)) }
-            }
-            Text(departure.destination, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 4.dp))
-            val left = Duration.between(now, featured.leave)
-            Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.Bottom) {
-                when {
-                    left.isNegative -> Text(stringResource(R.string.departures_hero_too_late), style = MaterialTheme.typography.titleLarge)
-                    left.toMinutes() == 0L -> Text(
-                        stringResource(R.string.departures_hero_now),
-                        style = MaterialTheme.typography.headlineMedium,
+                        stringResource(R.string.departures_minutes, left.toMinutes()),
+                        style = MaterialTheme.typography.displaySmall.tabular(),
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
                     )
-                    else -> {
-                        Text(stringResource(R.string.departures_hero_leave_in), style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            stringResource(R.string.departures_minutes, left.toMinutes()),
-                            style = MaterialTheme.typography.displaySmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
                 }
             }
         }
     }
 }
+
+/** Figures of one width, so that a countdown does not jitter as it moves. */
+private fun TextStyle.tabular() = copy(fontFeatureSettings = "tnum")
 
 private fun Refusal.message() = when (this) {
     Refusal.TOO_LATE -> R.string.departures_refused_too_late
@@ -270,7 +297,7 @@ private fun DepartureRow(leg: Departures.Leg, departure: Departure, now: Instant
                         departure.aimed == null -> stringResource(R.string.departures_minutes, departure.expected.minutesFrom(now))
                         else -> departure.aimed.clock()
                     },
-                    style = if (arriving) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+                    style = (if (arriving) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium).tabular(),
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     textDecoration = if (cancelled) TextDecoration.LineThrough else null,

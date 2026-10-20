@@ -63,14 +63,20 @@ private sealed interface Read {
 
 /**
  * Every disruption of the lines that is not over yet, line by line: under way
- * first, the worst first, then those to come. Read when shown, and every two
- * minutes while it is.
+ * first, the worst first, then those to come. Read when shown, every two
+ * minutes while it is, and when [refresh] changes; [onRead] follows each read.
  */
 @Composable
-fun AlertsPage(backend: Backend, modifier: Modifier = Modifier, now: () -> Instant = Instant::now) {
+fun AlertsPage(
+    backend: Backend,
+    modifier: Modifier = Modifier,
+    now: () -> Instant = Instant::now,
+    refresh: Int = 0,
+    onRead: () -> Unit = {},
+) {
     var read by remember { mutableStateOf<Read>(Read.Loading) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(backend) {
+    LaunchedEffect(backend, refresh) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
                 read = try {
@@ -81,6 +87,7 @@ fun AlertsPage(backend: Backend, modifier: Modifier = Modifier, now: () -> Insta
                 } catch (_: JSONException) {
                     Read.Unreadable
                 }
+                onRead()
                 delay(REFRESH_MS)
             }
         }

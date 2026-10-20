@@ -5,11 +5,14 @@ import android.app.NotificationManager
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.core.view.WindowCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
@@ -94,6 +97,26 @@ class MainActivityTest {
         compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
         back()
         compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+    }
+
+    /** Pulls the page down, from its top, and waits for [reads] to grow. */
+    private fun pullDown(vararg reads: java.util.concurrent.atomic.AtomicInteger) {
+        compose.waitUntil(timeoutMillis = 5_000) { reads.all { it.get() > 0 } }
+        compose.waitForIdle()
+        val before = reads.map { it.get() }
+        compose.onNode(hasScrollAction()).performTouchInput { swipeDown(startY = top, endY = bottom) }
+        compose.waitUntil(timeoutMillis = 5_000) { reads.zip(before).all { (read, was) -> read.get() > was } }
+    }
+
+    @Test
+    fun pullingEachTabDownReadsItAgain() {
+        pullDown(backend.statusReads, backend.departuresReads)
+        tab(R.string.nav_alerts).performClick()
+        pullDown(backend.alertsReads)
+        tab(R.string.nav_history).performClick()
+        pullDown(backend.historyReads)
+        // And again: the spinner went away after the last read.
+        pullDown(backend.historyReads)
     }
 
     @Test

@@ -30,8 +30,8 @@ class ThemeTest {
                 Triple("amber text", primary, background),
                 Triple("outage", error, background),
                 Triple("all fine", Good, surfaceContainerLow),
-                Triple("next train", onPrimaryContainer, primaryContainer),
-                Triple("amber on the next train", primary, primaryContainer),
+                Triple("next train", onSurface, surfaceContainerHigh),
+                Triple("countdown on the next train", primary, surfaceContainerHigh),
                 Triple("date picker", onSurface, surfaceContainerHigh),
             )) {
                 assertTrue("$name: ${contrast(text, ground)}", contrast(text, ground) >= 4.5f)

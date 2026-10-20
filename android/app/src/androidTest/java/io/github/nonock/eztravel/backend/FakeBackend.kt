@@ -27,6 +27,9 @@ class FakeBackend(
     val picks = CopyOnWriteArrayList<String?>()
     val saved = CopyOnWriteArrayList<String>()
     val statusReads = AtomicInteger()
+    val departuresReads = AtomicInteger()
+    val alertsReads = AtomicInteger()
+    val historyReads = AtomicInteger()
 
     override fun register(token: String) {
         if (failing) throw IOException("unreachable")
@@ -46,18 +49,21 @@ class FakeBackend(
     }
 
     override suspend fun history(): List<HistoryEntry> {
+        historyReads.incrementAndGet()
         if (failing) throw IOException("unreachable")
         if (garbled) throw JSONException("not JSON")
         return history
     }
 
     override suspend fun departures(): Departures {
+        departuresReads.incrementAndGet()
         if (failing) throw IOException("unreachable")
         if (garbled) throw JSONException("not JSON")
         return departures
     }
 
     override suspend fun alerts(): Alerts {
+        alertsReads.incrementAndGet()
         if (failing) throw IOException("unreachable")
         if (garbled) throw JSONException("not JSON")
         return alerts

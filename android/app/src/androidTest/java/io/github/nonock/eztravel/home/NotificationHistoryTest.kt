@@ -13,6 +13,8 @@ import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
 import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import io.github.nonock.eztravel.notifications.text
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -80,6 +82,27 @@ class NotificationHistoryTest {
     fun anUnreachableServerIsSaid() {
         show(FakeBackend(failing = true))
         compose.onNodeWithText(text(R.string.away_unreachable)).assertIsDisplayed()
+    }
+
+    @Test
+    fun eachEntryShowsWhatItIsAbout() {
+        val started = PushMessage.Started(train, PushMessage.Severity.BLOCKING, "Ligne L : trafic interrompu", null)
+        val train1 = PushMessage.Train(train, "PALO", "Gare Centrale", "Les Aubépines", noon(0), noon(0))
+        show(
+            FakeBackend(
+                history = listOf(
+                    HistoryEntry.Sent(noon(0), started),
+                    HistoryEntry.Sent(noon(0), PushMessage.Leave(train1, noon(0), "2", live = true, until = null)),
+                    HistoryEntry.Sent(noon(0), PushMessage.Outage),
+                    HistoryEntry.Sent(noon(0), PushMessage.Recovered),
+                    HistoryEntry.Sent(noon(0), PushMessage.Planned(1, "Ligne L : travaux")),
+                ),
+            ),
+        )
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasText("Ligne L : trafic interrompu")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNode(hasContentDescription(text(R.string.line_train, "L")) and hasText("Ligne L : trafic interrompu")).assertIsDisplayed()
     }
 
     @Test

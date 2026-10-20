@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -36,6 +37,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -98,16 +100,18 @@ enum class Tab(@StringRes val label: Int, @StringRes val title: Int, val icon: I
 
 /**
  * The commute, the lines' alerts and the history of notifications, one tab
- * each; the settings behind the gear. Back leaves the settings, then goes
- * back to the commute.
+ * each, read again when pulled down; the settings behind the gear. Back
+ * leaves the settings, then goes back to the commute.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App() {
     var tab by rememberSaveable { mutableStateOf(Tab.TRIP) }
     var settings by rememberSaveable { mutableStateOf(false) }
-    // Time away moves the next watch: the status is read again after each change.
-    var saves by remember { mutableIntStateOf(0) }
+    // Read again when pulled down, and after the time away changes: it moves the next watch.
+    var refresh by remember { mutableIntStateOf(0) }
+    var refreshing by remember { mutableStateOf(false) }
+    val read = { refreshing = false }
     BackHandler(enabled = settings || tab != Tab.TRIP) {
         if (settings) settings = false else tab = Tab.TRIP
     }
@@ -148,23 +152,38 @@ fun App() {
             }
         },
     ) { padding ->
-        Column(
-            Modifier
-                .padding(padding)
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 16.dp)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            val backend = AppBackend.current
-            when {
-                settings -> AwaySetting(backend, onSaved = { saves++ })
-                tab == Tab.TRIP -> {
-                    CommuteStatus(backend, refresh = saves)
-                    NextDepartures(backend, Modifier.padding(top = 16.dp))
+        val backend = AppBackend.current
+        val page = @Composable {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 16.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                when {
+                    settings -> AwaySetting(backend, onSaved = { refresh++ })
+                    tab == Tab.TRIP -> {
+                        CommuteStatus(backend, refresh = refresh)
+                        NextDepartures(backend, Modifier.padding(top = 16.dp), refresh = refresh, onRead = read)
+                    }
+                    tab == Tab.ALERTS -> AlertsPage(backend, refresh = refresh, onRead = read)
+                    else -> NotificationHistory(backend, refresh = refresh, onRead = read)
                 }
-                tab == Tab.ALERTS -> AlertsPage(backend)
-                else -> NotificationHistory(backend)
             }
+        }
+        // Without a server, nothing would be read again.
+        if (settings || !backend.configured) {
+            Box(Modifier.padding(padding)) { page() }
+        } else {
+            PullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = {
+                    refreshing = true
+                    refresh++
+                },
+                modifier = Modifier.padding(padding),
+            ) { page() }
         }
     }
 }
