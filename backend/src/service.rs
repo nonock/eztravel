@@ -21,10 +21,10 @@ use crate::calendar::{Calendar, Direction, Phase, phase, watched_direction};
 use crate::config::Config;
 use crate::departures::{NextDepartures, leg_stops, monitoring_ref, one_way};
 use crate::history::{self, Entry, History};
-use crate::leaving::{Leaving, remind};
+use crate::leaving::{Aim, Leaving, remind, reminded_leg};
 use crate::prim::Prim;
 use crate::prim::PrimError;
-use crate::profile::{Profile, Store};
+use crate::profile::{Pick, Profile, Store};
 use crate::push::{self, PushError, Sender};
 use crate::relevance::{Leg, Route};
 use crate::trains::{Seen, Trains, follow};
@@ -287,7 +287,8 @@ impl Service {
             let key = (local.date(), direction);
             let window = self.window_bounds(local, direction);
             notifications.extend(follow(&mut trains, key, window, now, seen, true));
-            notifications.extend(self.reminders(&mut leaving, key, now, local, seen));
+            let pick = profile.pick.as_ref();
+            notifications.extend(self.reminders(&mut leaving, key, now, local, seen, pick));
             // Last: when anything before it cannot be sent, the poll is tried again
             // whole, and checks are not back yet anyway.
             if health.recovering() {
@@ -369,8 +370,9 @@ impl Service {
         Ok(seen)
     }
 
-    /// The reminder to leave, when the way has a usual time to set off: for the
-    /// first ride with its time to the platform, if its station's trains are read.
+    /// The reminder to leave, for the train picked in the app today, or else
+    /// when the way has a usual time to set off: on the ride `reminded_leg`
+    /// says, if its station's trains are read.
     fn reminders(
         &self,
         leaving: &mut Leaving,
@@ -378,33 +380,40 @@ impl Service {
         now: Timestamp,
         local: DateTime,
         seen: &[Seen],
+        pick: Option<&Pick>,
     ) -> Vec<Notification> {
         let (legs, usual) = match key.1 {
             Direction::Outbound => (&self.config.outbound, self.config.leave.outbound),
             Direction::Inbound => (&self.config.inbound, self.config.leave.inbound),
         };
-        let reached = legs
-            .iter()
-            .find_map(|leg| Some((leg, leg.reach?)))
-            .and_then(|(leg, reach)| {
-                Some((seen.iter().find(|seen| seen.line == leg.line)?, reach))
-            });
-        let (Some(usual), Some((seen, reach))) = (usual, reached) else {
+        let reached = reminded_leg(legs).and_then(|(leg, reach)| {
+            Some((seen.iter().find(|seen| seen.line == leg.line)?, reach))
+        });
+        let Some((seen, reach)) = reached else {
             return vec![];
         };
-        let usual = local
-            .date()
-            .to_datetime(usual)
-            .to_zoned(self.config.time_zone())
-            .expect("a day's local time is within range")
-            .timestamp();
+        let aim = match (pick.filter(|pick| (pick.day, pick.direction) == key), usual) {
+            (Some(pick), _) => Aim::Picked {
+                journey: &pick.journey,
+                leave: pick.leave,
+            },
+            (None, Some(usual)) => Aim::Usual(
+                local
+                    .date()
+                    .to_datetime(usual)
+                    .to_zoned(self.config.time_zone())
+                    .expect("a day's local time is within range")
+                    .timestamp(),
+            ),
+            (None, None) => return vec![],
+        };
         remind(
             leaving,
             key,
             now,
             seen,
             SignedDuration::from_mins(i64::from(reach)),
-            usual,
+            aim,
         )
     }
 
@@ -1268,35 +1277,38 @@ mod tests {
         assert!(saved.contains("stop_area:IDFM:71250"), "{saved}");
     }
 
-    /// Line L between two train stations, which PRIM lists stop by stop; no route for the metro.
+    /// Line L between two train stations, which PRIM lists stop by stop, both
+    /// ways; no route for the metro.
     async fn train_routes_server() -> MockServer {
         let server = MockServer::start().await;
         Mock::given(path("/v2/navitia/lines/line%3AIDFM%3AC01740/routes"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({ "routes": [{ "id": "route:IDFM:A" }] })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({ "routes": [{ "id": "route:IDFM:A" }, { "id": "route:IDFM:B" }] }),
+            ))
             .mount(&server)
             .await;
-        let rows: Vec<_> = [
-            ("100", "71100", "Les Aubépines"),
-            ("200", "71370", "Gare Centrale"),
-        ]
-        .iter()
-        .map(|(place, area, name)| {
-            serde_json::json!({ "stop_point": {
-                "id": format!("stop_point:IDFM:monomodalStopPlace:{place}"),
-                "name": name,
-                "stop_area": { "id": format!("stop_area:IDFM:{area}") }
-            } })
-        })
-        .collect();
-        Mock::given(path("/v2/navitia/routes/route%3AIDFM%3AA/route_schedules"))
+        let aubepines = ("100", "71100", "Les Aubépines");
+        let centrale = ("200", "71370", "Gare Centrale");
+        for (route, stops) in [("A", [aubepines, centrale]), ("B", [centrale, aubepines])] {
+            let rows: Vec<_> = stops
+                .iter()
+                .map(|(place, area, name)| {
+                    serde_json::json!({ "stop_point": {
+                        "id": format!("stop_point:IDFM:monomodalStopPlace:{place}"),
+                        "name": name,
+                        "stop_area": { "id": format!("stop_area:IDFM:{area}") }
+                    } })
+                })
+                .collect();
+            Mock::given(path(format!(
+                "/v2/navitia/routes/route%3AIDFM%3A{route}/route_schedules"
+            )))
             .respond_with(ResponseTemplate::new(200).set_body_json(
                 serde_json::json!({ "route_schedules": [{ "table": { "rows": rows } }] }),
             ))
             .mount(&server)
             .await;
+        }
         Mock::given(path("/v2/navitia/lines/line%3AIDFM%3AC02000/routes"))
             .respond_with(
                 ResponseTemplate::new(200).set_body_json(serde_json::json!({ "routes": [] })),
@@ -1308,19 +1320,27 @@ mod tests {
 
     /// A stop listing `journeys` of line L, leaving at 7:52 in Paris and ending at Gare Centrale.
     fn stop_list(journeys: &[&str]) -> serde_json::Value {
-        let visits: Vec<_> = journeys
+        let trains: Vec<_> = journeys.iter().map(|journey| (*journey, "06:52")).collect();
+        timed_list(200, &trains)
+    }
+
+    /// A stop listing trains of line L by journey and departure time on Tuesday,
+    /// UTC, ending at the stop place `end`.
+    fn timed_list(end: u32, trains: &[(&str, &str)]) -> serde_json::Value {
+        let visits: Vec<_> = trains
             .iter()
-            .map(|journey| {
+            .map(|(journey, time)| {
+                let time = format!("2026-11-03T{time}:00Z");
                 serde_json::json!({
                     "RecordedAtTime": "2026-11-03T04:00:00Z",
                     "MonitoredVehicleJourney": {
                         "LineRef": { "value": "STIF:Line::C01740:" },
                         "FramedVehicleJourneyRef": { "DatedVehicleJourneyRef": journey },
-                        "DestinationRef": { "value": "STIF:StopArea:SP:200:" },
+                        "DestinationRef": { "value": format!("STIF:StopArea:SP:{end}:") },
                         "DestinationName": [{ "value": "Gare Centrale" }],
                         "MonitoredCall": {
-                            "AimedDepartureTime": "2026-11-03T06:52:00Z",
-                            "ExpectedDepartureTime": "2026-11-03T06:52:00Z",
+                            "AimedDepartureTime": time,
+                            "ExpectedDepartureTime": time,
                             "DepartureStatus": "onTime"
                         }
                     }
@@ -1373,6 +1393,59 @@ mod tests {
         assert_eq!(service.poll(tuesday("06:36")).await, Poll::Sent(1));
         // Remembered across a restart.
         assert_eq!(setup.service().poll(tuesday("06:38")).await, Poll::Sent(0));
+    }
+
+    /// Picks the train `journey` of Tuesday's way `direction`, to leave at `leave` UTC.
+    fn pick(setup: &Setup, direction: Direction, journey: &str, leave: &str) {
+        setup.store.update(|profile| {
+            profile.pick = Some(Pick {
+                day: jiff::civil::date(2026, 11, 3),
+                direction,
+                journey: journey.into(),
+                leave: tuesday(leave),
+            });
+        });
+    }
+
+    #[tokio::test]
+    async fn the_train_picked_today_is_reminded_rather_than_the_usual_one() {
+        let setup = Setup::with(train_routes_server().await).await;
+        setup.prim_answers(200, false, 3).await;
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(timed_list(200, &[("j1", "06:52"), ("j2", "07:07")])),
+            )
+            .mount(&setup.server)
+            .await;
+        setup.firebase_answers_to("leave", 200, 1).await;
+        pick(&setup, Direction::Outbound, "j2", "06:55");
+        let mut service = setup.service();
+        // The 7:52 in Paris would be reminded from 7:35: the 8:07 is, from 7:50.
+        assert_eq!(service.poll(tuesday("06:36")).await, Poll::Sent(0));
+        assert_eq!(service.poll(tuesday("06:50")).await, Poll::Sent(1));
+        assert_eq!(service.poll(tuesday("06:52")).await, Poll::Sent(0));
+    }
+
+    #[tokio::test]
+    async fn without_a_usual_time_only_a_picked_train_is_reminded() {
+        let setup = Setup::with(train_routes_server().await).await;
+        setup.prim_answers(200, false, 3).await;
+        // The way home boards at Gare Centrale for Les Aubépines, 25 minutes away.
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(timed_list(100, &[("j1", "15:45")])),
+            )
+            .mount(&setup.server)
+            .await;
+        setup.firebase_answers_to("leave", 200, 1).await;
+        let mut service = setup.service();
+        // The other way's pick is no pick.
+        pick(&setup, Direction::Outbound, "j1", "15:20");
+        assert_eq!(service.poll(tuesday("15:15")).await, Poll::Sent(0));
+        pick(&setup, Direction::Inbound, "j1", "15:20");
+        assert_eq!(service.poll(tuesday("15:16")).await, Poll::Sent(1));
+        assert_eq!(service.poll(tuesday("15:18")).await, Poll::Sent(0));
     }
 
     #[tokio::test]
@@ -1433,7 +1506,7 @@ mod tests {
         std::fs::write(setup.dir.path().join("routes.json"), saved).unwrap();
         let mut service = setup.service();
         let departures = service.departures();
-        let from = async |now| departures.view(at(now)).await.legs[0].from.clone();
+        let from = async |now| departures.view(at(now), None).await.legs[0].from.clone();
         assert_eq!(from(MORNING).await.as_deref(), Some("Saved"));
         service.poll(at(MORNING)).await;
         assert_eq!(from(TWO_MINUTES_LATER).await.as_deref(), Some("71100"));

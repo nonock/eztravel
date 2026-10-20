@@ -1,5 +1,6 @@
 //! The API the app calls: register the phone, read and set the time away,
-//! see what the backend sees, and the next departures.
+//! see what the backend sees, the next departures, and pick one of them for
+//! the reminder to leave.
 //!
 //! Every request carries the app key (`Authorization: Bearer …`), compiled
 //! into the user's own build of the app and kept out of the repository.
@@ -13,20 +14,23 @@ use axum::http::StatusCode;
 use axum::http::header::AUTHORIZATION;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use jiff::Timestamp;
 use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 
-use crate::calendar::Schedule;
+use crate::calendar::{Calendar, Schedule};
 use crate::departures::{self, NextDepartures};
 use crate::history::History;
+use crate::leaving::Refusal;
 use crate::profile::Store;
 use crate::watch::{Snapshot, View};
 
 /// Firebase tokens are a few hundred characters long.
 const MAX_TOKEN_LENGTH: usize = 4096;
+/// Journeys are named in a few dozen characters.
+const MAX_JOURNEY_LENGTH: usize = 256;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -40,6 +44,20 @@ pub struct Settings {
 #[serde(deny_unknown_fields)]
 struct Device {
     token: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Picked {
+    /// The train, by its journey. Required, but null drops the pick.
+    #[serde(deserialize_with = "Option::deserialize")]
+    journey: Option<String>,
+}
+
+/// Why a pick is refused, in the shape fixed by `fixtures/api/pick-refused.json`.
+#[derive(Serialize)]
+struct Refused {
+    refused: Refusal,
 }
 
 /// What the handlers share with the poll loop.
@@ -96,6 +114,7 @@ pub fn router(
         .route("/status", get(status_now))
         .route("/history", get(sent))
         .route("/departures", get(next_departures))
+        .route("/departure", put(pick_departure))
         .layer(middleware::from_fn_with_state(Arc::new(key), authorize))
         .with_state(Shared {
             store,
@@ -180,8 +199,61 @@ async fn sent(State(history): State<Arc<History>>) -> Json<Sent> {
 }
 
 /// Read from PRIM when asked, at most once a minute per stop.
-async fn next_departures(State(departures): State<Arc<NextDepartures>>) -> Json<departures::View> {
-    Json(departures.view(Timestamp::now()).await)
+async fn next_departures(
+    State(departures): State<Arc<NextDepartures>>,
+    State(store): State<Arc<Store>>,
+) -> Json<departures::View> {
+    let pick = store.profile().pick;
+    Json(departures.view(Timestamp::now(), pick.as_ref()).await)
+}
+
+async fn pick_departure(
+    State(store): State<Arc<Store>>,
+    State(departures): State<Arc<NextDepartures>>,
+    State(schedule): State<Arc<Schedule>>,
+    Json(picked): Json<Picked>,
+) -> Response {
+    pick(
+        &store,
+        &departures,
+        &schedule,
+        picked.journey,
+        Timestamp::now(),
+    )
+    .await
+}
+
+/// Keeps the train `journey` for the reminder to leave, if it can be reminded
+/// of; none drops the pick.
+async fn pick(
+    store: &Store,
+    departures: &NextDepartures,
+    schedule: &Schedule,
+    journey: Option<String>,
+    now: Timestamp,
+) -> Response {
+    let Some(journey) = journey else {
+        store.update(|profile| profile.pick = None);
+        return StatusCode::NO_CONTENT.into_response();
+    };
+    let calendar = Calendar {
+        away_through: store.profile().away_through,
+        ..schedule.calendar.clone()
+    };
+    let picked = if journey.is_empty() || journey.len() > MAX_JOURNEY_LENGTH {
+        Err(Refusal::Unknown)
+    } else {
+        departures.pick(&journey, now, &calendar).await
+    };
+    match picked {
+        Ok(pick) => {
+            store.update(|profile| profile.pick = Some(pick));
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(refused) => {
+            (StatusCode::UNPROCESSABLE_ENTITY, Json(Refused { refused })).into_response()
+        }
+    }
 }
 
 async fn set_settings(
@@ -195,9 +267,11 @@ async fn set_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calendar::Direction;
     use crate::config::Config;
     use crate::history::History;
     use crate::prim::Prim;
+    use crate::profile::Pick;
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode};
     use http_body_util::BodyExt;
@@ -291,6 +365,7 @@ mod tests {
             (Method::GET, "/status", None),
             (Method::GET, "/history", None),
             (Method::GET, "/departures", None),
+            (Method::PUT, "/departure", Some(r#"{"journey":null}"#)),
         ] {
             for authorization in [
                 None,
@@ -457,6 +532,118 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&body).unwrap(),
             fixture
         );
+    }
+
+    fn fixture(name: &str) -> serde_json::Value {
+        let path = format!("{}/../fixtures/api/{name}.json", env!("CARGO_MANIFEST_DIR"));
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_pick_is_dropped_with_null() {
+        let api = Api::new();
+        api.store.update(|profile| {
+            profile.pick = Some(Pick {
+                day: date(2026, 11, 3),
+                direction: Direction::Inbound,
+                journey: "j1".into(),
+                leave: "2026-11-03T15:20:00Z".parse().unwrap(),
+            });
+        });
+        let (status, _) = api
+            .authorized(Method::PUT, "/departure", Some(r#"{"journey":null}"#))
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(api.store.profile().pick, None);
+    }
+
+    #[tokio::test]
+    async fn a_pick_says_why_it_is_refused() {
+        // Without the routes, the departures are unknown.
+        let api = Api::new();
+        let (status, body) = api
+            .authorized(Method::PUT, "/departure", Some(r#"{"journey":"j2"}"#))
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+            fixture("pick-refused")
+        );
+        let long = format!(r#"{{"journey":"{}"}}"#, "j".repeat(MAX_JOURNEY_LENGTH + 1));
+        for request in [r#"{"journey":""}"#, long.as_str()] {
+            let (status, body) = api
+                .authorized(Method::PUT, "/departure", Some(request))
+                .await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(body, r#"{"refused":"unknown"}"#);
+        }
+        for request in [r#"{"journey":"j2","at":"now"}"#, "{}", r#"{"journey":"#] {
+            let (status, _) = api
+                .authorized(Method::PUT, "/departure", Some(request))
+                .await;
+            assert!(status.is_client_error(), "{request}: {status}");
+        }
+        assert_eq!(api.store.profile().pick, None);
+    }
+
+    #[tokio::test]
+    async fn a_train_picked_is_kept_and_shown() {
+        let server = wiremock::MockServer::start().await;
+        for (stop, body) in [
+            (
+                "STIF:StopArea:SP:100:",
+                departures::example::morning_board(),
+            ),
+            (
+                "STIF:StopArea:SP:200:",
+                departures::example::morning_alight(),
+            ),
+        ] {
+            wiremock::Mock::given(wiremock::matchers::query_param("MonitoringRef", stop))
+                .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(body))
+                .mount(&server)
+                .await;
+        }
+        let config = Config::parse(include_str!("../config.example.toml")).unwrap();
+        let departures = NextDepartures::new(
+            &config,
+            Prim::new(&server.uri(), "key"),
+            departures::example::routes(),
+        );
+        let api = Api::new();
+        // 7:50 in Paris: the 8:07, 4 minutes late, leaves at 8:11; leave at 7:59.
+        let now = departures::example::at("06:50:00");
+        let response = pick(
+            &api.store,
+            &departures,
+            &config.schedule(),
+            Some("j2".into()),
+            now,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let picked = api.store.profile().pick.unwrap();
+        assert_eq!(
+            (picked.direction, picked.journey.as_str(), picked.leave),
+            (
+                Direction::Outbound,
+                "j2",
+                departures::example::at("06:59:00")
+            )
+        );
+        // Away that day: refused, and the pick stays as it was.
+        api.store
+            .update(|profile| profile.away_through = Some(date(2026, 11, 3)));
+        let response = pick(
+            &api.store,
+            &departures,
+            &config.schedule(),
+            Some("j2".into()),
+            now,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(api.store.profile().pick, Some(picked));
     }
 
     #[tokio::test]

@@ -1,13 +1,15 @@
-//! What the phone sets through the API: which devices to notify, and until
-//! when the user is away. Shared by the API and the poll loop, saved in the
-//! data folder.
+//! What the phone sets through the API: which devices to notify, until
+//! when the user is away, and the train picked for the reminder to leave.
+//! Shared by the API and the poll loop, saved in the data folder.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use jiff::Timestamp;
 use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 
+use crate::calendar::Direction;
 use crate::service::{load, save};
 
 /// Tokens change when the app is reinstalled: keep the latest few only.
@@ -19,6 +21,21 @@ pub struct Profile {
     pub devices: Vec<String>,
     /// Last day away from the office, included.
     pub away_through: Option<Date>,
+    /// The train to be reminded of, instead of the first one at the usual time.
+    #[serde(default)]
+    pub pick: Option<Pick>,
+}
+
+/// A train picked in the app, on its day and way.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pick {
+    pub day: Date,
+    pub direction: Direction,
+    /// The train, by its journey.
+    pub journey: String,
+    /// When to leave for it, as it was when picked. Should it be cancelled,
+    /// the first train that can be caught leaving from then takes its place.
+    pub leave: Timestamp,
 }
 
 impl Profile {
@@ -46,7 +63,7 @@ impl Store {
     pub fn open(path: &Path, seed_devices: &[String]) -> Self {
         let profile = load(path).unwrap_or_else(|| Profile {
             devices: seed_devices.to_vec(),
-            away_through: None,
+            ..Profile::default()
         });
         Self {
             path: path.to_path_buf(),
@@ -103,7 +120,7 @@ mod tests {
     fn a_device_can_be_forgotten() {
         let mut profile = Profile {
             devices: vec!["a".into(), "b".into()],
-            away_through: None,
+            ..Profile::default()
         };
         profile.forget("a");
         profile.forget("unknown");
@@ -116,9 +133,16 @@ mod tests {
         let path = dir.path().join("profile.json");
         let store = Store::open(&path, &["seed".into()]);
         assert_eq!(tokens(&store.profile()), ["seed"]);
+        let pick = Pick {
+            day: date(2026, 11, 3),
+            direction: Direction::Inbound,
+            journey: "j1".into(),
+            leave: "2026-11-03T17:05:00Z".parse().unwrap(),
+        };
         store.update(|profile| {
             profile.register("phone");
             profile.away_through = Some(date(2026, 12, 24));
+            profile.pick = Some(pick.clone());
         });
         // The seed only applies when nothing was saved.
         let reopened = Store::open(&path, &["other seed".into()]);
@@ -126,7 +150,8 @@ mod tests {
             reopened.profile(),
             Profile {
                 devices: vec!["seed".into(), "phone".into()],
-                away_through: Some(date(2026, 12, 24))
+                away_through: Some(date(2026, 12, 24)),
+                pick: Some(pick),
             }
         );
     }
@@ -137,9 +162,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("profile.json");
         std::fs::write(&path, r#"{"devices":["old","phone"],"away_through":null}"#).unwrap();
-        assert_eq!(
-            tokens(&Store::open(&path, &["seed".into()]).profile()),
-            ["old", "phone"]
-        );
+        let profile = Store::open(&path, &["seed".into()]).profile();
+        assert_eq!(tokens(&profile), ["old", "phone"]);
+        assert_eq!(profile.pick, None);
     }
 }

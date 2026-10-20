@@ -1,25 +1,27 @@
 //! When to leave for the train: a reminder a few minutes before.
 //!
-//! The train is the first one that can be caught when leaving at the usual
-//! time of the way, or now if later, up to half an hour after it. The
-//! reminder says how it runs, but only what PRIM knows: a train that has not
+//! The train is the one picked in the app, or else the first one that can be
+//! caught when leaving at the usual time of the way, or now if later, up to
+//! half an hour after it. The reminder says how it runs, but only what PRIM knows: a train that has not
 //! set off yet carries the night's timetable, so it is "still scheduled"
 //! rather than "on time". After the reminder, a delay of a few minutes is
 //! told once; a train said cancelled gives way to the next one.
 
 use jiff::civil::Date;
+use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::alerts::Notification;
-use crate::calendar::Direction;
+use crate::calendar::{Calendar, Direction, WatchWindows};
 use crate::departures::{CallStatus, Visit, serves};
+use crate::relevance::Leg;
 use crate::trains::{Seen, Train};
 
 /// The reminder comes this long before it is time to leave.
 pub const NOTICE: SignedDuration = SignedDuration::from_mins(5);
-/// No reminder to leave later than this after the usual time: by then the
-/// way was taken, or not at all.
+/// No reminder to leave later than this after the usual time, or the picked
+/// train's: by then the way was taken, or not at all.
 pub const LATEST: SignedDuration = SignedDuration::from_mins(30);
 /// A delay this long, said after the reminder, is told.
 pub const LATE: SignedDuration = SignedDuration::from_mins(3);
@@ -38,20 +40,95 @@ struct Reminded {
     journey: String,
     train: Train,
     told_late: bool,
+    /// The pick it was for, if any: a new pick is reminded anew.
+    #[serde(default)]
+    picked: Option<String>,
+}
+
+/// What the reminder is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Aim<'a> {
+    /// The first train that can be caught leaving at the usual time, or now if later.
+    Usual(Timestamp),
+    /// The train picked in the app, by its journey. Cancelled, it gives way to
+    /// the first one that can be caught leaving at `leave`, or now if later.
+    Picked { journey: &'a str, leave: Timestamp },
+}
+
+/// The ride the reminder is for, and its minutes to the platform: the first
+/// of the way with them.
+pub fn reminded_leg(legs: &[Leg]) -> Option<(&Leg, u32)> {
+    legs.iter().find_map(|leg| Some((leg, leg.reach?)))
+}
+
+/// Why a train cannot be picked for the reminder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Refusal {
+    /// Its time to leave is past.
+    TooLate,
+    /// Not an office day, or time away: nothing is watched.
+    NotOfficeDay,
+    /// Leaving outside the way's watch window, when no reminder is sent.
+    OutsideWindow,
+    /// Not among the trains of the ride reminded that run.
+    Unknown,
+    /// The departures cannot be read just now.
+    Unavailable,
+}
+
+/// Whether a reminder to leave at `leave` on the way `direction` can be given:
+/// not past, on an office day, during the way's window.
+pub fn check_pick(
+    now: Timestamp,
+    leave: Timestamp,
+    direction: Direction,
+    tz: &TimeZone,
+    calendar: &Calendar,
+    windows: &WatchWindows,
+) -> Result<(), Refusal> {
+    if leave < now {
+        return Err(Refusal::TooLate);
+    }
+    let local = leave.to_zoned(tz.clone());
+    if !calendar.is_office_day(local.date()) {
+        return Err(Refusal::NotOfficeDay);
+    }
+    let window = match direction {
+        Direction::Outbound => windows.outbound,
+        Direction::Inbound => windows.inbound,
+    };
+    if local.time() < window.start || local.time() >= window.end {
+        return Err(Refusal::OutsideWindow);
+    }
+    Ok(())
 }
 
 /// One poll's reminders for the leg `seen`, `reach` from leaving to its
-/// platform, for someone leaving at `usual`, or now if later.
+/// platform, for the train `aim` says.
 pub fn remind(
     leaving: &mut Leaving,
     key: (Date, Direction),
     now: Timestamp,
     seen: &Seen,
     reach: SignedDuration,
-    usual: Timestamp,
+    aim: Aim,
 ) -> Vec<Notification> {
     if leaving.window != Some(key) {
         leaving.window = Some(key);
+        leaving.reminded = None;
+    }
+    let picked = match aim {
+        Aim::Picked { journey, .. } => Some(journey),
+        Aim::Usual(_) => None,
+    };
+    // A new pick is reminded anew; dropping one keeps the reminder given.
+    if picked.is_some()
+        && leaving
+            .reminded
+            .as_ref()
+            .is_some_and(|reminded| reminded.picked.as_deref() != picked)
+    {
         leaving.reminded = None;
     }
     let listed = |journey: &str| {
@@ -79,21 +156,30 @@ pub fn remind(
         }
         leaving.reminded = None;
     }
-    // The first train that can be caught, leaving at the usual time or now,
-    // but not much later than usual.
-    let earliest = usual.max(now);
-    let Some((visit, expected)) = seen
-        .board
-        .iter()
-        .filter(|visit| visit.line == seen.line && visit.status != CallStatus::Cancelled)
-        .filter_map(|visit| Some((visit, departure(visit)?)))
-        .filter(|(visit, expected)| {
-            *expected - reach >= earliest
-                && *expected - reach <= usual + LATEST
-                && serves(visit, *expected, (&seen.alight, &seen.arriving)).is_some()
-        })
-        .min_by_key(|(_, expected)| *expected)
-    else {
+    // When a train that can still be caught leaves.
+    let catchable = |visit: &Visit| {
+        let expected = departure(visit)?;
+        (visit.line == seen.line
+            && visit.status != CallStatus::Cancelled
+            && expected - reach >= now
+            && serves(visit, expected, (&seen.alight, &seen.arriving)).is_some())
+        .then_some(expected)
+    };
+    // The first one when leaving at `from`, or now if later, but not much later.
+    let first = |from: Timestamp| {
+        seen.board
+            .iter()
+            .filter_map(|visit| Some((visit, catchable(visit)?)))
+            .filter(|(_, expected)| *expected - reach >= from && *expected - reach <= from + LATEST)
+            .min_by_key(|(_, expected)| *expected)
+    };
+    let chosen = match aim {
+        Aim::Usual(usual) => first(usual),
+        Aim::Picked { journey, leave } => listed(journey)
+            .and_then(|visit| Some((visit, catchable(visit)?)))
+            .or_else(|| first(leave)),
+    };
+    let Some((visit, expected)) = chosen else {
         return vec![];
     };
     let at = expected - reach;
@@ -112,6 +198,7 @@ pub fn remind(
         journey: visit.journey.clone(),
         train: train.clone(),
         told_late: false,
+        picked: picked.map(String::from),
     });
     vec![Notification::Leave {
         train,
@@ -211,7 +298,29 @@ mod tests {
     }
 
     fn poll(leaving: &mut Leaving, now: &str, board: Vec<Value>) -> Vec<Notification> {
-        remind(leaving, KEY, at(now), &seen(board), REACH, usual())
+        remind(
+            leaving,
+            KEY,
+            at(now),
+            &seen(board),
+            REACH,
+            Aim::Usual(usual()),
+        )
+    }
+
+    /// A poll for the train `journey` picked in the app, to leave at `leave`.
+    fn picked(
+        leaving: &mut Leaving,
+        now: &str,
+        board: Vec<Value>,
+        journey: &str,
+        leave: &str,
+    ) -> Vec<Notification> {
+        let aim = Aim::Picked {
+            journey,
+            leave: at(leave),
+        };
+        remind(leaving, KEY, at(now), &seen(board), REACH, aim)
     }
 
     #[test]
@@ -348,6 +457,152 @@ mod tests {
     }
 
     #[test]
+    fn a_pick_must_leave_during_the_window_of_an_office_day() {
+        let config = crate::config::Config::parse(include_str!("../config.example.toml")).unwrap();
+        let check = |now: &str, leave: &str, calendar: &Calendar| {
+            check_pick(
+                now.parse().unwrap(),
+                leave.parse().unwrap(),
+                Direction::Inbound,
+                &config.time_zone(),
+                calendar,
+                &config.windows,
+            )
+        };
+        let calendar = &config.calendar;
+        // The way home is watched from 16:00 to 17:30 in Paris, on Tuesdays.
+        let now = "2026-11-03T14:00:00Z";
+        assert_eq!(check(now, "2026-11-03T15:00:00Z", calendar), Ok(()));
+        assert_eq!(check(now, "2026-11-03T16:29:00Z", calendar), Ok(()));
+        assert_eq!(
+            check(now, "2026-11-03T16:30:00Z", calendar),
+            Err(Refusal::OutsideWindow)
+        );
+        assert_eq!(
+            check(now, "2026-11-03T14:59:00Z", calendar),
+            Err(Refusal::OutsideWindow)
+        );
+        assert_eq!(
+            check("2026-11-03T15:21:00Z", "2026-11-03T15:20:00Z", calendar),
+            Err(Refusal::TooLate)
+        );
+        assert_eq!(
+            check("2026-11-02T14:00:00Z", "2026-11-02T15:20:00Z", calendar),
+            Err(Refusal::NotOfficeDay)
+        );
+        let away = Calendar {
+            away_through: Some(date(2026, 11, 3)),
+            ..calendar.clone()
+        };
+        assert_eq!(
+            check(now, "2026-11-03T15:20:00Z", &away),
+            Err(Refusal::NotOfficeDay)
+        );
+        // In the morning, the morning's window.
+        assert_eq!(
+            check_pick(
+                at("05:00"),
+                at("06:00"),
+                Direction::Outbound,
+                &config.time_zone(),
+                calendar,
+                &config.windows
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_picked_train_is_the_one_reminded_once() {
+        let mut leaving = Leaving::default();
+        // The 7:47 rather than the 7:32 of the usual time: leave at 7:35.
+        assert_eq!(
+            picked(&mut leaving, "07:15", three(on_time()), "j3", "07:35"),
+            []
+        );
+        assert_eq!(
+            picked(&mut leaving, "07:30", three(on_time()), "j3", "07:35"),
+            leave(train("07:47", "07:47"), "07:35", true)
+        );
+        assert_eq!(
+            picked(&mut leaving, "07:32", three(on_time()), "j3", "07:35"),
+            []
+        );
+    }
+
+    #[test]
+    fn a_cancelled_pick_gives_way_once_to_the_next_train_from_its_time() {
+        let cancelled = visit("j2", "07:32", "07:32", "cancelled", "07:05");
+        // Cancelled before the reminder.
+        let mut leaving = Leaving::default();
+        for now in ["07:14", "07:16", "07:18"] {
+            assert_eq!(
+                picked(&mut leaving, now, three(cancelled.clone()), "j2", "07:20"),
+                []
+            );
+        }
+        assert_eq!(
+            picked(
+                &mut leaving,
+                "07:30",
+                three(cancelled.clone()),
+                "j2",
+                "07:20"
+            ),
+            leave(train("07:47", "07:47"), "07:35", true)
+        );
+        for now in ["07:31", "07:32", "07:34"] {
+            assert_eq!(
+                picked(&mut leaving, now, three(cancelled.clone()), "j2", "07:20"),
+                []
+            );
+        }
+        // Cancelled after it.
+        let mut leaving = Leaving::default();
+        picked(&mut leaving, "07:15", three(on_time()), "j2", "07:20");
+        assert_eq!(
+            picked(
+                &mut leaving,
+                "07:30",
+                three(cancelled.clone()),
+                "j2",
+                "07:20"
+            ),
+            leave(train("07:47", "07:47"), "07:35", true)
+        );
+        assert_eq!(
+            picked(&mut leaving, "07:32", three(cancelled), "j2", "07:20"),
+            []
+        );
+    }
+
+    #[test]
+    fn a_new_pick_is_reminded_anew_but_dropping_one_is_not() {
+        let mut leaving = Leaving::default();
+        poll(&mut leaving, "07:15", three(on_time()));
+        assert_eq!(
+            picked(&mut leaving, "07:30", three(on_time()), "j3", "07:35"),
+            leave(train("07:47", "07:47"), "07:35", true)
+        );
+        assert_eq!(
+            picked(&mut leaving, "07:31", three(on_time()), "j3", "07:35"),
+            []
+        );
+        // Back to the usual time: the reminder was given.
+        assert_eq!(poll(&mut leaving, "07:32", three(on_time())), []);
+    }
+
+    #[test]
+    fn a_reminder_saved_by_the_previous_version_is_read() {
+        let mut leaving = Leaving::default();
+        poll(&mut leaving, "07:15", three(on_time()));
+        let saved = serde_json::to_string(&leaving).unwrap();
+        let old = saved.replace(r#","picked":null"#, "");
+        assert!(!old.contains("picked"));
+        assert_eq!(serde_json::from_str::<Leaving>(&old).unwrap(), leaving);
+    }
+
+    #[test]
     fn a_new_window_starts_afresh_and_survives_a_restart() {
         let mut leaving = Leaving::default();
         poll(&mut leaving, "07:15", three(on_time()));
@@ -360,7 +615,7 @@ mod tests {
             at("07:15"),
             &seen(three(on_time())),
             REACH,
-            usual(),
+            Aim::Usual(usual()),
         );
         assert_eq!(reminded, leave(train("07:32", "07:32"), "07:20", true));
     }

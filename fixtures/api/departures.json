@@ -10,31 +10,37 @@
       "reach": 12,
       "departures": [
         {
+          "journey": "j1",
           "aimed": "2026-11-03T06:52:00Z",
           "expected": "2026-11-03T06:52:00Z",
           "arrival": "2026-11-03T07:04:00Z",
           "mission": "PALO",
           "destination": "Gare Centrale",
           "platform": "2",
-          "status": "on_time"
+          "status": "on_time",
+          "picked": false
         },
         {
+          "journey": "j2",
           "aimed": "2026-11-03T07:07:00Z",
           "expected": "2026-11-03T07:11:00Z",
           "arrival": "2026-11-03T07:23:00Z",
           "mission": "PILO",
           "destination": "Gare Centrale",
           "platform": "2",
-          "status": "delayed"
+          "status": "delayed",
+          "picked": true
         },
         {
+          "journey": "j3",
           "aimed": "2026-11-03T07:22:00Z",
           "expected": "2026-11-03T07:22:00Z",
           "arrival": "2026-11-03T07:34:00Z",
           "mission": "PALO",
           "destination": "Gare Centrale",
           "platform": "2",
-          "status": "cancelled"
+          "status": "cancelled",
+          "picked": false
         }
       ]
     },
@@ -47,22 +53,26 @@
       "reach": null,
       "departures": [
         {
+          "journey": "m1",
           "aimed": null,
           "expected": "2026-11-03T06:53:30Z",
           "arrival": null,
           "mission": null,
           "destination": "Porte Nord",
           "platform": null,
-          "status": "on_time"
+          "status": "on_time",
+          "picked": false
         },
         {
+          "journey": "m2",
           "aimed": null,
           "expected": "2026-11-03T06:58:10Z",
           "arrival": null,
           "mission": null,
           "destination": "Porte Nord",
           "platform": null,
-          "status": "on_time"
+          "status": "on_time",
+          "picked": false
         }
       ]
     }
