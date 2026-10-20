@@ -288,8 +288,10 @@ impl Service {
             let window = self.window_bounds(local, direction);
             notifications.extend(follow(&mut trains, key, window, now, seen, true));
             notifications.extend(self.reminders(&mut leaving, key, now, local, seen));
+            // Last: when anything before it cannot be sent, the poll is tried again
+            // whole, and checks are not back yet anyway.
             if health.recovering() {
-                notifications.insert(0, Notification::Recovered);
+                notifications.push(Notification::Recovered);
             }
         }
         if let Err(error) = self.send(now, until, profile, &notifications).await {
@@ -1042,6 +1044,27 @@ mod tests {
         for time in ["06:00", "06:10", "06:12"] {
             service.poll(tuesday(time)).await;
         }
+    }
+
+    #[tokio::test]
+    async fn the_end_of_an_outage_is_said_once_what_else_was_due_got_through() {
+        let setup = Setup::new().await;
+        Mock::given(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(2)
+            .mount(&setup.server)
+            .await;
+        setup.prim_answers(200, true, 2).await;
+        setup.firebase_answers_to("outage", 200, 1).await;
+        // The alert due with it fails once: the whole poll is tried again.
+        setup.firebase_answers(500, 1).await;
+        setup.firebase_answers(200, 1).await;
+        setup.firebase_answers_to("recovered", 200, 1).await;
+        let mut service = setup.service();
+        service.poll(tuesday("06:00")).await;
+        service.poll(tuesday("06:10")).await;
+        service.poll(tuesday("06:12")).await;
+        assert_eq!(service.poll(tuesday("06:14")).await, Poll::Sent(2));
     }
 
     #[tokio::test]
