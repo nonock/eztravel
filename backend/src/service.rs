@@ -22,6 +22,7 @@ use crate::config::Config;
 use crate::departures::{NextDepartures, leg_stops, monitoring_ref, one_way};
 use crate::history::{self, Entry, History};
 use crate::leaving::{Aim, Leaving, remind, reminded_leg};
+use crate::line_alerts::LineAlerts;
 use crate::prim::Prim;
 use crate::prim::PrimError;
 use crate::profile::{Pick, Profile, Store};
@@ -53,6 +54,7 @@ pub struct Service {
     status: Arc<Mutex<Snapshot>>,
     history: Arc<History>,
     departures: Arc<NextDepartures>,
+    line_alerts: Arc<LineAlerts>,
     routes: BTreeMap<String, Vec<Route>>,
     routes_day: Option<Date>,
 }
@@ -102,6 +104,7 @@ impl Service {
             status: Arc::default(),
             history: Arc::new(History::open(&data_dir.join(HISTORY_FILE))),
             departures: Arc::new(NextDepartures::new(&config, prim.clone(), routes.clone())),
+            line_alerts: Arc::new(LineAlerts::new(&config, prim.clone())),
             routes,
             routes_day: None,
             config,
@@ -150,6 +153,7 @@ impl Service {
                 schedule,
                 service.history(),
                 service.departures(),
+                service.line_alerts(),
                 app_key,
             ),
             service,
@@ -164,6 +168,11 @@ impl Service {
     /// The next departures, read when the app asks, on the stops of the routes.
     pub fn departures(&self) -> Arc<NextDepartures> {
         self.departures.clone()
+    }
+
+    /// The disruptions of the lines, as the poll loop last read them or when the app asks.
+    pub fn line_alerts(&self) -> Arc<LineAlerts> {
+        self.line_alerts.clone()
     }
 
     /// What the last poll saw, updated after each poll.
@@ -263,7 +272,11 @@ impl Service {
         let lines = self.config.line_codes();
         let codes: Vec<&str> = lines.iter().map(String::as_str).collect();
         let disruptions = match self.prim.disruptions(&codes).await {
-            Ok(disruptions) => disruptions,
+            Ok(disruptions) => {
+                // The app's Alertes page needs no read of its own then.
+                self.line_alerts.store(now, &disruptions);
+                disruptions
+            }
             Err(error) => {
                 let until = self.window_end(local, direction);
                 self.failed(now, until, Cause::Prim, profile, health).await;
@@ -577,6 +590,7 @@ impl Service {
         }
         save(&self.data_dir.join(ROUTES_FILE), &self.routes);
         self.departures.set_routes(self.routes.clone());
+        self.line_alerts.set_routes(self.routes.clone());
         for leg in self.config.outbound.iter().chain(&self.config.inbound) {
             let has =
                 |route: &Route, area: &str| route.stops.iter().any(|stop| stop.stop_area == area);
@@ -1102,6 +1116,19 @@ mod tests {
                 cause: Cause::Firebase
             })
         );
+    }
+
+    #[tokio::test]
+    async fn the_alerts_page_uses_what_the_poll_just_read() {
+        let setup = Setup::new().await;
+        // Read once, by the poll: the page asks for nothing more.
+        setup.prim_answers(200, true, 1).await;
+        setup.firebase_answers(200, 1).await;
+        let mut service = setup.service();
+        service.poll(at(MORNING)).await;
+        let view = service.line_alerts().view(at(MORNING)).await;
+        let lines = view.lines.unwrap();
+        assert_eq!(lines[0].alerts.len(), 1, "{lines:?}");
     }
 
     #[tokio::test]

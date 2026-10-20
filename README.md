@@ -107,6 +107,7 @@ All requests carry `Authorization: Bearer <APP_KEY>`.
 | `GET /status` | What the backend sees: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /history` | What it sent, newest first: [fixtures/api/history.json](fixtures/api/history.json) |
 | `GET /departures` | The next departures on each leg: [fixtures/api/README.md](fixtures/api/README.md) |
+| `GET /alerts` | Every disruption of the lines not yet over: [fixtures/api/README.md](fixtures/api/README.md) |
 | `PUT /departure` `{"journey": "…"}` | Picks a departure for the reminder to leave, or `null` for none: [fixtures/api/README.md](fixtures/api/README.md) |
 
 Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md).

@@ -1,0 +1,54 @@
+{
+  "lines": [
+    {
+      "line": "L",
+      "mode": "train",
+      "color": "#7B61C9",
+      "alerts": [
+        {
+          "id": "incident-l",
+          "severity": "blocking",
+          "cause": "incident",
+          "title": "Ligne L : trafic interrompu entre Les Aubépines et Gare Centrale",
+          "text": "Le trafic est interrompu entre Les Aubépines et Gare Centrale jusqu'à 9h.\nMotif : panne d'un train.",
+          "active": true,
+          "begin": "2026-11-03T06:30:00Z",
+          "end": "2026-11-03T08:00:00Z",
+          "on_way": true,
+          "updated": "2026-11-03T06:35:00Z"
+        },
+        {
+          "id": "works-l",
+          "severity": "information",
+          "cause": "works",
+          "title": "Ligne L : travaux à Les Peupliers",
+          "text": "Les week-ends de novembre, les trains ne desservent pas Les Peupliers après 22h.",
+          "active": false,
+          "begin": "2026-11-07T21:00:00Z",
+          "end": "2026-11-08T04:00:00Z",
+          "on_way": false,
+          "updated": "2026-10-20T08:00:00Z"
+        }
+      ]
+    },
+    {
+      "line": "X",
+      "mode": "metro",
+      "color": "#E07A1F",
+      "alerts": [
+        {
+          "id": "slow-x",
+          "severity": "disrupted",
+          "cause": "unknown",
+          "title": "Métro X : trafic ralenti",
+          "text": "Le trafic est ralenti sur l'ensemble de la ligne.",
+          "active": true,
+          "begin": "2026-11-03T06:00:00Z",
+          "end": "2026-11-03T09:00:00Z",
+          "on_way": true,
+          "updated": "2026-11-03T06:40:00Z"
+        }
+      ]
+    }
+  ]
+}

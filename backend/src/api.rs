@@ -24,6 +24,7 @@ use crate::calendar::{Calendar, Schedule};
 use crate::departures::{self, NextDepartures};
 use crate::history::History;
 use crate::leaving::Refusal;
+use crate::line_alerts::{self, LineAlerts};
 use crate::profile::Store;
 use crate::watch::{Snapshot, View};
 
@@ -68,6 +69,13 @@ struct Shared {
     schedule: Arc<Schedule>,
     history: Arc<History>,
     departures: Arc<NextDepartures>,
+    line_alerts: Arc<LineAlerts>,
+}
+
+impl FromRef<Shared> for Arc<LineAlerts> {
+    fn from_ref(shared: &Shared) -> Self {
+        shared.line_alerts.clone()
+    }
 }
 
 impl FromRef<Shared> for Arc<Store> {
@@ -106,6 +114,7 @@ pub fn router(
     schedule: Schedule,
     history: Arc<History>,
     departures: Arc<NextDepartures>,
+    line_alerts: Arc<LineAlerts>,
     key: String,
 ) -> Router {
     Router::new()
@@ -115,6 +124,7 @@ pub fn router(
         .route("/history", get(sent))
         .route("/departures", get(next_departures))
         .route("/departure", put(pick_departure))
+        .route("/alerts", get(alerts))
         .layer(middleware::from_fn_with_state(Arc::new(key), authorize))
         .with_state(Shared {
             store,
@@ -122,6 +132,7 @@ pub fn router(
             schedule: Arc::new(schedule),
             history,
             departures,
+            line_alerts,
         })
 }
 
@@ -207,6 +218,11 @@ async fn next_departures(
     Json(departures.view(Timestamp::now(), pick.as_ref()).await)
 }
 
+/// The lines' disruptions, as the poll loop last read them, or read at most every few minutes.
+async fn alerts(State(line_alerts): State<Arc<LineAlerts>>) -> Json<line_alerts::View> {
+    Json(line_alerts.view(Timestamp::now()).await)
+}
+
 async fn pick_departure(
     State(store): State<Arc<Store>>,
     State(departures): State<Arc<NextDepartures>>,
@@ -286,6 +302,7 @@ mod tests {
         status: Arc<Mutex<Snapshot>>,
         history: Arc<History>,
         departures: Arc<NextDepartures>,
+        line_alerts: Arc<LineAlerts>,
         _dir: tempfile::TempDir,
     }
 
@@ -304,6 +321,10 @@ mod tests {
                 status: Arc::default(),
                 history: Arc::new(History::open(&dir.path().join("history.json"))),
                 departures: Arc::new(departures),
+                line_alerts: Arc::new(LineAlerts::new(
+                    &Config::parse(include_str!("../config.example.toml")).unwrap(),
+                    Prim::new("http://127.0.0.1:9", "key"),
+                )),
                 _dir: dir,
             }
         }
@@ -334,6 +355,7 @@ mod tests {
                 schedule,
                 self.history.clone(),
                 self.departures.clone(),
+                self.line_alerts.clone(),
                 KEY.into(),
             )
             .oneshot(request)
@@ -366,6 +388,7 @@ mod tests {
             (Method::GET, "/history", None),
             (Method::GET, "/departures", None),
             (Method::PUT, "/departure", Some(r#"{"journey":null}"#)),
+            (Method::GET, "/alerts", None),
         ] {
             for authorization in [
                 None,
@@ -644,6 +667,14 @@ mod tests {
         .await;
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(api.store.profile().pick, Some(picked));
+    }
+
+    #[tokio::test]
+    async fn alerts_that_cannot_be_read_are_said_unknown() {
+        let api = Api::new();
+        let (status, body) = api.authorized(Method::GET, "/alerts", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, r#"{"lines":null}"#);
     }
 
     #[tokio::test]
