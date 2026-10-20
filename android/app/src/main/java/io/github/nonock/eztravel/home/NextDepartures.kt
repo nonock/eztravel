@@ -320,7 +320,7 @@ private fun StopName(name: String, modifier: Modifier) {
 
 /** A small label on its own ground, such as the platform. */
 @Composable
-private fun Tag(text: String) {
+internal fun Tag(text: String) {
     Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
         Text(text, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
     }

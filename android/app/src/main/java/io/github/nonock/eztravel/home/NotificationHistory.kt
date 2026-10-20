@@ -1,12 +1,9 @@
 package io.github.nonock.eztravel.home
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,7 +36,7 @@ private sealed interface Sent {
 
 /** What the backend sent, by day, newest first. */
 @Composable
-fun NotificationHistory(backend: Backend, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun NotificationHistory(backend: Backend, modifier: Modifier = Modifier) {
     var sent by remember { mutableStateOf<Sent>(Sent.Loading) }
     LaunchedEffect(backend) {
         sent = try {
@@ -52,9 +49,6 @@ fun NotificationHistory(backend: Backend, onBack: () -> Unit, modifier: Modifier
     }
 
     Column(modifier) {
-        TextButton(onClick = onBack) { Text(stringResource(R.string.history_back)) }
-        Text(stringResource(R.string.history_title), style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(8.dp))
         when (val current = sent) {
             Sent.Loading -> Text(stringResource(R.string.away_loading))
             Sent.Unreachable -> Text(stringResource(R.string.away_unreachable), color = MaterialTheme.colorScheme.error)

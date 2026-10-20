@@ -30,6 +30,9 @@ interface Backend {
     /** The next departures on the way shown. */
     suspend fun departures(): Departures
 
+    /** Every disruption of the lines that is not over yet. */
+    suspend fun alerts(): Alerts
+
     /**
      * Picks the train [journey] for the reminder to leave, or none: null once
      * saved, or why the backend refuses it.
@@ -69,6 +72,10 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
 
     override suspend fun departures(): Departures = withContext(Dispatchers.IO) {
         Departures.parse(request("GET", "/departures", null))
+    }
+
+    override suspend fun alerts(): Alerts = withContext(Dispatchers.IO) {
+        Alerts.parse(request("GET", "/alerts", null))
     }
 
     override suspend fun pick(journey: String?): Refusal? = withContext(Dispatchers.IO) {

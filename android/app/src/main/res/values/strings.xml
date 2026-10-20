@@ -55,7 +55,6 @@
     <string name="status_outage_firebase">Watching interrupted since %1$s: notifications cannot be sent. Check the traffic elsewhere.</string>
     <string name="status_outage_server">Watching interrupted since %1$s: the server has stopped checking. Check the traffic elsewhere.</string>
     <string name="history_title">Notification history</string>
-    <string name="history_back">Back</string>
     <string name="history_empty">Nothing sent yet.</string>
     <string name="history_today">Today</string>
     <string name="history_yesterday">Yesterday</string>
@@ -99,4 +98,23 @@
     <string name="departures_pick_failed">The reminder could not be saved.</string>
     <string name="ok" translatable="false">OK</string>
     <string name="cancel">Cancel</string>
+    <string name="back">Back</string>
+    <string name="nav_trip">Commute</string>
+    <string name="nav_alerts">Alerts</string>
+    <string name="nav_history">History</string>
+    <string name="settings_title">Settings</string>
+    <string name="alerts_unavailable">Alerts cannot be read right now.</string>
+    <string name="alerts_none_at_all">No alert on your lines.</string>
+    <string name="alerts_none">No alert on this line.</string>
+    <string name="alerts_now">Now</string>
+    <string name="alerts_coming">Coming</string>
+    <string name="alerts_on_way">On your way</string>
+    <string name="alerts_until">Until %1$s</string>
+    <string name="alerts_from">From %1$s</string>
+    <string name="alerts_unfold">Read all</string>
+    <string name="alerts_fold">Fold</string>
+    <plurals name="alerts_more_periods">
+        <item quantity="one">%d more period</item>
+        <item quantity="other">%d more periods</item>
+    </plurals>
 </resources>

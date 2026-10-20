@@ -91,6 +91,14 @@ class HttpBackendTest {
     }
 
     @Test
+    fun readsTheAlerts() = runBlocking {
+        status = 200
+        answer = File("../../fixtures/api/alerts.json").readText()
+        assertEquals(Alerts.parse(answer), backend.alerts())
+        assertEquals(listOf("GET /alerts"), received.map { "${it.method} ${it.path}" })
+    }
+
+    @Test
     fun picksADepartureAndDropsIt() = runBlocking {
         assertNull(backend.pick("j2"))
         assertNull(backend.pick(null))

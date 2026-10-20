@@ -17,6 +17,7 @@ class FakeBackend(
     var status: Status = Status(null, null, null, null, emptyList(), emptyList()),
     var history: List<HistoryEntry> = emptyList(),
     var departures: Departures = Departures(Status.Direction.OUTBOUND, emptyList()),
+    var alerts: Alerts = Alerts(emptyList()),
     /** The answer to picks: null when saved. */
     var refusal: Refusal? = null,
     /** Picks cannot be saved, while all else works. */
@@ -54,6 +55,12 @@ class FakeBackend(
         if (failing) throw IOException("unreachable")
         if (garbled) throw JSONException("not JSON")
         return departures
+    }
+
+    override suspend fun alerts(): Alerts {
+        if (failing) throw IOException("unreachable")
+        if (garbled) throw JSONException("not JSON")
+        return alerts
     }
 
     override suspend fun pick(journey: String?): Refusal? {

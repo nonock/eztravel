@@ -3,7 +3,11 @@ package io.github.nonock.eztravel
 import android.Manifest
 import android.app.NotificationManager
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.core.view.WindowCompat
@@ -45,13 +49,51 @@ class MainActivityTest {
 
     private fun text(id: Int) = compose.activity.getString(id)
 
+    /** A tab of the bottom bar. */
+    private fun tab(id: Int) = compose.onNode(hasText(text(id)) and hasClickAction())
+
+    /** The phone's back gesture, once the screen shows what was last tapped. */
+    private fun back() {
+        compose.waitForIdle()
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+    }
+
     @Test
-    fun theHomeScreenShowsTheStatusAndTheTimeAway() {
+    fun theAppOpensOnTheCommute() {
         compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > 0 }
+        tab(R.string.nav_trip).assertIsSelected()
+        compose.onNodeWithText(text(R.string.app_name)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.departures_title)).assertIsDisplayed()
+    }
+
+    @Test
+    fun eachTabOpensItsPageAndBackComesToTheCommute() {
+        tab(R.string.nav_history).performClick()
+        compose.onNodeWithText(text(R.string.history_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.history_empty)).assertIsDisplayed()
+        tab(R.string.nav_alerts).performClick()
+        tab(R.string.nav_alerts).assertIsSelected()
+        compose.onNodeWithText(text(R.string.alerts_none_at_all)).assertIsDisplayed()
+        // The phone's own back gesture comes to the commute, as its tab does.
+        back()
+        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+        tab(R.string.nav_history).performClick()
+        tab(R.string.nav_trip).performClick()
+        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+    }
+
+    @Test
+    fun theTimeAwayIsBehindTheGearAndBackLeavesIt() {
+        compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
         compose.onNodeWithText(text(R.string.away_none)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.away_title)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.back)).performClick()
+        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
+        back()
+        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
     }
 
     @Test
@@ -60,22 +102,11 @@ class MainActivityTest {
         compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > 0 }
         compose.waitForIdle()
         val atLaunch = backend.statusReads.get()
+        compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
         compose.onNodeWithText(text(R.string.away_choose)).performClick()
         compose.onNodeWithText(text(R.string.ok)).performClick()
+        compose.onNodeWithContentDescription(text(R.string.back)).performClick()
         compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > atLaunch }
-    }
-
-    @Test
-    fun theHistoryOpensFromTheHomeScreenAndBackLeavesIt() {
-        compose.onNodeWithText(text(R.string.history_title)).performClick()
-        compose.onNodeWithText(text(R.string.history_empty)).assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.history_back)).performClick()
-        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
-        // The phone's own back gesture does the same.
-        compose.onNodeWithText(text(R.string.history_title)).performClick()
-        compose.onNodeWithText(text(R.string.history_empty)).assertIsDisplayed()
-        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
-        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
     }
 
     @Test

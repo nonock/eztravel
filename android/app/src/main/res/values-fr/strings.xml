@@ -55,7 +55,6 @@
     <string name="status_outage_firebase">Surveillance interrompue depuis %1$s : les notifications ne partent plus. Vérifiez le trafic ailleurs.</string>
     <string name="status_outage_server">Surveillance interrompue depuis %1$s : le serveur ne fait plus ses relevés. Vérifiez le trafic ailleurs.</string>
     <string name="history_title">Historique des notifications</string>
-    <string name="history_back">Retour</string>
     <string name="history_empty">Rien n’a encore été envoyé.</string>
     <string name="history_today">Aujourd’hui</string>
     <string name="history_yesterday">Hier</string>
@@ -98,4 +97,23 @@
     <string name="departures_refused_unavailable">Les départs ne peuvent pas être lus pour l’instant : réessayez dans un moment.</string>
     <string name="departures_pick_failed">Le rappel n’a pas pu être enregistré.</string>
     <string name="cancel">Annuler</string>
+    <string name="back">Retour</string>
+    <string name="nav_trip">Trajet</string>
+    <string name="nav_alerts">Alertes</string>
+    <string name="nav_history">Historique</string>
+    <string name="settings_title">Réglages</string>
+    <string name="alerts_unavailable">Les alertes ne peuvent pas être lues pour l’instant.</string>
+    <string name="alerts_none_at_all">Aucune alerte sur vos lignes.</string>
+    <string name="alerts_none">Aucune alerte sur cette ligne.</string>
+    <string name="alerts_now">En cours</string>
+    <string name="alerts_coming">À venir</string>
+    <string name="alerts_on_way">Sur votre trajet</string>
+    <string name="alerts_until">Jusqu’à %1$s</string>
+    <string name="alerts_from">À partir de %1$s</string>
+    <string name="alerts_unfold">Tout lire</string>
+    <string name="alerts_fold">Replier</string>
+    <plurals name="alerts_more_periods">
+        <item quantity="one">%d autre créneau</item>
+        <item quantity="other">%d autres créneaux</item>
+    </plurals>
 </resources>

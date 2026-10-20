@@ -3,7 +3,6 @@ package io.github.nonock.eztravel.home
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nonock.eztravel.R
@@ -14,7 +13,6 @@ import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
 import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import io.github.nonock.eztravel.notifications.text
-import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -33,9 +31,7 @@ class NotificationHistoryTest {
 
     private fun text(id: Int, vararg args: Any) = context.getString(id, *args)
 
-    private var backs = 0
-
-    private fun show(backend: FakeBackend) = compose.setContent { NotificationHistory(backend, onBack = { backs++ }) }
+    private fun show(backend: FakeBackend) = compose.setContent { NotificationHistory(backend) }
 
     /** Noon on the day `daysAgo` days before today, in the phone's time zone. */
     private fun noon(daysAgo: Long): Instant =
@@ -90,12 +86,5 @@ class NotificationHistoryTest {
     fun aGarbledAnswerIsTakenAsAnUnreachableServer() {
         show(FakeBackend(garbled = true))
         compose.onNodeWithText(text(R.string.away_unreachable)).assertIsDisplayed()
-    }
-
-    @Test
-    fun theBackButtonLeaves() {
-        show(FakeBackend())
-        compose.onNodeWithText(text(R.string.history_back)).performClick()
-        assertEquals(1, backs)
     }
 }
