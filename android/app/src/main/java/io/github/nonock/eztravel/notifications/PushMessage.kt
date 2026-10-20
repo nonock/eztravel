@@ -159,7 +159,7 @@ sealed interface PushMessage {
                 line ?: return null,
                 data["mission"],
                 data["destination"] ?: return null,
-                data["from"] ?: return null,
+                data["station"] ?: return null,
                 instant(data["aimed"]) ?: return null,
                 instant(data["expected"]),
             )

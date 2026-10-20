@@ -181,7 +181,8 @@ fn describe_train(train: &Train, labels: &[LineLabel], put: &mut dyn FnMut(&str,
         put("mission", mission);
     }
     put("destination", &train.destination);
-    put("from", &train.from);
+    // Not `from`, which Firebase keeps for itself.
+    put("station", &train.from);
     put("aimed", &train.aimed.to_string());
     put("expected", &train.expected.to_string());
     let until = train.aimed.max(train.expected) + TRAIN_SHOWN_AFTER;
@@ -545,6 +546,28 @@ mod tests {
             short_message: None,
             message: html.into(),
             sections: vec![],
+        }
+    }
+
+    #[test]
+    fn no_payload_uses_a_key_firebase_refuses() {
+        // Firebase answers 400 to these: the notification never leaves.
+        let refused = |key: &str| {
+            ["from", "message_type"].contains(&key)
+                || key.starts_with("google.")
+                || key.starts_with("gcm.")
+        };
+        let folder = format!("{}/../fixtures/push", env!("CARGO_MANIFEST_DIR"));
+        for file in std::fs::read_dir(folder).unwrap() {
+            let name = file.unwrap().file_name().into_string().unwrap();
+            let Some(kind) = name.strip_suffix(".json") else {
+                continue;
+            };
+            let keys: Vec<String> = fixture(kind)
+                .into_keys()
+                .filter(|key| refused(key))
+                .collect();
+            assert_eq!(keys, Vec::<String>::new(), "{name}");
         }
     }
 

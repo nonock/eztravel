@@ -139,12 +139,12 @@ class PushMessageTest {
         )
         // Late by how much, it must say.
         assertNull(PushMessage.parse(fixture("train_late") - "expected"))
-        assertNull(PushMessage.parse(fixture("train_late") - "from"))
+        assertNull(PushMessage.parse(fixture("train_late") - "station"))
     }
 
     @Test
     fun aTrainWithoutWhatNamesItIsIgnored() {
-        for (missing in listOf("line", "destination", "from", "aimed")) {
+        for (missing in listOf("line", "destination", "station", "aimed")) {
             assertNull(missing, PushMessage.parse(fixture("train_cancelled") - missing))
             assertNull(missing, PushMessage.parse(fixture("train_back") - missing))
         }
