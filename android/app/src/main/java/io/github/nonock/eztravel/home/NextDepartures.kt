@@ -1,14 +1,23 @@
 package io.github.nonock.eztravel.home
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -97,7 +106,7 @@ fun NextDepartures(backend: Backend, modifier: Modifier = Modifier, now: () -> I
             unreadable -> Text(stringResource(R.string.departures_unavailable), color = MaterialTheme.colorScheme.error)
             current == null -> Text(stringResource(R.string.away_loading))
             else -> {
-                val reminded = current.legs.firstOrNull { it.reach != null }
+                val reminded = current.reminded
                 for (leg in current.legs) {
                     if (leg === reminded) LegDepartures(leg, readAt, refused, pick) else LegDepartures(leg, readAt)
                 }
@@ -114,86 +123,121 @@ private fun Refusal.message() = when (this) {
     Refusal.UNAVAILABLE -> R.string.departures_refused_unavailable
 }
 
-/** [onPick], on the leg the reminder is for, with why the last pick was [refused]. */
+/** A leg in its card. [onPick], on the leg the reminder is for, with why the last pick was [refused]. */
 @Composable
 private fun LegDepartures(leg: Departures.Leg, now: Instant, refused: Int? = null, onPick: ((Departure) -> Unit)? = null) {
-    Spacer(Modifier.height(12.dp))
-    // Read as one: "Line J, Les Aubépines → Gare Centrale".
-    Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
-        LineBadge(leg.line, leg.color)
-        if (leg.from != null && leg.to != null) {
-            Spacer(Modifier.width(12.dp))
-            Text(stringResource(R.string.departures_leg, leg.from, leg.to), style = MaterialTheme.typography.titleSmall)
+    Card(
+        Modifier.fillMaxWidth().padding(top = 12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            // Read as one: "Line J, Les Aubépines → Gare Centrale".
+            Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
+                LineBadge(leg.line, leg.color)
+                if (leg.from != null && leg.to != null) {
+                    Spacer(Modifier.width(12.dp))
+                    Text(stringResource(R.string.departures_leg, leg.from, leg.to), style = MaterialTheme.typography.titleSmall)
+                }
+            }
+            refused?.let {
+                Text(stringResource(it), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+            }
+            val departures = leg.departures
+            when {
+                departures == null -> Text(
+                    stringResource(R.string.departures_unavailable),
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                departures.isEmpty() -> Text(stringResource(R.string.departures_none), modifier = Modifier.padding(top = 8.dp))
+                else -> departures.forEachIndexed { index, departure ->
+                    if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    DepartureRow(leg, departure, now, onPick)
+                }
+            }
         }
-    }
-    refused?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
-    val departures = leg.departures
-    when {
-        departures == null -> Text(stringResource(R.string.departures_unavailable), color = MaterialTheme.colorScheme.error)
-        departures.isEmpty() -> Text(stringResource(R.string.departures_none))
-        else -> for (departure in departures) DepartureRow(departure, now, leg.reach, onPick)
     }
 }
 
 /**
- * One departure, read as one: "07:07, +4 min, Gare Centrale, PILO, Platform 2,
- * arrives 07:23, leave in 9 min". [reach] is the time to its platform, if known.
- * With [onPick], a train that can still be caught is picked by a tap, and the
- * one picked dropped.
+ * One departure of [leg], read as one: "07:07, +4 min, Gare Centrale, PILO,
+ * Platform 2, arrives 07:23, leave in 9 min". With [onPick], a train that can
+ * still be caught has a bell that picks it for the reminder to leave, and drops
+ * it once picked.
  */
 @Composable
-private fun DepartureRow(departure: Departure, now: Instant, reach: Duration?, onPick: ((Departure) -> Unit)?) {
-    val catchable = reach != null && departure.state != State.CANCELLED && !now.isAfter(departure.expected.minus(reach))
-    val pickable = onPick != null && departure.journey != null && (departure.picked || catchable)
-    val tap = if (pickable) {
-        val label = stringResource(if (departure.picked) R.string.departures_unpick else R.string.departures_pick)
-        Modifier.clickable(onClickLabel = label) { onPick(departure) }
-    } else {
-        Modifier
-    }
-    Row(
-        Modifier.padding(top = 8.dp).then(tap).semantics(mergeDescendants = true) {},
-        verticalAlignment = Alignment.Top,
-    ) {
-        Column(Modifier.width(76.dp)) {
-            val cancelled = departure.state == State.CANCELLED
-            Text(
+private fun DepartureRow(leg: Departures.Leg, departure: Departure, now: Instant, onPick: ((Departure) -> Unit)?) {
+    val pickable = onPick != null && departure.journey != null && (departure.picked || leg.catchable(departure, now))
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.Top) {
+            Column(Modifier.width(72.dp)) {
+                val cancelled = departure.state == State.CANCELLED
+                Text(
+                    when {
+                        // The metro gives no timetable: the minutes left say more.
+                        departure.aimed == null -> departure.expected.minutesFrom(now).let { minutes ->
+                            if (minutes == 0L) stringResource(R.string.departures_arriving) else stringResource(R.string.departures_minutes, minutes)
+                        }
+                        else -> departure.aimed.clock()
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    textDecoration = if (cancelled) TextDecoration.LineThrough else null,
+                )
                 when {
-                    // The metro gives no timetable: the minutes left say more.
-                    departure.aimed == null -> departure.expected.minutesFrom(now).let { minutes ->
-                        if (minutes == 0L) stringResource(R.string.departures_arriving) else stringResource(R.string.departures_minutes, minutes)
-                    }
-                    else -> departure.aimed.clock()
-                },
-                fontWeight = FontWeight.Bold,
-                textDecoration = if (cancelled) TextDecoration.LineThrough else null,
-            )
-            when {
-                cancelled -> Text(stringResource(R.string.departures_cancelled), color = MaterialTheme.colorScheme.error)
-                departure.delayMinutes > 0 -> Text(stringResource(R.string.departures_late, departure.delayMinutes), color = MaterialTheme.colorScheme.primary)
-                departure.state == State.DELAYED -> Text(stringResource(R.string.departures_delayed), color = MaterialTheme.colorScheme.primary)
-            }
-        }
-        Column(Modifier.weight(1f)) {
-            Text(departure.destination)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val details = MaterialTheme.typography.bodySmall
-                val muted = MaterialTheme.colorScheme.onSurfaceVariant
-                departure.mission?.let { Text(it, style = details, color = muted) }
-                departure.platform?.let { Text(stringResource(R.string.departures_platform, it), style = details, color = muted) }
-                departure.arrival?.let { Text(stringResource(R.string.departures_arrival, it.clock()), style = details, color = muted) }
-            }
-            if (reach != null && departure.state != State.CANCELLED) {
-                val left = Duration.between(now, departure.expected.minus(reach))
-                when {
-                    left.isNegative -> Text(stringResource(R.string.departures_too_late), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    left.toMinutes() == 0L -> Text(stringResource(R.string.departures_leave_now), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    else -> Text(stringResource(R.string.departures_leave_in, left.toMinutes()), color = MaterialTheme.colorScheme.primary)
+                    cancelled -> Text(stringResource(R.string.departures_cancelled), color = MaterialTheme.colorScheme.error)
+                    departure.delayMinutes > 0 -> Text(
+                        stringResource(R.string.departures_late, departure.delayMinutes),
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    departure.state == State.DELAYED -> Text(stringResource(R.string.departures_delayed), color = MaterialTheme.colorScheme.primary)
                 }
             }
-            if (departure.picked) {
-                Text(stringResource(R.string.departures_picked), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Column(Modifier.weight(1f)) {
+                Text(departure.destination, style = MaterialTheme.typography.bodyLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val details = MaterialTheme.typography.bodySmall
+                    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+                    departure.platform?.let { Tag(stringResource(R.string.departures_platform, it)) }
+                    departure.mission?.let { Text(it, style = details, color = muted) }
+                    departure.arrival?.let { Text(stringResource(R.string.departures_arrival, it.clock()), style = details, color = muted) }
+                }
+                val leave = leg.leaveAt(departure)
+                if (leave != null && departure.state != State.CANCELLED) {
+                    val left = Duration.between(now, leave)
+                    when {
+                        left.isNegative -> Text(stringResource(R.string.departures_too_late), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        left.toMinutes() == 0L -> Text(stringResource(R.string.departures_leave_now), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        else -> Text(stringResource(R.string.departures_leave_in, left.toMinutes()), color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                if (departure.picked) {
+                    Text(stringResource(R.string.departures_picked), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
             }
         }
+        if (pickable) Bell(departure, onPick)
+    }
+}
+
+/** A small label on its own ground, such as the platform. */
+@Composable
+private fun Tag(text: String) {
+    Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+        Text(text, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+    }
+}
+
+/** Picks the train for the reminder to leave, or drops it: named by its time for TalkBack. */
+@Composable
+private fun Bell(departure: Departure, onPick: (Departure) -> Unit) {
+    val label = stringResource(if (departure.picked) R.string.departures_unpick else R.string.departures_pick, departure.knownBy.clock())
+    IconToggleButton(checked = departure.picked, onCheckedChange = { onPick(departure) }) {
+        Icon(
+            if (departure.picked) Icons.Filled.Notifications else Icons.Outlined.Notifications,
+            contentDescription = label,
+            tint = if (departure.picked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }

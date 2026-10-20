@@ -11,6 +11,10 @@ import java.time.Instant
  * `fixtures/api/departures.json` in the repository, which the backend tests read too.
  */
 data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
+    /** The ride the reminder is for: the first with its time to the platform, as the backend has it. */
+    val reminded: Leg?
+        get() = legs.firstOrNull { it.reach != null }
+
     /** The same departures, with [journey] as the one picked, or none. */
     fun picking(journey: String?) = copy(
         legs = legs.map { leg ->
@@ -30,7 +34,14 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
         val to: String?,
         val departures: List<Departure>?,
         val reach: Duration? = null,
-    )
+    ) {
+        /** When to leave for [departure], from its expected time; null without a time to the platform. */
+        fun leaveAt(departure: Departure): Instant? = reach?.let { departure.expected.minus(it) }
+
+        /** Not cancelled, and its time to leave not past at [now]. */
+        fun catchable(departure: Departure, now: Instant): Boolean =
+            departure.state != State.CANCELLED && leaveAt(departure)?.let { !now.isAfter(it) } == true
+    }
 
     data class Departure(
         /** Null on the metro, which gives expected times only. */
@@ -47,6 +58,10 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
         /** Picked for the reminder to leave. */
         val picked: Boolean = false,
     ) {
+        /** The time it is known by: the timetable's, or the expected one on the metro. */
+        val knownBy: Instant
+            get() = aimed ?: expected
+
         /** Whole minutes late; 0 when on time or early. */
         val delayMinutes: Long
             get() = aimed?.let { Duration.between(it, expected).toMinutes().coerceAtLeast(0) } ?: 0

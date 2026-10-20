@@ -123,23 +123,27 @@ class NextDeparturesTest {
             .assertCountEquals(0)
     }
 
-    /** The row of the train leaving at [aimed]. */
-    private fun row(aimed: String) = hasText(at(aimed).clock()) and hasClickAction()
+    /** The bell that picks the train leaving at [aimed], or drops it once picked. */
+    private fun bell(aimed: String) = hasContentDescription(text(R.string.departures_pick, at(aimed).clock()))
+
+    private fun picked(aimed: String) = hasContentDescription(text(R.string.departures_unpick, at(aimed).clock()))
 
     @Test
     fun aTrainIsPickedForTheReminderAndDropped() {
         val backend = FakeBackend(departures = morning)
         show(backend)
-        waitFor(row("07:07:00"))
-        compose.onNode(row("07:07:00")).performClick()
+        waitFor(bell("07:07:00"))
+        compose.onNode(bell("07:07:00")).performClick()
         waitFor(hasText(at("07:07:00").clock()) and hasText(text(R.string.departures_picked)))
+        compose.onNode(picked("07:07:00")).assertIsDisplayed()
         assertEquals(listOf("j3"), backend.picks)
         // Another one in its place.
-        compose.onNode(row("07:37:00")).performClick()
+        compose.onNode(bell("07:37:00")).performClick()
         waitFor(hasText(at("07:37:00").clock()) and hasText(text(R.string.departures_picked)))
         compose.onAllNodes(hasText(text(R.string.departures_picked))).assertCountEquals(1)
-        // Tapped again, it is dropped.
-        compose.onNode(row("07:37:00")).performClick()
+        compose.onNode(bell("07:07:00")).assertIsDisplayed()
+        // Its bell again, and it is dropped.
+        compose.onNode(picked("07:37:00")).performClick()
         compose.waitUntil(timeoutMillis = 5_000) { backend.picks.size == 3 }
         assertEquals(listOf("j3", "j5", null), backend.picks)
         compose.waitUntil(timeoutMillis = 5_000) {
@@ -150,11 +154,11 @@ class NextDeparturesTest {
     @Test
     fun onlyATrainThatCanStillBeCaughtCanBePicked() {
         show(FakeBackend(departures = morning))
-        waitFor(row("07:02:00"))
-        // Too late, cancelled, or the metro, without a time to its platform.
-        compose.onNode(row("06:52:00")).assertDoesNotExist()
-        compose.onNode(row("07:22:00")).assertDoesNotExist()
-        compose.onAllNodes(hasText("Porte Nord") and hasClickAction()).assertCountEquals(0)
+        waitFor(bell("07:02:00"))
+        // Too late, cancelled, or the metro, without a time to its platform: three bells only.
+        compose.onNode(bell("06:52:00")).assertDoesNotExist()
+        compose.onNode(bell("07:22:00")).assertDoesNotExist()
+        compose.onAllNodes(hasClickAction()).assertCountEquals(3)
     }
 
     @Test
@@ -171,7 +175,7 @@ class NextDeparturesTest {
     fun aRefusedPickSaysWhy() {
         val backend = FakeBackend(departures = morning)
         show(backend)
-        waitFor(row("07:07:00"))
+        waitFor(bell("07:07:00"))
         val reasons = mapOf(
             Refusal.TOO_LATE to R.string.departures_refused_too_late,
             Refusal.NOT_OFFICE_DAY to R.string.departures_refused_not_office_day,
@@ -181,13 +185,13 @@ class NextDeparturesTest {
         )
         for ((refusal, reason) in reasons) {
             backend.refusal = refusal
-            compose.onNode(row("07:07:00")).performClick()
+            compose.onNode(bell("07:07:00")).performClick()
             waitFor(text(reason))
         }
         compose.onNode(hasText(text(R.string.departures_picked))).assertDoesNotExist()
         // Saved after all: the reason goes.
         backend.refusal = null
-        compose.onNode(row("07:07:00")).performClick()
+        compose.onNode(bell("07:07:00")).performClick()
         waitFor(hasText(at("07:07:00").clock()) and hasText(text(R.string.departures_picked)))
         compose.onNodeWithText(text(R.string.departures_refused_unavailable)).assertDoesNotExist()
     }
@@ -195,8 +199,8 @@ class NextDeparturesTest {
     @Test
     fun aPickThatCannotBeSavedSaysSo() {
         show(FakeBackend(departures = morning, pickFailing = true))
-        waitFor(row("07:07:00"))
-        compose.onNode(row("07:07:00")).performClick()
+        waitFor(bell("07:07:00"))
+        compose.onNode(bell("07:07:00")).performClick()
         waitFor(text(R.string.departures_pick_failed))
         compose.onNode(hasText(text(R.string.departures_picked))).assertDoesNotExist()
     }

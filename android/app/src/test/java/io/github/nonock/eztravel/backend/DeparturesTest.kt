@@ -8,7 +8,9 @@ import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.time.Duration
@@ -67,6 +69,9 @@ class DeparturesTest {
         assertEquals(0L, early.delayMinutes)
         val halfAMinute = early.copy(expected = at("07:00:30"))
         assertEquals(0L, halfAMinute.delayMinutes)
+        // A train is known by its timetable's time, the metro by when it comes.
+        assertEquals(at("07:07:00"), train.departures?.get(1)?.knownBy)
+        assertEquals(at("06:53:30"), metro.departures?.first()?.knownBy)
     }
 
     @Test
@@ -89,6 +94,33 @@ class DeparturesTest {
         assertNull(older.reach)
         assertEquals(listOf(null, null, null), older.departures?.map { it.journey })
         assertEquals(listOf(false, false, false), older.departures?.map { it.picked })
+    }
+
+    @Test
+    fun theRideRemindedIsTheFirstWithItsTimeToThePlatform() {
+        val (train, metro) = Departures.parse(fixture("departures")).legs
+        assertEquals(train, Departures.parse(fixture("departures")).reminded)
+        // In the evening, the metro comes first, without a time to its platform.
+        val evening = Departures.parse(fixture("departures-unavailable"))
+        assertEquals(evening.legs[1], evening.reminded)
+        assertNull(Departures(Direction.OUTBOUND, listOf(metro)).reminded)
+    }
+
+    @Test
+    fun aTrainCanBeCaughtUntilItsTimeToLeave() {
+        val train = Departures.parse(fixture("departures")).legs[0]
+        val (onTime, late, cancelled) = train.departures!!
+        // Twelve minutes to the platform: the 7:52 leaves at 7:52, so leave at 7:40.
+        assertEquals(at("06:40:00"), train.leaveAt(onTime))
+        assertEquals(at("06:59:00"), train.leaveAt(late))
+        assertTrue(train.catchable(onTime, at("06:40:00")))
+        assertFalse(train.catchable(onTime, at("06:40:01")))
+        assertTrue(train.catchable(late, at("06:50:00")))
+        assertFalse(train.catchable(cancelled, at("06:50:00")))
+        // Without a time to the platform, nothing is caught on time.
+        val metro = Departures.parse(fixture("departures")).legs[1]
+        assertNull(metro.leaveAt(metro.departures!!.first()))
+        assertFalse(metro.catchable(metro.departures!!.first(), at("06:00:00")))
     }
 
     @Test

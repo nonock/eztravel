@@ -78,8 +78,8 @@
     <string name="departures_leave_now">Leave now</string>
     <string name="departures_too_late">Too late to catch</string>
     <string name="departures_picked">Reminder set</string>
-    <string name="departures_pick">Remind me to leave for it</string>
-    <string name="departures_unpick">Cancel the reminder</string>
+    <string name="departures_pick">Remind me to leave for the %1$s train</string>
+    <string name="departures_unpick">Cancel the reminder for the %1$s train</string>
     <string name="departures_refused_too_late">Too late to leave for this train.</string>
     <string name="departures_refused_not_office_day">No reminder: today is not an office day.</string>
     <string name="departures_refused_outside_window">No reminder: you would leave outside the watch window.</string>
