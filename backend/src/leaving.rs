@@ -1,10 +1,11 @@
 //! When to leave for the train: a reminder a few minutes before.
 //!
 //! The train is the first one that can be caught when leaving at the usual
-//! time of the way. The reminder says how it runs, but only what PRIM knows:
-//! a train that has not set off yet carries the night's timetable, so it is
-//! "still scheduled" rather than "on time". After the reminder, a delay of a
-//! few minutes is told once; a train said cancelled gives way to the next one.
+//! time of the way, or now if later, up to half an hour after it. The
+//! reminder says how it runs, but only what PRIM knows: a train that has not
+//! set off yet carries the night's timetable, so it is "still scheduled"
+//! rather than "on time". After the reminder, a delay of a few minutes is
+//! told once; a train said cancelled gives way to the next one.
 
 use jiff::civil::Date;
 use jiff::{SignedDuration, Timestamp};
@@ -17,6 +18,9 @@ use crate::trains::{Seen, Train};
 
 /// The reminder comes this long before it is time to leave.
 pub const NOTICE: SignedDuration = SignedDuration::from_mins(5);
+/// No reminder to leave later than this after the usual time: by then the
+/// way was taken, or not at all.
+pub const LATEST: SignedDuration = SignedDuration::from_mins(30);
 /// A delay this long, said after the reminder, is told.
 pub const LATE: SignedDuration = SignedDuration::from_mins(3);
 /// A train recorded this recently is followed live.
@@ -75,7 +79,8 @@ pub fn remind(
         }
         leaving.reminded = None;
     }
-    // The first train that can be caught, leaving at the usual time or now.
+    // The first train that can be caught, leaving at the usual time or now,
+    // but not much later than usual.
     let earliest = usual.max(now);
     let Some((visit, expected)) = seen
         .board
@@ -84,6 +89,7 @@ pub fn remind(
         .filter_map(|visit| Some((visit, departure(visit)?)))
         .filter(|(visit, expected)| {
             *expected - reach >= earliest
+                && *expected - reach <= usual + LATEST
                 && serves(visit, *expected, (&seen.alight, &seen.arriving)).is_some()
         })
         .min_by_key(|(_, expected)| *expected)
@@ -319,6 +325,26 @@ mod tests {
         // After it has left, nothing.
         let mut leaving = Leaving::default();
         assert_eq!(poll(&mut leaving, "07:50", three(on_time())), []);
+    }
+
+    #[test]
+    fn no_reminder_to_leave_more_than_half_an_hour_after_the_usual_time() {
+        let board = || {
+            vec![
+                visit("j3", "07:47", "07:47", "onTime", "07:30"),
+                visit("j4", "08:02", "08:02", "onTime", "07:30"),
+                visit("j5", "08:17", "08:17", "onTime", "07:30"),
+            ]
+        };
+        // Polls resuming late: leaving at 7:50 is still the way.
+        let mut leaving = Leaving::default();
+        assert_eq!(
+            poll(&mut leaving, "07:45", board()),
+            leave(train("08:02", "08:02"), "07:50", true)
+        );
+        // Leaving at 8:05 no more: by then the way was taken, or not at all.
+        let mut leaving = Leaving::default();
+        assert_eq!(poll(&mut leaving, "08:00", board()), []);
     }
 
     #[test]
