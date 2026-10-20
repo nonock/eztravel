@@ -31,16 +31,16 @@ class DeparturesTest {
         assertEquals(Duration.ofMinutes(12), train.reach)
         assertEquals(
             listOf(
-                Departure(at("06:52:00"), at("06:52:00"), at("07:04:00"), "PALO", "Gare Centrale", "2", State.ON_TIME),
-                Departure(at("07:07:00"), at("07:11:00"), at("07:23:00"), "PILO", "Gare Centrale", "2", State.DELAYED),
-                Departure(at("07:22:00"), at("07:22:00"), at("07:34:00"), "PALO", "Gare Centrale", "2", State.CANCELLED),
+                Departure(at("06:52:00"), at("06:52:00"), at("07:04:00"), "PALO", "Gare Centrale", "2", State.ON_TIME, "j1"),
+                Departure(at("07:07:00"), at("07:11:00"), at("07:23:00"), "PILO", "Gare Centrale", "2", State.DELAYED, "j2", picked = true),
+                Departure(at("07:22:00"), at("07:22:00"), at("07:34:00"), "PALO", "Gare Centrale", "2", State.CANCELLED, "j3"),
             ),
             train.departures,
         )
         assertEquals(Line("X", Mode.METRO), metro.line)
         assertNull(metro.reach)
         assertEquals(
-            Departure(null, at("06:53:30"), null, null, "Porte Nord", null, State.ON_TIME),
+            Departure(null, at("06:53:30"), null, null, "Porte Nord", null, State.ON_TIME, "m1"),
             metro.departures?.first(),
         )
     }
@@ -78,8 +78,45 @@ class DeparturesTest {
         assertEquals(Direction.OUTBOUND, departures.direction)
         // Unknown, it is shown by its times alone.
         assertEquals(State.ON_TIME, departures.legs[0].departures?.first()?.state)
-        // An older backend says nothing of the time to the platform.
-        json.getJSONArray("legs").getJSONObject(0).remove("reach")
-        assertNull(Departures.parse(json.toString()).legs[0].reach)
+        // An older backend says nothing of the time to the platform, nor of picking.
+        val leg = json.getJSONArray("legs").getJSONObject(0)
+        leg.remove("reach")
+        for (departure in leg.getJSONArray("departures").objects()) {
+            departure.remove("journey")
+            departure.remove("picked")
+        }
+        val older = Departures.parse(json.toString()).legs[0]
+        assertNull(older.reach)
+        assertEquals(listOf(null, null, null), older.departures?.map { it.journey })
+        assertEquals(listOf(false, false, false), older.departures?.map { it.picked })
+    }
+
+    @Test
+    fun aPickMarksItsTrainOnly() {
+        val departures = Departures.parse(fixture("departures"))
+        fun picked(of: Departures) = of.legs.flatMap { it.departures.orEmpty() }.filter { it.picked }.map { it.journey }
+        assertEquals(listOf("j1"), picked(departures.picking("j1")))
+        assertEquals(emptyList<String>(), picked(departures.picking(null)))
+        // A leg that cannot be read stays so.
+        val unavailable = Departures.parse(fixture("departures-unavailable"))
+        assertEquals(unavailable, unavailable.picking("j1"))
+    }
+
+    @Test
+    fun readsWhyAPickIsRefused() {
+        assertEquals(Refusal.UNAVAILABLE, Refusal.parse(fixture("pick-refused")))
+        val reasons = mapOf(
+            "too_late" to Refusal.TOO_LATE,
+            "not_office_day" to Refusal.NOT_OFFICE_DAY,
+            "outside_window" to Refusal.OUTSIDE_WINDOW,
+            "unknown" to Refusal.UNKNOWN,
+        )
+        for ((name, refusal) in reasons) {
+            assertEquals(refusal, Refusal.parse(JSONObject().put("refused", name).toString()))
+        }
+        // A reason from a newer backend, or no reason at all.
+        assertNull(Refusal.parse(JSONObject().put("refused", "too_far").toString()))
+        assertNull(Refusal.parse(JSONObject().put("error", "x").toString()))
+        assertNull(Refusal.parse("Unprocessable Entity"))
     }
 }

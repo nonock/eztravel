@@ -17,8 +17,13 @@ class FakeBackend(
     var status: Status = Status(null, null, null, null, emptyList(), emptyList()),
     var history: List<HistoryEntry> = emptyList(),
     var departures: Departures = Departures(Status.Direction.OUTBOUND, emptyList()),
+    /** The answer to picks: null when saved. */
+    var refusal: Refusal? = null,
+    /** Picks cannot be saved, while all else works. */
+    var pickFailing: Boolean = false,
 ) : Backend {
     val registered = CopyOnWriteArrayList<String>()
+    val picks = CopyOnWriteArrayList<String?>()
     val saved = CopyOnWriteArrayList<String>()
     val statusReads = AtomicInteger()
 
@@ -49,6 +54,12 @@ class FakeBackend(
         if (failing) throw IOException("unreachable")
         if (garbled) throw JSONException("not JSON")
         return departures
+    }
+
+    override suspend fun pick(journey: String?): Refusal? {
+        if (failing || pickFailing) throw IOException("unreachable")
+        picks += journey
+        return refusal
     }
 
     override suspend fun status(): Status {

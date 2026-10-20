@@ -11,6 +11,13 @@ import java.time.Instant
  * `fixtures/api/departures.json` in the repository, which the backend tests read too.
  */
 data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
+    /** The same departures, with [journey] as the one picked, or none. */
+    fun picking(journey: String?) = copy(
+        legs = legs.map { leg ->
+            leg.copy(departures = leg.departures?.map { it.copy(picked = journey != null && it.journey == journey) })
+        },
+    )
+
     /**
      * `from` and `to` are null until the backend knows the line's stops;
      * `departures` is null when they cannot be read. `reach` is the time from
@@ -35,6 +42,10 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
         val destination: String,
         val platform: String?,
         val state: State,
+        /** The train or metro, the same at every stop of its run; null from an older backend. */
+        val journey: String? = null,
+        /** Picked for the reminder to leave. */
+        val picked: Boolean = false,
     ) {
         /** Whole minutes late; 0 when on time or early. */
         val delayMinutes: Long
@@ -74,6 +85,38 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
                 "delayed" -> State.DELAYED
                 else -> State.ON_TIME
             },
+            journey = json.stringOrNull("journey"),
+            picked = json.optBoolean("picked"),
         )
+    }
+}
+
+/**
+ * Why the backend will not remind of a picked train. The format is fixed by
+ * `fixtures/api/pick-refused.json` in the repository.
+ */
+enum class Refusal {
+    /** Its time to leave is past. */
+    TOO_LATE,
+
+    /** Not an office day, or time away. */
+    NOT_OFFICE_DAY,
+
+    /** Leaving outside the watch window, when no reminder is sent. */
+    OUTSIDE_WINDOW,
+
+    /** No longer shown, or cancelled. */
+    UNKNOWN,
+
+    /** The backend cannot read the departures just now. */
+    UNAVAILABLE,
+    ;
+
+    companion object {
+        /** Null when the answer gives no reason this version knows. */
+        fun parse(json: String): Refusal? {
+            val name = runCatching { JSONObject(json) }.getOrNull()?.stringOrNull("refused")
+            return entries.firstOrNull { it.name.lowercase() == name }
+        }
     }
 }

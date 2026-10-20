@@ -91,6 +91,33 @@ class HttpBackendTest {
     }
 
     @Test
+    fun picksADepartureAndDropsIt() = runBlocking {
+        assertNull(backend.pick("j2"))
+        assertNull(backend.pick(null))
+        assertEquals(listOf("PUT /departure"), received.map { "${it.method} ${it.path}" }.distinct())
+        assertEquals("j2", JSONObject(received[0].body).getString("journey"))
+        assertTrue(JSONObject(received[1].body).isNull("journey"))
+    }
+
+    @Test
+    fun aRefusedPickSaysWhy() = runBlocking {
+        status = 422
+        answer = File("../../fixtures/api/pick-refused.json").readText()
+        assertEquals(Refusal.UNAVAILABLE, backend.pick("j2"))
+        // Without a reason it knows, or from a backend without picks: it was not saved.
+        for ((code, body) in listOf(422 to "Unprocessable Entity", 405 to "", 404 to "", 500 to """{"refused":"unknown"}""")) {
+            status = code
+            answer = body
+            try {
+                backend.pick("j2")
+                fail("a pick not saved must not pass silently")
+            } catch (error: BackendError) {
+                assertEquals(code, error.status)
+            }
+        }
+    }
+
+    @Test
     fun aRefusalIsAnError() {
         status = 401
         try {

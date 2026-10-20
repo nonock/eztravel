@@ -4,10 +4,12 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.filter
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nonock.eztravel.R
@@ -16,9 +18,11 @@ import io.github.nonock.eztravel.backend.Departures.Departure
 import io.github.nonock.eztravel.backend.Departures.Leg
 import io.github.nonock.eztravel.backend.Departures.State
 import io.github.nonock.eztravel.backend.FakeBackend
+import io.github.nonock.eztravel.backend.Refusal
 import io.github.nonock.eztravel.backend.Status.Direction
 import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -62,12 +66,12 @@ class NextDeparturesTest {
                 "Les Aubépines",
                 "Gare Centrale",
                 listOf(
-                    Departure(at("06:52:00"), at("06:52:00"), at("07:04:00"), "PALO", "Gare Centrale", "2", State.ON_TIME),
-                    Departure(at("07:02:00"), at("07:02:00"), at("07:14:00"), "PILO", "Gare Centrale", "2", State.ON_TIME),
-                    Departure(at("07:07:00"), at("07:11:00"), at("07:23:00"), "PILO", "Gare Centrale", "2", State.DELAYED),
-                    Departure(at("07:22:00"), at("07:22:00"), at("07:34:00"), "PALO", "Gare Centrale", "2", State.CANCELLED),
+                    Departure(at("06:52:00"), at("06:52:00"), at("07:04:00"), "PALO", "Gare Centrale", "2", State.ON_TIME, "j1"),
+                    Departure(at("07:02:00"), at("07:02:00"), at("07:14:00"), "PILO", "Gare Centrale", "2", State.ON_TIME, "j2"),
+                    Departure(at("07:07:00"), at("07:11:00"), at("07:23:00"), "PILO", "Gare Centrale", "2", State.DELAYED, "j3"),
+                    Departure(at("07:22:00"), at("07:22:00"), at("07:34:00"), "PALO", "Gare Centrale", "2", State.CANCELLED, "j4"),
                     // Said late, with no time yet.
-                    Departure(at("07:37:00"), at("07:37:00"), null, null, "Les Tilleuls", null, State.DELAYED),
+                    Departure(at("07:37:00"), at("07:37:00"), null, null, "Les Tilleuls", null, State.DELAYED, "j5"),
                 ),
                 reach = Duration.ofMinutes(12),
             ),
@@ -77,8 +81,8 @@ class NextDeparturesTest {
                 "Gare Centrale",
                 "Mairie",
                 listOf(
-                    Departure(null, at("06:50:20"), null, null, "Porte Nord", null, State.ON_TIME),
-                    Departure(null, at("06:53:30"), null, null, "Porte Nord", null, State.ON_TIME),
+                    Departure(null, at("06:50:20"), null, null, "Porte Nord", null, State.ON_TIME, "m1"),
+                    Departure(null, at("06:53:30"), null, null, "Porte Nord", null, State.ON_TIME, "m2"),
                 ),
             ),
         ),
@@ -117,6 +121,84 @@ class NextDeparturesTest {
         compose.onAllNodes(hasText(text(R.string.departures_leave_in, 3).substringBefore("3"), substring = true))
             .filter(hasText("Porte Nord"))
             .assertCountEquals(0)
+    }
+
+    /** The row of the train leaving at [aimed]. */
+    private fun row(aimed: String) = hasText(at(aimed).clock()) and hasClickAction()
+
+    @Test
+    fun aTrainIsPickedForTheReminderAndDropped() {
+        val backend = FakeBackend(departures = morning)
+        show(backend)
+        waitFor(row("07:07:00"))
+        compose.onNode(row("07:07:00")).performClick()
+        waitFor(hasText(at("07:07:00").clock()) and hasText(text(R.string.departures_picked)))
+        assertEquals(listOf("j3"), backend.picks)
+        // Another one in its place.
+        compose.onNode(row("07:37:00")).performClick()
+        waitFor(hasText(at("07:37:00").clock()) and hasText(text(R.string.departures_picked)))
+        compose.onAllNodes(hasText(text(R.string.departures_picked))).assertCountEquals(1)
+        // Tapped again, it is dropped.
+        compose.onNode(row("07:37:00")).performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { backend.picks.size == 3 }
+        assertEquals(listOf("j3", "j5", null), backend.picks)
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasText(text(R.string.departures_picked))).fetchSemanticsNodes().isEmpty()
+        }
+    }
+
+    @Test
+    fun onlyATrainThatCanStillBeCaughtCanBePicked() {
+        show(FakeBackend(departures = morning))
+        waitFor(row("07:02:00"))
+        // Too late, cancelled, or the metro, without a time to its platform.
+        compose.onNode(row("06:52:00")).assertDoesNotExist()
+        compose.onNode(row("07:22:00")).assertDoesNotExist()
+        compose.onAllNodes(hasText("Porte Nord") and hasClickAction()).assertCountEquals(0)
+    }
+
+    @Test
+    fun anOlderBackendOffersNoPick() {
+        val older = morning.copy(
+            legs = morning.legs.map { leg -> leg.copy(departures = leg.departures?.map { it.copy(journey = null) }) },
+        )
+        show(FakeBackend(departures = older))
+        waitFor(hasText(at("07:07:00").clock()))
+        compose.onAllNodes(hasClickAction()).assertCountEquals(0)
+    }
+
+    @Test
+    fun aRefusedPickSaysWhy() {
+        val backend = FakeBackend(departures = morning)
+        show(backend)
+        waitFor(row("07:07:00"))
+        val reasons = mapOf(
+            Refusal.TOO_LATE to R.string.departures_refused_too_late,
+            Refusal.NOT_OFFICE_DAY to R.string.departures_refused_not_office_day,
+            Refusal.OUTSIDE_WINDOW to R.string.departures_refused_outside_window,
+            Refusal.UNKNOWN to R.string.departures_refused_unknown,
+            Refusal.UNAVAILABLE to R.string.departures_refused_unavailable,
+        )
+        for ((refusal, reason) in reasons) {
+            backend.refusal = refusal
+            compose.onNode(row("07:07:00")).performClick()
+            waitFor(text(reason))
+        }
+        compose.onNode(hasText(text(R.string.departures_picked))).assertDoesNotExist()
+        // Saved after all: the reason goes.
+        backend.refusal = null
+        compose.onNode(row("07:07:00")).performClick()
+        waitFor(hasText(at("07:07:00").clock()) and hasText(text(R.string.departures_picked)))
+        compose.onNodeWithText(text(R.string.departures_refused_unavailable)).assertDoesNotExist()
+    }
+
+    @Test
+    fun aPickThatCannotBeSavedSaysSo() {
+        show(FakeBackend(departures = morning, pickFailing = true))
+        waitFor(row("07:07:00"))
+        compose.onNode(row("07:07:00")).performClick()
+        waitFor(text(R.string.departures_pick_failed))
+        compose.onNode(hasText(text(R.string.departures_picked))).assertDoesNotExist()
     }
 
     @Test

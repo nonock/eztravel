@@ -77,5 +77,14 @@
     <string name="departures_leave_in">Partir dans %1$d min</string>
     <string name="departures_leave_now">Partir maintenant</string>
     <string name="departures_too_late">Trop tard pour celui-ci</string>
+    <string name="departures_picked">Rappel prévu</string>
+    <string name="departures_pick">Me rappeler de partir pour ce train</string>
+    <string name="departures_unpick">Annuler le rappel</string>
+    <string name="departures_refused_too_late">Trop tard pour partir prendre ce train.</string>
+    <string name="departures_refused_not_office_day">Pas de rappel : aujourd’hui n’est pas un jour de bureau.</string>
+    <string name="departures_refused_outside_window">Pas de rappel : vous partiriez en dehors du créneau de surveillance.</string>
+    <string name="departures_refused_unknown">Ce train ne peut plus être choisi.</string>
+    <string name="departures_refused_unavailable">Les départs ne peuvent pas être lus pour l’instant : réessayez dans un moment.</string>
+    <string name="departures_pick_failed">Le rappel n’a pas pu être enregistré.</string>
     <string name="cancel">Annuler</string>
 </resources>

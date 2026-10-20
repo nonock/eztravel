@@ -29,9 +29,16 @@ interface Backend {
 
     /** The next departures on the way shown. */
     suspend fun departures(): Departures
+
+    /**
+     * Picks the train [journey] for the reminder to leave, or none: null once
+     * saved, or why the backend refuses it.
+     */
+    suspend fun pick(journey: String?): Refusal?
 }
 
-class BackendError(val status: Int) : IOException("the backend answered $status")
+/** [body] is the backend's answer, when it gave one. */
+class BackendError(val status: Int, val body: String? = null) : IOException("the backend answered $status")
 
 class HttpBackend(private val baseUrl: String, private val key: String) : Backend {
     override val configured: Boolean
@@ -64,6 +71,15 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
         Departures.parse(request("GET", "/departures", null))
     }
 
+    override suspend fun pick(journey: String?): Refusal? = withContext(Dispatchers.IO) {
+        try {
+            request("PUT", "/departure", JSONObject().put("journey", journey ?: JSONObject.NULL))
+            null
+        } catch (error: BackendError) {
+            error.body?.takeIf { error.status == UNPROCESSABLE }?.let(Refusal::parse) ?: throw error
+        }
+    }
+
     private fun request(method: String, path: String, body: JSONObject?): String {
         val connection = URL(baseUrl + path).openConnection() as HttpURLConnection
         try {
@@ -77,7 +93,7 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
                 connection.outputStream.use { it.write(body.toString().toByteArray()) }
             }
             val status = connection.responseCode
-            if (status !in 200..299) throw BackendError(status)
+            if (status !in 200..299) throw BackendError(status, connection.errorStream?.bufferedReader()?.use { it.readText() })
             return connection.inputStream.bufferedReader().use { it.readText() }
         } finally {
             connection.disconnect()
@@ -86,5 +102,6 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
 
     private companion object {
         const val TIMEOUT_MS = 15_000
+        const val UNPROCESSABLE = 422
     }
 }
