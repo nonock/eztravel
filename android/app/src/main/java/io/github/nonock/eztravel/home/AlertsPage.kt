@@ -1,6 +1,8 @@
 package io.github.nonock.eztravel.home
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Card
@@ -26,6 +30,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -107,21 +114,70 @@ fun AlertsPage(
     }
 }
 
+/**
+ * A line, folded to its header until tapped: what is under way and to come,
+ * and the worst under way, so that nothing urgent hides in a fold.
+ */
 @Composable
 private fun LineSection(line: Alerts.LineAlerts, now: Instant) {
-    // Read once, from the badge: "Line J".
+    var open by rememberSaveable(line.line.name) { mutableStateOf(false) }
+    val any = line.alerts.isNotEmpty()
+    val tap = if (any) {
+        Modifier.clickable(onClickLabel = stringResource(if (open) R.string.alerts_hide_line else R.string.alerts_show_line)) { open = !open }
+    } else {
+        Modifier
+    }
+    // Read as one, the line from its badge: "Line J, 1 now, 3 coming".
     Row(
-        Modifier.padding(top = 16.dp, bottom = 4.dp).semantics(mergeDescendants = true) {},
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .then(tap)
+            .semantics(mergeDescendants = true) {}
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         LineBadge(line.line, line.color)
         Spacer(Modifier.width(12.dp))
-        Text(line.line.label(LocalResources.current), style = MaterialTheme.typography.titleMedium, modifier = Modifier.clearAndSetSemantics {})
+        Column(Modifier.weight(1f)) {
+            Text(line.line.label(LocalResources.current), style = MaterialTheme.typography.titleMedium, modifier = Modifier.clearAndSetSemantics {})
+            val parts = listOfNotNull(
+                line.underWay.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.alerts_under_way, it, it) },
+                line.toCome.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.alerts_to_come, it, it) },
+            )
+            Text(
+                if (any) parts.joinToString(", ") else stringResource(R.string.alerts_none),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        line.worstUnderWay?.let { worst ->
+            val (icon, tint) = severityMark(worst)
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+        }
+        if (any) {
+            Icon(
+                if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
-    if (line.alerts.isEmpty()) {
-        Text(stringResource(R.string.alerts_none), color = MaterialTheme.colorScheme.onSurfaceVariant)
+    AnimatedVisibility(open) {
+        Column {
+            for ((alert, more) in line.grouped) AlertCard(alert, more, now)
+        }
     }
-    for ((alert, more) in line.grouped) AlertCard(alert, more, now)
+}
+
+/** A severity's icon and color, the same on the header and on the cards. */
+@Composable
+private fun severityMark(severity: Severity): Pair<ImageVector, Color> = when (severity) {
+    Severity.BLOCKING -> Icons.Filled.Warning to MaterialTheme.colorScheme.error
+    Severity.DISRUPTED -> Icons.Filled.Warning to MaterialTheme.colorScheme.primary
+    Severity.INFORMATION -> Icons.Outlined.Info to MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 /** One alert, folded to its first lines until tapped; [more] alerts share its title. */
@@ -137,11 +193,7 @@ private fun AlertCard(alert: Alert, more: Int, now: Instant) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Row(Modifier.padding(16.dp)) {
-            val (icon, tint) = when (alert.severity) {
-                Severity.BLOCKING -> Icons.Filled.Warning to MaterialTheme.colorScheme.error
-                Severity.DISRUPTED -> Icons.Filled.Warning to MaterialTheme.colorScheme.primary
-                Severity.INFORMATION -> Icons.Outlined.Info to MaterialTheme.colorScheme.onSurfaceVariant
-            }
+            val (icon, tint) = severityMark(alert.severity)
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
             Spacer(Modifier.width(12.dp))
             Column {

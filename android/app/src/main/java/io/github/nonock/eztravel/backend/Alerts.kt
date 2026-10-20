@@ -15,6 +15,18 @@ data class Alerts(val lines: List<LineAlerts>?) {
         /** One per title, the first as listed, with how many more share it: works come split by period. */
         val grouped: List<Pair<Alert, Int>>
             get() = alerts.groupBy { it.title }.map { (_, same) -> same.first() to same.size - 1 }
+
+        /** How many are under way, as shown: one per title. */
+        val underWay: Int
+            get() = grouped.count { (alert, _) -> alert.active }
+
+        /** How many are to come, as shown. */
+        val toCome: Int
+            get() = grouped.size - underWay
+
+        /** The worst of those under way, if any: it shows even when the line is folded. */
+        val worstUnderWay: Severity?
+            get() = alerts.filter { it.active }.minOfOrNull { it.severity }
     }
 
     enum class Severity { BLOCKING, DISRUPTED, INFORMATION }

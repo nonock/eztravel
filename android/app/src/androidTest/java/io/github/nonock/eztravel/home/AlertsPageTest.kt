@@ -4,6 +4,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -74,6 +75,41 @@ class AlertsPageTest {
         it.config.getOrNull(SemanticsActions.OnClick)?.label == text(label)
     }
 
+    /** A line's header, tapped to show or hide its alerts. */
+    private fun header(line: String) = hasContentDescription(line) and hasClickAction()
+
+    private fun unfold(line: String) {
+        waitFor(header(line) and tapLabel(R.string.alerts_show_line))
+        compose.onNode(header(line)).performClick()
+    }
+
+    private fun summary(underWay: Int, toCome: Int) = listOf(
+        context.resources.getQuantityString(R.plurals.alerts_under_way, underWay, underWay),
+        context.resources.getQuantityString(R.plurals.alerts_to_come, toCome, toCome),
+    ).joinToString(", ")
+
+    @Test
+    fun linesStartFoldedWithWhatIsUnderWayAndToCome() {
+        val alerts = Alerts(
+            listOf(
+                LineAlerts(train, 0xFF7B61C9.toInt(), listOf(stopped, works, works.copy(id = "works-l-2"))),
+                LineAlerts(metro, null, listOf(slowed)),
+            ),
+        )
+        show(FakeBackend(alerts = alerts))
+        val l = text(R.string.line_train, "L")
+        waitFor(header(l) and hasText(summary(1, 1)) and tapLabel(R.string.alerts_show_line))
+        waitFor(header(text(R.string.line_metro, "X")) and hasText(context.resources.getQuantityString(R.plurals.alerts_under_way, 1, 1)))
+        compose.onNodeWithText(stopped.title).assertDoesNotExist()
+        compose.onNode(header(l)).performClick()
+        waitFor(hasText(stopped.title))
+        waitFor(header(l) and tapLabel(R.string.alerts_hide_line))
+        compose.onNode(header(l)).performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { compose.onAllNodes(hasText(stopped.title)).fetchSemanticsNodes().isEmpty() }
+        // The metro's stays folded.
+        compose.onNodeWithText(slowed.title).assertDoesNotExist()
+    }
+
     @Test
     fun eachLineShowsItsAlertsWithWhenAndWhetherOnTheWay() {
         // Works come split by period: the second of a title shows as one more.
@@ -86,6 +122,8 @@ class AlertsPageTest {
         show(FakeBackend(alerts = alerts))
         waitFor(hasContentDescription(text(R.string.line_train, "L")))
         compose.onNodeWithText(text(R.string.line_train, "L")).assertDoesNotExist()
+        unfold(text(R.string.line_train, "L"))
+        unfold(text(R.string.line_metro, "X"))
         waitFor(
             hasText(stopped.title) and hasText(text(R.string.alerts_now)) and hasText(text(R.string.alerts_on_way)) and
                 hasText(text(R.string.alerts_until, stopped.end.shown(today))) and hasText(stopped.text),
@@ -104,6 +142,7 @@ class AlertsPageTest {
     @Test
     fun aCardUnfoldsWhenTappedAndFoldsAgain() {
         show(FakeBackend(alerts = Alerts(listOf(LineAlerts(train, null, listOf(stopped))))))
+        unfold(text(R.string.line_train, "L"))
         waitFor(hasText(stopped.title) and tapLabel(R.string.alerts_unfold))
         compose.onNode(hasText(stopped.title)).performClick()
         waitFor(hasText(stopped.title) and tapLabel(R.string.alerts_fold))
@@ -113,9 +152,17 @@ class AlertsPageTest {
 
     @Test
     fun noAlertAnywhereIsSaidSo() {
+        show(FakeBackend(alerts = Alerts(listOf(LineAlerts(train, null, emptyList()), LineAlerts(metro, null, listOf(works))))))
+        // A line without alerts has nothing to show; works to come only are said so.
+        waitFor(hasContentDescription(text(R.string.line_train, "L")) and hasText(text(R.string.alerts_none)))
+        compose.onNode(header(text(R.string.line_train, "L"))).assertDoesNotExist()
+        waitFor(header(text(R.string.line_metro, "X")) and hasText(context.resources.getQuantityString(R.plurals.alerts_to_come, 1, 1)))
+    }
+
+    @Test
+    fun noAlertOnAnyLineIsSaidOnTop() {
         show(FakeBackend(alerts = Alerts(listOf(LineAlerts(train, null, emptyList())))))
         waitFor(text(R.string.alerts_none_at_all))
-        waitFor(text(R.string.alerts_none))
     }
 
     @Test

@@ -116,4 +116,14 @@
         <item quantity="one">%d autre créneau</item>
         <item quantity="other">%d autres créneaux</item>
     </plurals>
+    <string name="alerts_show_line">Afficher ses alertes</string>
+    <string name="alerts_hide_line">Masquer ses alertes</string>
+    <plurals name="alerts_under_way">
+        <item quantity="one">%d en cours</item>
+        <item quantity="other">%d en cours</item>
+    </plurals>
+    <plurals name="alerts_to_come">
+        <item quantity="one">%d à venir</item>
+        <item quantity="other">%d à venir</item>
+    </plurals>
 </resources>

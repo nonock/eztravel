@@ -68,6 +68,21 @@ class AlertsTest {
     }
 
     @Test
+    fun aLineSaysHowManyAreUnderWayAndToComeAndTheWorstUnderWay() {
+        val (train, metro) = Alerts.parse(fixture("alerts")).lines!!
+        val works = train.alerts[1]
+        val split = train.copy(alerts = train.alerts + works.copy(id = "works-l-2"))
+        // Counted as shown: alerts sharing a title once.
+        assertEquals(1 to 1, split.underWay to split.toCome)
+        assertEquals(Severity.BLOCKING, split.worstUnderWay)
+        assertEquals(Severity.DISRUPTED, metro.worstUnderWay)
+        // Works to come only: nothing under way.
+        val coming = train.copy(alerts = listOf(works))
+        assertEquals(0 to 1, coming.underWay to coming.toCome)
+        assertNull(coming.worstUnderWay)
+    }
+
+    @Test
     fun alertsSharingATitleShowOnce() {
         val line = Alerts.parse(fixture("alerts")).lines!![0]
         val works = line.alerts[1]

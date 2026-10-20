@@ -117,4 +117,14 @@
         <item quantity="one">%d more period</item>
         <item quantity="other">%d more periods</item>
     </plurals>
+    <string name="alerts_show_line">Show its alerts</string>
+    <string name="alerts_hide_line">Hide its alerts</string>
+    <plurals name="alerts_under_way">
+        <item quantity="one">%d now</item>
+        <item quantity="other">%d now</item>
+    </plurals>
+    <plurals name="alerts_to_come">
+        <item quantity="one">%d coming</item>
+        <item quantity="other">%d coming</item>
+    </plurals>
 </resources>
