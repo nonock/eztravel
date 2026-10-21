@@ -2,7 +2,7 @@
 
 An Android app that follows one home-to-work commute in the Paris region and notifies you when its lines are disrupted, only on the days and at the hours you travel. Data comes from [PRIM](https://prim.iledefrance-mobilites.fr), the open data portal of Île-de-France Mobilités.
 
-> **Status: milestone 1 done.** Disruption alerts on office days. Next: real-time departures and cancelled trains (milestone 2).
+> **Status: milestone 2 done.** Disruption alerts on office days, next departures, cancelled trains and the reminder to leave. Next: trust and calendar (milestone 3).
 
 ## Why
 
@@ -122,7 +122,7 @@ Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md
 
 0. **Done.** PRIM data checked against the lines' X accounts.
 1. **Done.** Disruption alerts on office days: backend, calendar, push, app.
-2. Next departures, cancelled trains, "leave in X min" countdown, notification before departure, and the usual train of each way, set once in the app.
+2. **Done.** Next departures, cancelled trains, "leave in X min" countdown, notification before departure, and the usual train of each way, set once in the app.
 3. Trust and calendar:
    - when a window opens, the phone checks the backend itself and says so if it does not answer or has stopped checking, since the backend cannot report its own failure;
    - a month calendar in the app, with office days, remote-work days and time away each in their own color, where a tap switches a single day;
