@@ -20,13 +20,15 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
 
     /**
      * The train shown first on the ride reminded: the one picked, unless
-     * cancelled, or else the next one that can be caught at [now].
+     * cancelled, or else the usual one, or else the next one that can be
+     * caught at [now].
      */
     fun featured(now: Instant): Featured? {
         for (leg in legs) {
             val reach = leg.reach ?: continue
             val departures = leg.departures.orEmpty()
             val departure = departures.firstOrNull { it.picked && it.state != State.CANCELLED }
+                ?: departures.firstOrNull { it.usual && it.state != State.CANCELLED }
                 ?: departures.firstOrNull { leg.catchable(it, now) }
                 ?: return null
             return Featured(leg, departure, departure.expected.minus(reach))
@@ -34,10 +36,14 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
         return null
     }
 
-    /** The same departures, with [journey] as the one picked, or none. */
+    /** The same departures, with [journey] as the one picked, or none: a pick replaces the usual train. */
     fun picking(journey: String?) = copy(
         legs = legs.map { leg ->
-            leg.copy(departures = leg.departures?.map { it.copy(picked = journey != null && it.journey == journey) })
+            leg.copy(
+                departures = leg.departures?.map {
+                    it.copy(picked = journey != null && it.journey == journey, usual = it.usual && journey == null)
+                },
+            )
         },
     )
 
@@ -76,6 +82,8 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
         val journey: String? = null,
         /** Picked for the reminder to leave. */
         val picked: Boolean = false,
+        /** The way's usual train, when none is picked that day. */
+        val usual: Boolean = false,
     ) {
         /** The time it is known by: the timetable's, or the expected one on the metro. */
         val knownBy: Instant
@@ -121,6 +129,7 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
             },
             journey = json.stringOrNull("journey"),
             picked = json.optBoolean("picked"),
+            usual = json.optBoolean("usual"),
         )
     }
 }

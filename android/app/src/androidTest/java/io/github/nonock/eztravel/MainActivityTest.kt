@@ -2,6 +2,9 @@ package io.github.nonock.eztravel
 
 import android.Manifest
 import android.app.NotificationManager
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
@@ -90,6 +93,7 @@ class MainActivityTest {
     @Test
     fun theTimeAwayIsBehindTheGearAndBackLeavesIt() {
         compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
+        compose.onNodeWithText(text(R.string.usual_title)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.away_none)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.away_title)).assertIsDisplayed()
         compose.onNodeWithContentDescription(text(R.string.back)).performClick()
@@ -117,6 +121,22 @@ class MainActivityTest {
         pullDown(backend.historyReads)
         // And again: the spinner went away after the last read.
         pullDown(backend.historyReads)
+    }
+
+    @Test
+    fun savingAUsualTrainReadsTheDeparturesAgain() {
+        compose.waitUntil(timeoutMillis = 5_000) { backend.departuresReads.get() > 0 }
+        compose.waitForIdle()
+        val atLaunch = backend.departuresReads.get()
+        compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
+        compose.onNode(
+            SemanticsMatcher("tapped to choose") {
+                it.config.getOrNull(SemanticsActions.OnClick)?.label == text(R.string.usual_choose_outbound)
+            },
+        ).performClick()
+        compose.onNodeWithText(text(R.string.ok)).performClick()
+        compose.onNodeWithContentDescription(text(R.string.back)).performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { backend.departuresReads.get() > atLaunch }
     }
 
     @Test

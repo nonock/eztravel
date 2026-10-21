@@ -147,6 +147,28 @@ class DeparturesTest {
     }
 
     @Test
+    fun withoutAPickTheUsualTrainIsShownFirst() {
+        val json = JSONObject(fixture("departures"))
+        val trains = json.getJSONArray("legs").getJSONObject(0).getJSONArray("departures")
+        trains.getJSONObject(1).put("picked", false).put("usual", true)
+        // From a backend without usual trains.
+        trains.getJSONObject(0).remove("usual")
+        val departures = Departures.parse(json.toString())
+        assertEquals(listOf(false, true, false), departures.legs[0].departures!!.map { it.usual })
+        // The 8:07, rather than the next one to catch, the 7:52.
+        val featured = departures.featured(at("06:30:00"))
+        assertEquals("j2" to at("06:59:00"), featured?.departure?.journey to featured?.leave)
+        // Past its time to leave: on the way to it, most likely.
+        assertEquals("j2", departures.featured(at("07:05:00"))?.departure?.journey)
+        // A pick comes first, and the usual train is no longer marked.
+        val picked = departures.picking("j1")
+        assertEquals("j1", picked.featured(at("06:30:00"))?.departure?.journey)
+        assertEquals(listOf(false, false, false), picked.legs[0].departures!!.map { it.usual })
+        // Dropping the pick leaves the usual train to the next read.
+        assertEquals(listOf(false, true, false), departures.picking(null).legs[0].departures!!.map { it.usual })
+    }
+
+    @Test
     fun aPickMarksItsTrainOnly() {
         val departures = Departures.parse(fixture("departures"))
         fun picked(of: Departures) = of.legs.flatMap { it.departures.orEmpty() }.filter { it.picked }.map { it.journey }

@@ -1,6 +1,7 @@
 package io.github.nonock.eztravel.backend
 
 import com.sun.net.httpserver.HttpServer
+import io.github.nonock.eztravel.backend.Status.Direction
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
@@ -14,6 +15,7 @@ import java.io.File
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.time.LocalDate
+import java.time.LocalTime
 
 class HttpBackendTest {
     private data class Received(val method: String, val path: String, val authorization: String?, val body: String)
@@ -64,6 +66,45 @@ class HttpBackendTest {
         assertEquals(listOf("PUT", "PUT"), received.map { it.method })
         assertEquals("2026-12-24", JSONObject(received[0].body).getString("away_through"))
         assertTrue(JSONObject(received[1].body).isNull("away_through"))
+    }
+
+    @Test
+    fun readsTheUsualTrains() = runBlocking {
+        status = 200
+        answer = File("../../fixtures/api/settings.json").readText()
+        assertEquals(UsualTrains(LocalTime.of(8, 7), LocalTime.of(17, 52)), backend.usualTrains())
+        answer = """{"away_through":null,"usual_trains":{"outbound":null,"inbound":"17:52:00"}}"""
+        assertEquals(UsualTrains(null, LocalTime.of(17, 52)), backend.usualTrains())
+        // From a backend that has none.
+        answer = """{"away_through":null}"""
+        assertEquals(UsualTrains(null, null), backend.usualTrains())
+        assertEquals(listOf("GET /settings"), received.map { "${it.method} ${it.path}" }.distinct())
+    }
+
+    @Test
+    fun setsAndClearsAUsualTrain() = runBlocking {
+        assertNull(backend.setUsualTrain(Direction.OUTBOUND, LocalTime.of(8, 7)))
+        assertNull(backend.setUsualTrain(Direction.INBOUND, null))
+        assertEquals(listOf("PUT /usual-train"), received.map { "${it.method} ${it.path}" }.distinct())
+        val (first, second) = received.map { JSONObject(it.body) }
+        assertEquals("outbound" to "08:07", first.getString("direction") to first.getString("time"))
+        assertEquals("inbound", second.getString("direction"))
+        assertTrue(second.isNull("time"))
+    }
+
+    @Test
+    fun aRefusedUsualTrainSaysWhy() = runBlocking {
+        status = 422
+        answer = """{"refused":"outside_window"}"""
+        assertEquals(Refusal.OUTSIDE_WINDOW, backend.setUsualTrain(Direction.OUTBOUND, LocalTime.of(10, 0)))
+        status = 404
+        answer = ""
+        try {
+            backend.setUsualTrain(Direction.OUTBOUND, LocalTime.of(8, 7))
+            fail("a usual train not saved must not pass silently")
+        } catch (error: BackendError) {
+            assertEquals(404, error.status)
+        }
     }
 
     @Test

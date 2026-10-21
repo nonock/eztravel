@@ -59,6 +59,7 @@ import io.github.nonock.eztravel.home.NextDepartures
 import io.github.nonock.eztravel.home.NotificationHistory
 import io.github.nonock.eztravel.notifications.Notifier
 import io.github.nonock.eztravel.settings.AwaySetting
+import io.github.nonock.eztravel.settings.UsualTrainSetting
 import io.github.nonock.eztravel.ui.theme.EztravelTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -162,7 +163,10 @@ fun App() {
                     .verticalScroll(rememberScrollState()),
             ) {
                 when {
-                    settings -> AwaySetting(backend, onSaved = { refresh++ })
+                    settings -> {
+                        UsualTrainSetting(backend, onSaved = { refresh++ })
+                        AwaySetting(backend, Modifier.padding(top = 24.dp), onSaved = { refresh++ })
+                    }
                     tab == Tab.TRIP -> {
                         CommuteStatus(backend, refresh = refresh)
                         NextDepartures(backend, Modifier.padding(top = 16.dp), refresh = refresh, onRead = read)

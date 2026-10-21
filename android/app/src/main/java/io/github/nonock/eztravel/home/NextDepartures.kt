@@ -177,7 +177,13 @@ private fun NextTrainContent(featured: Departures.Featured, departure: Departure
                 Spacer(Modifier.width(6.dp))
             }
             Text(
-                stringResource(if (departure.picked) R.string.departures_hero_picked else R.string.departures_hero_next),
+                stringResource(
+                    when {
+                        departure.picked -> R.string.departures_hero_picked
+                        departure.usual -> R.string.departures_hero_usual
+                        else -> R.string.departures_hero_next
+                    },
+                ),
                 style = MaterialTheme.typography.labelLarge,
             )
         }
@@ -341,6 +347,9 @@ private fun DepartureRow(leg: Departures.Leg, departure: Departure, now: Instant
                 }
                 if (departure.picked) {
                     Text(stringResource(R.string.departures_picked), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+                if (departure.usual) {
+                    Text(stringResource(R.string.departures_usual), color = MaterialTheme.colorScheme.primary)
                 }
             }
         }

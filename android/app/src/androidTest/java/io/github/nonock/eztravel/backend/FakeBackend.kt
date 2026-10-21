@@ -3,6 +3,7 @@ package io.github.nonock.eztravel.backend
 import org.json.JSONException
 import java.io.IOException
 import java.time.LocalDate
+import java.time.LocalTime
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -22,9 +23,13 @@ class FakeBackend(
     var refusal: Refusal? = null,
     /** Picks cannot be saved, while all else works. */
     var pickFailing: Boolean = false,
+    var usual: UsualTrains = UsualTrains(null, null),
+    /** The answer to setting a usual train: null when saved. */
+    var usualRefusal: Refusal? = null,
 ) : Backend {
     val registered = CopyOnWriteArrayList<String>()
     val picks = CopyOnWriteArrayList<String?>()
+    val usualSaved = CopyOnWriteArrayList<Pair<Status.Direction, LocalTime?>>()
     val saved = CopyOnWriteArrayList<String>()
     val statusReads = AtomicInteger()
     val departuresReads = AtomicInteger()
@@ -73,6 +78,19 @@ class FakeBackend(
         if (failing || pickFailing) throw IOException("unreachable")
         picks += journey
         return refusal
+    }
+
+    override suspend fun usualTrains(): UsualTrains {
+        if (failing) throw IOException("unreachable")
+        if (garbled) throw JSONException("not JSON")
+        return usual
+    }
+
+    override suspend fun setUsualTrain(direction: Status.Direction, time: LocalTime?): Refusal? {
+        if (failing) throw IOException("unreachable")
+        usualSaved += direction to time
+        if (usualRefusal == null) usual = usual.with(direction, time)
+        return usualRefusal
     }
 
     override suspend fun status(): Status {

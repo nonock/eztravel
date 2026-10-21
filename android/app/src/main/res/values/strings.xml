@@ -127,4 +127,18 @@
         <item quantity="one">%d coming</item>
         <item quantity="other">%d coming</item>
     </plurals>
+    <string name="usual_title">Usual trains</string>
+    <string name="usual_explained">On office days, a reminder tells you when to leave for the first train from this time. A train picked with its bell comes first.</string>
+    <string name="usual_outbound">To work</string>
+    <string name="usual_inbound">Home</string>
+    <string name="usual_none">None</string>
+    <string name="usual_choose_outbound">Choose the usual train to work</string>
+    <string name="usual_choose_inbound">Choose the usual train home</string>
+    <string name="usual_clear_outbound">Remove the usual train to work</string>
+    <string name="usual_clear_inbound">Remove the usual train home</string>
+    <string name="usual_pick_title">Time of the train</string>
+    <string name="usual_refused">No reminder can be given for this train.</string>
+    <string name="usual_unreachable">The usual trains cannot be read just now.</string>
+    <string name="departures_hero_usual">Your usual train</string>
+    <string name="departures_usual">Usual train</string>
 </resources>

@@ -7,6 +7,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.time.LocalDate
+import java.time.LocalTime
 
 /** The eztravel backend, as the app sees it. Tests replace it with a fake. */
 interface Backend {
@@ -20,6 +21,12 @@ interface Backend {
     suspend fun awayThrough(): LocalDate?
 
     suspend fun setAwayThrough(date: LocalDate?)
+
+    /** The usual train of each way. */
+    suspend fun usualTrains(): UsualTrains
+
+    /** Sets the usual train of [direction], or none: null once saved, or why the backend refuses it. */
+    suspend fun setUsualTrain(direction: Status.Direction, time: LocalTime?): Refusal?
 
     /** What the backend sees: the lines being watched and whether checks work. */
     suspend fun status(): Status
@@ -62,6 +69,15 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
         Unit
     }
 
+    override suspend fun usualTrains(): UsualTrains = withContext(Dispatchers.IO) {
+        UsualTrains.parse(request("GET", "/settings", null))
+    }
+
+    override suspend fun setUsualTrain(direction: Status.Direction, time: LocalTime?): Refusal? = withContext(Dispatchers.IO) {
+        val usual = JSONObject().put("direction", direction.name.lowercase()).put("time", time?.toString() ?: JSONObject.NULL)
+        refusable("PUT", "/usual-train", usual)
+    }
+
     override suspend fun status(): Status = withContext(Dispatchers.IO) {
         Status.parse(request("GET", "/status", null))
     }
@@ -79,12 +95,15 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
     }
 
     override suspend fun pick(journey: String?): Refusal? = withContext(Dispatchers.IO) {
-        try {
-            request("PUT", "/departure", JSONObject().put("journey", journey ?: JSONObject.NULL))
-            null
-        } catch (error: BackendError) {
-            error.body?.takeIf { error.status == UNPROCESSABLE }?.let(Refusal::parse) ?: throw error
-        }
+        refusable("PUT", "/departure", JSONObject().put("journey", journey ?: JSONObject.NULL))
+    }
+
+    /** Null once saved, or why the backend refuses it; any other failure throws. */
+    private fun refusable(method: String, path: String, body: JSONObject): Refusal? = try {
+        request(method, path, body)
+        null
+    } catch (error: BackendError) {
+        error.body?.takeIf { error.status == UNPROCESSABLE }?.let(Refusal::parse) ?: throw error
     }
 
     private fun request(method: String, path: String, body: JSONObject?): String {

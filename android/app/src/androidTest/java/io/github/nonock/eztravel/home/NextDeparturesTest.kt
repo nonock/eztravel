@@ -255,6 +255,16 @@ class NextDeparturesTest {
     }
 
     @Test
+    fun withoutAPickTheUsualTrainComesFirst() {
+        val trains = morning.legs[0].departures!!.map { if (it.journey == "j3") it.copy(usual = true) else it }
+        show(FakeBackend(departures = morning.copy(legs = listOf(morning.legs[0].copy(departures = trains), morning.legs[1]))))
+        // The 8:07, rather than the 8:02, the next one to catch.
+        waitFor(hero(R.string.departures_hero_usual) and hasText(at("07:07:00").clock()))
+        waitFor(hasText(at("07:07:00").clock()) and hasText("PILO") and hasText(text(R.string.departures_usual)))
+        compose.onNode(hero(R.string.departures_hero_next)).assertDoesNotExist()
+    }
+
+    @Test
     fun noTrainToCatchLeavesTheCardOut() {
         val metroOnly = morning.copy(legs = morning.legs.drop(1))
         show(FakeBackend(departures = metroOnly))

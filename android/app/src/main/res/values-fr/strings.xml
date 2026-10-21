@@ -126,4 +126,18 @@
         <item quantity="one">%d à venir</item>
         <item quantity="other">%d à venir</item>
     </plurals>
+    <string name="usual_title">Trains habituels</string>
+    <string name="usual_explained">Les jours de bureau, un rappel vous dit quand partir pour le premier train à partir de cette heure. Un train choisi avec la cloche passe avant.</string>
+    <string name="usual_outbound">Aller</string>
+    <string name="usual_inbound">Retour</string>
+    <string name="usual_none">Aucun</string>
+    <string name="usual_choose_outbound">Choisir le train habituel de l’aller</string>
+    <string name="usual_choose_inbound">Choisir le train habituel du retour</string>
+    <string name="usual_clear_outbound">Retirer le train habituel de l’aller</string>
+    <string name="usual_clear_inbound">Retirer le train habituel du retour</string>
+    <string name="usual_pick_title">Heure du train</string>
+    <string name="usual_refused">Pas de rappel possible pour ce train.</string>
+    <string name="usual_unreachable">Les trains habituels ne peuvent pas être lus pour l’instant.</string>
+    <string name="departures_hero_usual">Votre train habituel</string>
+    <string name="departures_usual">Train habituel</string>
 </resources>
