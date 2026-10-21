@@ -117,6 +117,7 @@ Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md
 
 - Backend, from `backend/`: `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt`, coverage with `cargo llvm-cov`.
 - App, from `android/`: `./gradlew testDebugUnitTest` (JVM), `./gradlew connectedDebugAndroidTest` (on a phone, unlocked), `./gradlew lintDebug`, coverage with `createDebugUnitTestCoverageReport` and `createDebugAndroidTestCoverageReport`.
+- Git hooks, enabled with `git config core.hooksPath hooks`: before a commit, [hooks/check.py](hooks/check.py) refuses secrets (the values of `.env`, `local.properties` and the Firebase files, and keys of known formats) and personal data (the words of `local/forbidden.txt` and the stops and lines of your configuration), and Rust code left unformatted; before a push, it checks every commit pushed, authors included, then runs the backend's lint, tests and `cargo audit`, and the app's JVM tests and lint. They need Python 3, `cargo install cargo-audit` and `JAVA_HOME`. Their own tests: `python -m unittest discover -s hooks`.
 
 ## Roadmap
 

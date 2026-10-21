@@ -1,0 +1,24 @@
+#!/bin/sh
+# Before anything reaches the public repository: secrets, personal data and
+# authors of every commit pushed, then lint, tests and the dependency audit.
+# Needs Python 3, cargo-audit (cargo install cargo-audit) and JAVA_HOME.
+root=$(git rev-parse --show-toplevel)
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_sha" in
+    *[!0]*) python -I "$root/hooks/check.py" commits "$local_sha" || exit 1 ;;
+  esac
+done
+python -I -m unittest discover -s "$root/hooks" -q 2>/dev/null || {
+  echo "pre-push: the checks' own tests fail: python -m unittest discover -s hooks" >&2
+  exit 1
+}
+cd "$root/backend" || exit 1
+cargo fmt --check >/dev/null && cargo clippy -q --all-targets -- -D warnings && cargo test -q >/dev/null && cargo audit -q || {
+  echo "pre-push: the backend's format, lint, tests or dependency audit fail" >&2
+  exit 1
+}
+cd "$root/android" || exit 1
+./gradlew -q testDebugUnitTest lintDebug >/dev/null || {
+  echo "pre-push: the app's tests or lint fail" >&2
+  exit 1
+}

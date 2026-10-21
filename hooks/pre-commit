@@ -1,0 +1,11 @@
+#!/bin/sh
+# Refuses a commit that adds a secret or personal data, or Rust code left
+# unformatted. Enabled with: git config core.hooksPath hooks
+root=$(git rev-parse --show-toplevel)
+python -I "$root/hooks/check.py" staged || exit 1
+if git diff --cached --name-only | grep -q '^backend/.*\.rs$'; then
+  (cd "$root/backend" && cargo fmt --check >/dev/null) || {
+    echo "pre-commit: Rust code not formatted, run cargo fmt in backend/" >&2
+    exit 1
+  }
+fi
