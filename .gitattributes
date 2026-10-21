@@ -1,5 +1,6 @@
 # Unix line endings everywhere, so that tests, Docker builds and scripts behave the same on every machine.
 * text=auto eol=lf
-*.bat text eol=crlf
+# Windows scripts keep CRLF as written, unconverted: Dependabot commits the Gradle wrapper's so.
+*.bat -text
 *.jar binary
 *.webp binary
