@@ -81,13 +81,13 @@
     <string name="departures_arrival">arrives %1$s</string>
     <string name="departures_leave_in">Leave in %1$d min</string>
     <string name="departures_leave_now">Leave now</string>
-    <string name="departures_too_late">Too late to catch</string>
+    <string name="departures_leaves_in">Departs in %1$d min</string>
+    <string name="departures_leaving">Departing now</string>
     <string name="departures_picked">Reminder set</string>
     <string name="departures_hero_next">Next train to catch</string>
     <string name="departures_hero_picked">Your train</string>
     <string name="departures_hero_leave_in">Leave in</string>
     <string name="departures_hero_now">Time to go</string>
-    <string name="departures_hero_too_late">Too late for this train</string>
     <string name="departures_pick">Remind me to leave for the %1$s train</string>
     <string name="departures_unpick">Cancel the reminder for the %1$s train</string>
     <string name="departures_refused_too_late">Too late to leave for this train.</string>

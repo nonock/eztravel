@@ -200,7 +200,8 @@ private fun NextTrainContent(featured: Departures.Featured, departure: Departure
         val left = Duration.between(now, featured.leave)
         Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.Bottom) {
             when {
-                left.isNegative -> Text(stringResource(R.string.departures_hero_too_late), style = MaterialTheme.typography.titleLarge)
+                // Most likely on the way to it.
+                left.isNegative -> Text(leavesIn(departure, now), style = MaterialTheme.typography.titleLarge)
                 left.toMinutes() == 0L -> Text(
                     stringResource(R.string.departures_hero_now),
                     style = MaterialTheme.typography.headlineMedium,
@@ -220,6 +221,13 @@ private fun NextTrainContent(featured: Departures.Featured, departure: Departure
             }
         }
     }
+}
+
+/** When [departure] leaves: in so many minutes, or now. */
+@Composable
+private fun leavesIn(departure: Departure, now: Instant): String {
+    val minutes = departure.expected.minutesFrom(now)
+    return if (minutes == 0L) stringResource(R.string.departures_leaving) else stringResource(R.string.departures_leaves_in, minutes)
 }
 
 /** Figures of one width, so that a countdown does not jitter as it moves. */
@@ -325,7 +333,8 @@ private fun DepartureRow(leg: Departures.Leg, departure: Departure, now: Instant
                 if (leave != null && departure.state != State.CANCELLED) {
                     val left = Duration.between(now, leave)
                     when {
-                        left.isNegative -> Text(stringResource(R.string.departures_too_late), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        // Too soon to leave for, but not for whoever is already on the way.
+                        left.isNegative -> Text(leavesIn(departure, now), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         left.toMinutes() == 0L -> Text(stringResource(R.string.departures_leave_now), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                         else -> Text(stringResource(R.string.departures_leave_in, left.toMinutes()), color = MaterialTheme.colorScheme.primary)
                     }

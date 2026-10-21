@@ -81,13 +81,13 @@
     <string name="departures_arrival">arrivée %1$s</string>
     <string name="departures_leave_in">Partir dans %1$d min</string>
     <string name="departures_leave_now">Partir maintenant</string>
-    <string name="departures_too_late">Trop tard pour celui-ci</string>
+    <string name="departures_leaves_in">Départ dans %1$d min</string>
+    <string name="departures_leaving">Départ imminent</string>
     <string name="departures_picked">Rappel prévu</string>
     <string name="departures_hero_next">Prochain train à prendre</string>
     <string name="departures_hero_picked">Votre train</string>
     <string name="departures_hero_leave_in">Partir dans</string>
     <string name="departures_hero_now">C’est l’heure de partir</string>
-    <string name="departures_hero_too_late">Trop tard pour ce train</string>
     <string name="departures_pick">Me rappeler de partir pour le train de %1$s</string>
     <string name="departures_unpick">Annuler le rappel du train de %1$s</string>
     <string name="departures_refused_too_late">Trop tard pour partir prendre ce train.</string>

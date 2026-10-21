@@ -114,8 +114,11 @@ class NextDeparturesTest {
     @Test
     fun aLegWithItsTimeToThePlatformSaysWhenToLeave() {
         show(FakeBackend(departures = morning))
-        // Twelve minutes to the platform, at 6:50.
-        waitFor(hasText(at("06:52:00").clock()) and hasText(text(R.string.departures_too_late)))
+        // Twelve minutes to the platform, at 6:50. Too soon to leave for the 6:52:
+        // when it leaves, for whoever is already on the way.
+        waitFor(hasText(at("06:52:00").clock()) and hasText(text(R.string.departures_leaves_in, 2)))
+        compose.onNode(hasText(at("06:52:00").clock()) and hasText(text(R.string.departures_leave_in, 0).substringBefore("0"), substring = true))
+            .assertDoesNotExist()
         waitFor(hasText(at("07:02:00").clock()) and hasText(text(R.string.departures_leave_now)))
         waitFor(hasText(at("07:07:00").clock()) and hasText(text(R.string.departures_leave_in, 9)))
         waitFor(hasText(at("07:37:00").clock()) and hasText(text(R.string.departures_leave_in, 35)))
@@ -241,10 +244,14 @@ class NextDeparturesTest {
     }
 
     @Test
-    fun aPickedTrainTooLateToCatchSaysSo() {
-        val late = morning.picking("j1")
-        show(FakeBackend(departures = late))
-        waitFor(hero(R.string.departures_hero_picked) and hasText(at("06:52:00").clock()) and hasText(text(R.string.departures_hero_too_late)))
+    fun aPickedTrainPastItsTimeToLeaveSaysWhenItLeaves() {
+        // On the way to it, most likely.
+        var clock = at("06:50:00")
+        compose.setContent { NextDepartures(FakeBackend(departures = morning.picking("j1")), now = { clock }, tickMs = 50) }
+        waitFor(hero(R.string.departures_hero_picked) and hasText(at("06:52:00").clock()) and hasText(text(R.string.departures_leaves_in, 2)))
+        clock = at("06:52:10")
+        waitFor(hero(R.string.departures_hero_picked) and hasText(text(R.string.departures_leaving)))
+        waitFor(hasText(at("06:52:00").clock()) and hasText("PALO") and hasText(text(R.string.departures_leaving)))
     }
 
     @Test
