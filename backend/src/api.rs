@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::calendar::{Calendar, Direction, Schedule};
 use crate::departures::{self, NextDepartures};
 use crate::history::History;
+use crate::journal::Journal;
 use crate::leaving::Refusal;
 use crate::line_alerts::{self, LineAlerts};
 use crate::profile::{Store, UsualTrains};
@@ -93,6 +94,13 @@ struct Shared {
     history: Arc<History>,
     departures: Arc<NextDepartures>,
     line_alerts: Arc<LineAlerts>,
+    journal: Arc<Journal>,
+}
+
+impl FromRef<Shared> for Arc<Journal> {
+    fn from_ref(shared: &Shared) -> Self {
+        shared.journal.clone()
+    }
 }
 
 impl FromRef<Shared> for Arc<LineAlerts> {
@@ -131,15 +139,27 @@ impl FromRef<Shared> for Arc<NextDepartures> {
     }
 }
 
-pub fn router(
-    store: Arc<Store>,
-    status: Arc<Mutex<Snapshot>>,
-    schedule: Schedule,
-    history: Arc<History>,
-    departures: Arc<NextDepartures>,
-    line_alerts: Arc<LineAlerts>,
-    key: String,
-) -> Router {
+/// What the API reads and changes, shared with the poll loop.
+pub struct Sources {
+    pub store: Arc<Store>,
+    pub status: Arc<Mutex<Snapshot>>,
+    pub schedule: Schedule,
+    pub history: Arc<History>,
+    pub departures: Arc<NextDepartures>,
+    pub line_alerts: Arc<LineAlerts>,
+    pub journal: Arc<Journal>,
+}
+
+pub fn router(sources: Sources, key: String) -> Router {
+    let Sources {
+        store,
+        status,
+        schedule,
+        history,
+        departures,
+        line_alerts,
+        journal,
+    } = sources;
     Router::new()
         .route("/devices", post(register))
         .route("/settings", get(settings).put(set_settings))
@@ -149,6 +169,7 @@ pub fn router(
         .route("/departure", put(pick_departure))
         .route("/usual-train", put(set_usual_train))
         .route("/alerts", get(alerts))
+        .route("/trains", get(ended_trains))
         .layer(middleware::from_fn_with_state(Arc::new(key), authorize))
         .with_state(Shared {
             store,
@@ -157,6 +178,7 @@ pub fn router(
             history,
             departures,
             line_alerts,
+            journal,
         })
 }
 
@@ -233,6 +255,21 @@ async fn sent(State(history): State<Arc<History>>) -> Json<Sent> {
         })
         .collect();
     Json(Sent { entries })
+}
+
+/// How many trains `GET /trains` gives, the latest first: a few weeks.
+const TRAINS_SHOWN: usize = 1000;
+
+/// `GET /trains`, in the shape fixed by `fixtures/api/trains.json`.
+#[derive(Serialize)]
+struct EndedTrains {
+    trains: Vec<crate::trains::Ended>,
+}
+
+async fn ended_trains(State(journal): State<Arc<Journal>>) -> Json<EndedTrains> {
+    Json(EndedTrains {
+        trains: journal.latest(TRAINS_SHOWN),
+    })
 }
 
 /// Read from PRIM when asked, at most once a minute per stop.
@@ -338,6 +375,7 @@ mod tests {
     use crate::history::History;
     use crate::prim::Prim;
     use crate::profile::Pick;
+    use crate::trains::Ended;
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode};
     use http_body_util::BodyExt;
@@ -353,6 +391,7 @@ mod tests {
         history: Arc<History>,
         departures: Arc<NextDepartures>,
         line_alerts: Arc<LineAlerts>,
+        journal: Arc<Journal>,
         _dir: tempfile::TempDir,
     }
 
@@ -375,6 +414,7 @@ mod tests {
                     &Config::parse(include_str!("../config.example.toml")).unwrap(),
                     Prim::new("http://127.0.0.1:9", "key"),
                 )),
+                journal: Arc::new(Journal::open(&dir.path().join("journal.jsonl"))),
                 _dir: dir,
             }
         }
@@ -399,18 +439,16 @@ mod tests {
             let schedule = Config::parse(include_str!("../config.example.toml"))
                 .unwrap()
                 .schedule();
-            let response = router(
-                self.store.clone(),
-                self.status.clone(),
+            let sources = Sources {
+                store: self.store.clone(),
+                status: self.status.clone(),
                 schedule,
-                self.history.clone(),
-                self.departures.clone(),
-                self.line_alerts.clone(),
-                KEY.into(),
-            )
-            .oneshot(request)
-            .await
-            .unwrap();
+                history: self.history.clone(),
+                departures: self.departures.clone(),
+                line_alerts: self.line_alerts.clone(),
+                journal: self.journal.clone(),
+            };
+            let response = router(sources, KEY.into()).oneshot(request).await.unwrap();
             let status = response.status();
             let bytes = response.into_body().collect().await.unwrap().to_bytes();
             (status, String::from_utf8(bytes.to_vec()).unwrap())
@@ -439,6 +477,7 @@ mod tests {
             (Method::GET, "/departures", None),
             (Method::PUT, "/departure", Some(r#"{"journey":null}"#)),
             (Method::GET, "/alerts", None),
+            (Method::GET, "/trains", None),
             (
                 Method::PUT,
                 "/usual-train",
@@ -606,6 +645,24 @@ mod tests {
                 "{body}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn the_trains_kept_answer_as_in_the_fixture() {
+        let api = Api::new();
+        let path = format!("{}/../fixtures/api/trains.json", env!("CARGO_MANIFEST_DIR"));
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        // Written as they ended, the oldest first.
+        let mut kept: Vec<Ended> = serde_json::from_value(fixture["trains"].clone()).unwrap();
+        kept.reverse();
+        api.journal.append(&kept);
+        let (status, body) = api.authorized(Method::GET, "/trains", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+            fixture
+        );
     }
 
     #[tokio::test]

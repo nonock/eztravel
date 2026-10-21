@@ -21,6 +21,7 @@ use crate::calendar::{Calendar, Direction, Phase, phase, watched_direction};
 use crate::config::Config;
 use crate::departures::{NextDepartures, leg_stops, monitoring_ref, one_way};
 use crate::history::{self, Entry, History};
+use crate::journal::Journal;
 use crate::leaving::{Aim, Leaving, remind, reminded_leg};
 use crate::line_alerts::LineAlerts;
 use crate::prim::Prim;
@@ -40,6 +41,7 @@ const HEALTH_FILE: &str = "health.json";
 const HISTORY_FILE: &str = "history.json";
 const TRAINS_FILE: &str = "trains.json";
 const LEAVING_FILE: &str = "leaving.json";
+const JOURNAL_FILE: &str = "journal.jsonl";
 
 pub struct Service {
     config: Config,
@@ -53,6 +55,7 @@ pub struct Service {
     health: Health,
     status: Arc<Mutex<Snapshot>>,
     history: Arc<History>,
+    journal: Arc<Journal>,
     departures: Arc<NextDepartures>,
     line_alerts: Arc<LineAlerts>,
     routes: BTreeMap<String, Vec<Route>>,
@@ -103,6 +106,7 @@ impl Service {
             health: load(&data_dir.join(HEALTH_FILE)).unwrap_or_default(),
             status: Arc::default(),
             history: Arc::new(History::open(&data_dir.join(HISTORY_FILE))),
+            journal: Arc::new(Journal::open(&data_dir.join(JOURNAL_FILE))),
             departures: Arc::new(NextDepartures::new(&config, prim.clone(), routes.clone())),
             line_alerts: Arc::new(LineAlerts::new(&config, prim.clone())),
             routes,
@@ -148,12 +152,15 @@ impl Service {
         let service = Self::new(config, prim, sender, store.clone(), &data_dir);
         Ok(Startup {
             api: api::router(
-                store,
-                service.status(),
-                schedule,
-                service.history(),
-                service.departures(),
-                service.line_alerts(),
+                api::Sources {
+                    store,
+                    status: service.status(),
+                    schedule,
+                    history: service.history(),
+                    departures: service.departures(),
+                    line_alerts: service.line_alerts(),
+                    journal: service.journal(),
+                },
                 app_key,
             ),
             service,
@@ -163,6 +170,11 @@ impl Service {
     /// What was sent, and windows that closed on a disruption.
     pub fn history(&self) -> Arc<History> {
         self.history.clone()
+    }
+
+    /// How each train followed went.
+    pub fn journal(&self) -> Arc<Journal> {
+        self.journal.clone()
     }
 
     /// The next departures, read when the app asks, on the stops of the routes.
@@ -562,7 +574,9 @@ impl Service {
         }
     }
 
-    fn commit_trains(&mut self, next: Trains) {
+    /// Keeps the trains followed, and those that ended in the journal.
+    fn commit_trains(&mut self, mut next: Trains) {
+        self.journal.append(&std::mem::take(&mut next.ended));
         if next != self.trains {
             self.trains = next;
             save(&self.data_dir.join(TRAINS_FILE), &self.trains);
@@ -631,6 +645,7 @@ mod tests {
     use super::*;
     use crate::profile::Pick;
     use crate::push::testing::account;
+    use crate::trains::Outcome;
     use crate::watch::{Cause, LineStatus, Outage};
     use wiremock::matchers::{body_string_contains, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1400,6 +1415,70 @@ mod tests {
         assert_eq!(service.poll(tuesday("05:45")).await, Poll::Sent(1));
         // Remembered across a restart: not said again.
         assert_eq!(setup.service().poll(tuesday("05:47")).await, Poll::Sent(0));
+    }
+
+    #[tokio::test]
+    async fn trains_that_ended_are_kept_in_the_journal_once_their_poll_is_done() {
+        let setup = Setup::with(train_routes_server().await).await;
+        Mock::given(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(feed(false)))
+            .up_to_n_times(1)
+            .mount(&setup.server)
+            .await;
+        setup.prim_answers(200, true, 3).await;
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(timed_list(200, &[("j1", "06:00")])),
+            )
+            .mount(&setup.server)
+            .await;
+        setup.firebase_answers(500, 1).await;
+        setup.firebase_answers(200, 1).await;
+        let mut service = setup.service();
+        let journal = service.journal();
+        // 6:50 in Paris: the 7:00 is followed.
+        assert_eq!(service.poll(tuesday("05:50")).await, Poll::Sent(0));
+        // Half an hour after it left, it ended; but the line's alert cannot be sent:
+        // the poll is tried again whole, and nothing is kept yet.
+        let failed = service.poll(tuesday("06:30")).await;
+        assert!(format!("{failed:?}").starts_with("NotSent"), "{failed:?}");
+        assert_eq!(journal.latest(5), []);
+        assert_eq!(service.poll(tuesday("06:32")).await, Poll::Sent(1));
+        // Still listed, long gone: not followed again, nor kept twice.
+        assert_eq!(service.poll(tuesday("06:34")).await, Poll::Sent(0));
+        let kept = journal.latest(5);
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(
+            (kept[0].train.aimed, kept[0].outcome),
+            (tuesday("06:00"), Outcome::Ran)
+        );
+    }
+
+    #[tokio::test]
+    async fn the_trains_of_a_window_are_kept_when_the_next_one_is_observed() {
+        let setup = Setup::with(train_routes_server().await).await;
+        setup.prim_answers(200, false, 1).await;
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(timed_list(200, &[("j1", "07:10")])),
+            )
+            .mount(&setup.server)
+            .await;
+        let mut service = setup.service();
+        // 8:00 in Paris on Tuesday: the 8:10 is followed until the window ends.
+        assert_eq!(service.poll(tuesday("07:00")).await, Poll::Sent(0));
+        assert_eq!(service.journal().latest(5), []);
+        // Thursday at 5:40 in Paris, the next office day: its morning's trains are
+        // observed, and Tuesday's end.
+        let thursday: Timestamp = "2026-11-05T04:40:00Z".parse().unwrap();
+        assert_eq!(service.poll(thursday).await, Poll::Observing);
+        let kept = service.journal().latest(5);
+        assert_eq!(
+            kept.iter()
+                .map(|ended| (ended.day, ended.direction))
+                .collect::<Vec<_>>(),
+            [(jiff::civil::date(2026, 11, 3), Direction::Outbound)]
+        );
     }
 
     #[tokio::test]

@@ -6,6 +6,7 @@ pub mod departures;
 pub mod disruptions;
 pub mod history;
 pub mod http;
+pub mod journal;
 pub mod leaving;
 pub mod line_alerts;
 pub mod prim;

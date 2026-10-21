@@ -1,0 +1,52 @@
+{
+  "trains": [
+    {
+      "day": "2026-11-03",
+      "direction": "inbound",
+      "line": "C01740",
+      "mission": "POLA",
+      "destination": "Les Aubépines",
+      "from": "Gare Centrale",
+      "aimed": "2026-11-03T16:37:00Z",
+      "expected": "2026-11-03T16:37:00Z",
+      "outcome": "announced",
+      "came_back": false
+    },
+    {
+      "day": "2026-11-03",
+      "direction": "inbound",
+      "line": "C01740",
+      "mission": "POLA",
+      "destination": "Les Aubépines",
+      "from": "Gare Centrale",
+      "aimed": "2026-11-03T16:22:00Z",
+      "expected": "2026-11-03T16:22:00Z",
+      "outcome": "ran",
+      "came_back": true
+    },
+    {
+      "day": "2026-11-03",
+      "direction": "outbound",
+      "line": "C01740",
+      "mission": "PILO",
+      "destination": "Gare Centrale",
+      "from": "Les Aubépines",
+      "aimed": "2026-11-03T07:07:00Z",
+      "expected": "2026-11-03T07:11:00Z",
+      "outcome": "ran",
+      "came_back": false
+    },
+    {
+      "day": "2026-11-03",
+      "direction": "outbound",
+      "line": "C01740",
+      "mission": "PALO",
+      "destination": "Gare Centrale",
+      "from": "Les Aubépines",
+      "aimed": "2026-11-03T06:52:00Z",
+      "expected": "2026-11-03T06:52:00Z",
+      "outcome": "missing",
+      "came_back": false
+    }
+  ]
+}
