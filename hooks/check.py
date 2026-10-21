@@ -122,18 +122,22 @@ def load_secrets(root):
 
 
 def load_words(root):
-    words = []
+    """A line of local/forbidden.txt starting with "!" allows its word, even from the configuration."""
+    words, allowed = [], set()
     listed = root / "local/forbidden.txt"
     if listed.exists():
         for line in listed.read_text(encoding="utf-8").splitlines():
-            if line.strip() and not line.lstrip().startswith("#"):
-                words.append(line.strip())
+            word = line.strip()
+            if word.startswith("!"):
+                allowed.add(word[1:].strip())
+            elif word and not word.startswith("#"):
+                words.append(word)
     config = root / "local/config.toml"
     if config.exists():
         text = config.read_text(encoding="utf-8")
         words += sorted(set(re.findall(r"stop_area:IDFM:\d+", text)))
         words += sorted(set(re.findall(r'(?:line|code) = "(C\d+)"', text)))
-    return words
+    return [word for word in words if word not in allowed]
 
 
 def git(*arguments):

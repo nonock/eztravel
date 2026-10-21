@@ -107,6 +107,16 @@ class Loading(unittest.TestCase):
                 ["Gare du Moulin", "stop_area:IDFM:424242", "C08888", "C09999"],
             )
 
+    def test_a_word_marked_with_an_exclamation_mark_is_allowed(self):
+        # Such as a stop of the commute that the repository's example already uses for another line.
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "local").mkdir()
+            (root / "local/forbidden.txt").write_text("Gare du Moulin\n!stop_area:IDFM:424242\n", encoding="utf-8")
+            (root / "local/config.toml").write_text(
+                'board = "stop_area:IDFM:424242"\nalight = "stop_area:IDFM:515151"\n', encoding="utf-8")
+            self.assertEqual(check.load_words(root), ["Gare du Moulin", "stop_area:IDFM:515151"])
+
     def test_without_local_files_only_the_known_formats_are_checked(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
