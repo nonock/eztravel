@@ -22,7 +22,7 @@ use crate::profile::Pick;
 use crate::push::{self, LineLabel};
 use crate::relevance::{Leg, Route, RouteStop};
 
-/// Departures shown per leg.
+/// Departures shown per leg, after those too soon to leave for on a ride with its time to the platform.
 pub const SHOWN: usize = 5;
 /// A stop is read again when its answer is older than this.
 const MAX_AGE: SignedDuration = SignedDuration::from_secs(60);
@@ -271,11 +271,14 @@ pub struct Departure {
 /// The next departures of `line` from the board stop, soonest first. With the
 /// alight stop and its visits, only those that call there afterwards, or end there:
 /// during an incident, a terminus drops trains from its arrivals long before they come.
+/// With `reach`, the minutes to the platform, those too soon to leave for come
+/// first, for whoever is already on the way, then [`SHOWN`] more.
 pub fn select(
     line: &str,
     board: &[Visit],
     alight: Option<(&str, &[Visit])>,
     now: Timestamp,
+    reach: Option<u32>,
 ) -> Vec<Departure> {
     let mut shown: Vec<Departure> = board
         .iter()
@@ -304,7 +307,14 @@ pub fn select(
         })
         .collect();
     shown.sort_by_key(|departure| departure.expected);
-    shown.truncate(SHOWN);
+    let too_soon = reach.map_or(0, |reach| {
+        let reach = SignedDuration::from_mins(i64::from(reach));
+        shown
+            .iter()
+            .take_while(|departure| departure.expected - reach < now)
+            .count()
+    });
+    shown.truncate(too_soon + SHOWN);
     shown
 }
 
@@ -447,7 +457,7 @@ impl NextDepartures {
             let stops = self.stops(leg);
             let mut departures = match &stops {
                 Some((board, alight)) => {
-                    self.departures(&mut cache, may_read, &leg.line, board, alight, now)
+                    self.departures(&mut cache, may_read, leg, board, alight, now)
                         .await
                 }
                 None => None,
@@ -498,7 +508,7 @@ impl NextDepartures {
         let mut cache = self.cache.lock().await;
         let may_read = cache.may_read(now);
         let departures = self
-            .departures(&mut cache, may_read, &leg.line, &board, &alight, now)
+            .departures(&mut cache, may_read, leg, &board, &alight, now)
             .await
             .ok_or(Refusal::Unavailable)?;
         let departure = departures
@@ -526,7 +536,7 @@ impl NextDepartures {
         &self,
         cache: &mut Cache,
         may_read: bool,
-        line: &str,
+        leg: &Leg,
         board: &RouteStop,
         alight: &RouteStop,
         now: Timestamp,
@@ -535,11 +545,17 @@ impl NextDepartures {
             .visits(cache, may_read, &monitoring_ref(&board.stop_point)?, now)
             .await?;
         if one_way(&board.stop_point) {
-            return Some(select(line, &leaving, None, now));
+            return Some(select(&leg.line, &leaving, None, now, leg.reach));
         }
         let stop = monitoring_ref(&alight.stop_point)?;
         let arriving = self.visits(cache, may_read, &stop, now).await?;
-        Some(select(line, &leaving, Some((&stop, &arriving)), now))
+        Some(select(
+            &leg.line,
+            &leaving,
+            Some((&stop, &arriving)),
+            now,
+            leg.reach,
+        ))
     }
 
     /// For the poll loop: a stop's visits, read whatever quota is left, since the
@@ -943,6 +959,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn at_rush_hour_the_ride_reminded_still_shows_five_trains_to_pick() {
+        // A train every two minutes from 7:51 in Paris, twelve minutes from home.
+        let rush = siri(
+            (0..12)
+                .map(|n| {
+                    let time = format!(
+                        "{}:00",
+                        (at("06:51:00") + SignedDuration::from_mins(2 * n)).strftime("%H:%M")
+                    );
+                    train(
+                        &format!("t{n}"),
+                        "06:49:00",
+                        "PALO",
+                        "Gare Centrale",
+                        departs(&time, &time, "onTime"),
+                    )
+                })
+                .collect(),
+        );
+        let server = MockServer::start().await;
+        answers(&server, "STIF:StopArea:SP:100:", rush, 1).await;
+        answers(&server, "STIF:StopArea:SP:200:", siri(vec![]), 1).await;
+        let departures = next_departures(&server, EXAMPLE);
+        let view = departures.view(at("06:50:00"), None).await;
+        // Six leave before the platform can be reached: still shown, for whoever is on the way.
+        let shown: Vec<_> = view.legs[0]
+            .departures
+            .iter()
+            .flatten()
+            .map(|departure| departure.journey.as_str())
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10"
+            ]
+        );
+        let calendar = Config::parse(EXAMPLE).unwrap().calendar;
+        assert_eq!(
+            departures
+                .pick("t10", at("06:50:00"), &calendar)
+                .await
+                .map(|pick| pick.leave),
+            Ok(at("06:59:00"))
+        );
+        assert_eq!(
+            departures.pick("t11", at("06:50:00"), &calendar).await,
+            Err(Refusal::Unknown)
+        );
+    }
+
+    #[tokio::test]
     async fn a_pick_is_refused_when_it_would_never_be_reminded() {
         let config = Config::parse(EXAMPLE).unwrap();
         let away = Calendar {
@@ -1296,7 +1364,7 @@ outbound = \"07:30\"
             .unwrap(),
         )
         .unwrap();
-        let shown = select("C01740", &visits, None, at("06:50:00"));
+        let shown = select("C01740", &visits, None, at("06:50:00"), None);
         assert_eq!(shown[0].expected, at("07:00:00"));
         assert_eq!(shown[0].aimed, Some(at("07:00:00")));
     }
@@ -1326,6 +1394,7 @@ outbound = \"07:30\"
             &board,
             Some(("STIF:StopArea:SP:200:", &[])),
             at("06:50:00"),
+            None,
         );
         assert_eq!(
             shown
@@ -1342,11 +1411,26 @@ outbound = \"07:30\"
             .map(|n| metro(&format!("m{n}"), &format!("07:0{n}:00")))
             .collect();
         let visits = parse(&serde_json::to_vec(&siri(visits)).unwrap()).unwrap();
-        let shown = select("C02000", &visits, None, at("07:00:00"));
+        let shown = select("C02000", &visits, None, at("07:00:00"), None);
         assert_eq!(shown.len(), SHOWN);
         assert_eq!(shown[0].expected, at("07:00:00"));
         // Another line's trains are not this leg's.
-        assert_eq!(select("C01740", &visits, None, at("07:00:00")), []);
+        assert_eq!(select("C01740", &visits, None, at("07:00:00"), None), []);
+    }
+
+    #[test]
+    fn trains_too_soon_to_leave_for_are_shown_before_the_first_that_can_be_caught() {
+        let visits: Vec<Value> = (0..9)
+            .map(|n| metro(&format!("m{n}"), &format!("07:0{n}:00")))
+            .collect();
+        let visits = parse(&serde_json::to_vec(&siri(visits)).unwrap()).unwrap();
+        // Three minutes to the platform: leaving now catches the 7:03. The 7:00 to
+        // 7:02 are still shown, for whoever is already on the way.
+        let shown = select("C02000", &visits, None, at("07:00:00"), Some(3));
+        assert_eq!(shown.len(), 3 + SHOWN);
+        assert_eq!(shown[0].expected, at("07:00:00"));
+        assert_eq!(shown[3].expected, at("07:03:00"));
+        assert_eq!(shown[3 + SHOWN - 1].expected, at("07:07:00"));
     }
 
     #[test]
