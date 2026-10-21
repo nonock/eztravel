@@ -1,6 +1,6 @@
-//! The API the app calls: register the phone, read and set the time away,
-//! see what the backend sees, the next departures, and pick one of them for
-//! the reminder to leave.
+//! The API the app calls: register the phone, read and set the time away and
+//! the usual train of each way, see what the backend sees, the next
+//! departures, and pick one of them for the reminder to leave.
 //!
 //! Every request carries the app key (`Authorization: Bearer …`), compiled
 //! into the user's own build of the app and kept out of the repository.
@@ -17,15 +17,15 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use jiff::Timestamp;
-use jiff::civil::Date;
+use jiff::civil::{Date, Time};
 use serde::{Deserialize, Serialize};
 
-use crate::calendar::{Calendar, Schedule};
+use crate::calendar::{Calendar, Direction, Schedule};
 use crate::departures::{self, NextDepartures};
 use crate::history::History;
 use crate::leaving::Refusal;
 use crate::line_alerts::{self, LineAlerts};
-use crate::profile::Store;
+use crate::profile::{Store, UsualTrains};
 use crate::watch::{Snapshot, View};
 
 /// Firebase tokens are a few hundred characters long.
@@ -33,12 +33,35 @@ const MAX_TOKEN_LENGTH: usize = 4096;
 /// Journeys are named in a few dozen characters.
 const MAX_JOURNEY_LENGTH: usize = 256;
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     /// Last day away from the office, included. Required, but may be null.
     #[serde(deserialize_with = "Option::deserialize")]
     pub away_through: Option<Date>,
+}
+
+/// `GET /settings`, in the shape fixed by `fixtures/api/settings.json`.
+#[derive(Serialize)]
+struct SettingsView {
+    away_through: Option<Date>,
+    usual_trains: UsualTrains,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Way {
+    Outbound,
+    Inbound,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Usual {
+    direction: Way,
+    /// The usual train's time at its station. Required, but null clears it.
+    #[serde(deserialize_with = "Option::deserialize")]
+    time: Option<Time>,
 }
 
 #[derive(Deserialize)]
@@ -124,6 +147,7 @@ pub fn router(
         .route("/history", get(sent))
         .route("/departures", get(next_departures))
         .route("/departure", put(pick_departure))
+        .route("/usual-train", put(set_usual_train))
         .route("/alerts", get(alerts))
         .layer(middleware::from_fn_with_state(Arc::new(key), authorize))
         .with_state(Shared {
@@ -159,9 +183,11 @@ async fn register(State(store): State<Arc<Store>>, Json(device): Json<Device>) -
     StatusCode::NO_CONTENT
 }
 
-async fn settings(State(store): State<Arc<Store>>) -> Json<Settings> {
-    Json(Settings {
-        away_through: store.profile().away_through,
+async fn settings(State(store): State<Arc<Store>>) -> Json<SettingsView> {
+    let profile = store.profile();
+    Json(SettingsView {
+        away_through: profile.away_through,
+        usual_trains: profile.usual,
     })
 }
 
@@ -214,8 +240,12 @@ async fn next_departures(
     State(departures): State<Arc<NextDepartures>>,
     State(store): State<Arc<Store>>,
 ) -> Json<departures::View> {
-    let pick = store.profile().pick;
-    Json(departures.view(Timestamp::now(), pick.as_ref()).await)
+    let profile = store.profile();
+    Json(
+        departures
+            .view(Timestamp::now(), profile.pick.as_ref(), &profile.usual)
+            .await,
+    )
 }
 
 /// The lines' disruptions, as the poll loop last read them, or read at most every few minutes.
@@ -270,6 +300,26 @@ async fn pick(
             (StatusCode::UNPROCESSABLE_ENTITY, Json(Refused { refused })).into_response()
         }
     }
+}
+
+/// Keeps the usual train of a way, if it can be reminded of; none clears it.
+async fn set_usual_train(
+    State(store): State<Arc<Store>>,
+    State(departures): State<Arc<NextDepartures>>,
+    Json(usual): Json<Usual>,
+) -> Response {
+    let direction = match usual.direction {
+        Way::Outbound => Direction::Outbound,
+        Way::Inbound => Direction::Inbound,
+    };
+    if let Some(Err(refused)) = usual
+        .time
+        .map(|time| departures.check_usual(direction, time))
+    {
+        return (StatusCode::UNPROCESSABLE_ENTITY, Json(Refused { refused })).into_response();
+    }
+    store.update(|profile| profile.usual.set(direction, usual.time));
+    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn set_settings(
@@ -389,6 +439,11 @@ mod tests {
             (Method::GET, "/departures", None),
             (Method::PUT, "/departure", Some(r#"{"journey":null}"#)),
             (Method::GET, "/alerts", None),
+            (
+                Method::PUT,
+                "/usual-train",
+                Some(r#"{"direction":"outbound","time":null}"#),
+            ),
         ] {
             for authorization in [
                 None,
@@ -466,7 +521,10 @@ mod tests {
         let api = Api::new();
         assert_eq!(
             api.authorized(Method::GET, "/settings", None).await,
-            (StatusCode::OK, r#"{"away_through":null}"#.into())
+            (
+                StatusCode::OK,
+                r#"{"away_through":null,"usual_trains":{"outbound":null,"inbound":null}}"#.into()
+            )
         );
         let set = api
             .authorized(
@@ -477,13 +535,77 @@ mod tests {
             .await;
         assert_eq!(set.0, StatusCode::NO_CONTENT);
         assert_eq!(api.store.profile().away_through, Some(date(2026, 12, 24)));
-        assert_eq!(
-            api.authorized(Method::GET, "/settings", None).await.1,
-            r#"{"away_through":"2026-12-24"}"#
+        let (_, body) = api.authorized(Method::GET, "/settings", None).await;
+        assert!(
+            body.starts_with(r#"{"away_through":"2026-12-24","#),
+            "{body}"
         );
         api.authorized(Method::PUT, "/settings", Some(r#"{"away_through":null}"#))
             .await;
         assert_eq!(api.store.profile().away_through, None);
+    }
+
+    #[tokio::test]
+    async fn the_usual_train_of_each_way_is_set_read_and_cleared() {
+        let api = Api::new();
+        let set = |body: &'static str| api.authorized(Method::PUT, "/usual-train", Some(body));
+        assert_eq!(
+            set(r#"{"direction":"outbound","time":"08:07"}"#).await.0,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            set(r#"{"direction":"inbound","time":"17:52:00"}"#).await.0,
+            StatusCode::NO_CONTENT
+        );
+        let path = format!(
+            "{}/../fixtures/api/settings.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        api.authorized(
+            Method::PUT,
+            "/settings",
+            Some(r#"{"away_through":"2026-12-24"}"#),
+        )
+        .await;
+        let (_, body) = api.authorized(Method::GET, "/settings", None).await;
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+            fixture
+        );
+        // Leaving at 8:18, after the morning window: it would never be reminded.
+        assert_eq!(
+            set(r#"{"direction":"outbound","time":"08:30"}"#).await,
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                r#"{"refused":"outside_window"}"#.into()
+            )
+        );
+        assert_eq!(
+            set(r#"{"direction":"inbound","time":null}"#).await.0,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            api.store.profile().usual,
+            crate::profile::UsualTrains {
+                outbound: Some(jiff::civil::time(8, 7, 0, 0)),
+                inbound: None
+            }
+        );
+        for body in [
+            r#"{"direction":"sideways","time":null}"#,
+            r#"{"direction":"outbound","time":"25:00"}"#,
+            r#"{"direction":"outbound"}"#,
+            r#"{"time":"08:07"}"#,
+            r#"{"direction":"outbound","time":null,"other":1}"#,
+        ] {
+            assert_eq!(
+                set(body).await.0,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{body}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -25,7 +25,7 @@ use crate::leaving::{Aim, Leaving, remind, reminded_leg};
 use crate::line_alerts::LineAlerts;
 use crate::prim::Prim;
 use crate::prim::PrimError;
-use crate::profile::{Pick, Profile, Store};
+use crate::profile::{Profile, Store};
 use crate::push::{self, PushError, Sender};
 use crate::relevance::{Leg, Route};
 use crate::trains::{Seen, Trains, follow};
@@ -300,8 +300,7 @@ impl Service {
             let key = (local.date(), direction);
             let window = self.window_bounds(local, direction);
             notifications.extend(follow(&mut trains, key, window, now, seen, true));
-            let pick = profile.pick.as_ref();
-            notifications.extend(self.reminders(&mut leaving, key, now, local, seen, pick));
+            notifications.extend(self.reminders(&mut leaving, key, now, local, seen, profile));
             // Last: when anything before it cannot be sent, the poll is tried again
             // whole, and checks are not back yet anyway.
             if health.recovering() {
@@ -384,8 +383,8 @@ impl Service {
     }
 
     /// The reminder to leave, for the train picked in the app today, or else
-    /// when the way has a usual time to set off: on the ride `reminded_leg`
-    /// says, if its station's trains are read.
+    /// the way's usual train: on the ride `reminded_leg` says, if its station's
+    /// trains are read.
     fn reminders(
         &self,
         leaving: &mut Leaving,
@@ -393,11 +392,11 @@ impl Service {
         now: Timestamp,
         local: DateTime,
         seen: &[Seen],
-        pick: Option<&Pick>,
+        profile: &Profile,
     ) -> Vec<Notification> {
-        let (legs, usual) = match key.1 {
-            Direction::Outbound => (&self.config.outbound, self.config.leave.outbound),
-            Direction::Inbound => (&self.config.inbound, self.config.leave.inbound),
+        let legs = match key.1 {
+            Direction::Outbound => &self.config.outbound,
+            Direction::Inbound => &self.config.inbound,
         };
         let reached = reminded_leg(legs).and_then(|(leg, reach)| {
             Some((seen.iter().find(|seen| seen.line == leg.line)?, reach))
@@ -405,29 +404,27 @@ impl Service {
         let Some((seen, reach)) = reached else {
             return vec![];
         };
+        let reach = SignedDuration::from_mins(i64::from(reach));
+        let pick = profile.pick.as_ref();
+        let usual = profile.usual.of(key.1);
         let aim = match (pick.filter(|pick| (pick.day, pick.direction) == key), usual) {
             (Some(pick), _) => Aim::Picked {
                 journey: &pick.journey,
                 leave: pick.leave,
             },
+            // Leave in time for the first train from the usual one's time.
             (None, Some(usual)) => Aim::Usual(
                 local
                     .date()
                     .to_datetime(usual)
                     .to_zoned(self.config.time_zone())
                     .expect("a day's local time is within range")
-                    .timestamp(),
+                    .timestamp()
+                    - reach,
             ),
             (None, None) => return vec![],
         };
-        remind(
-            leaving,
-            key,
-            now,
-            seen,
-            SignedDuration::from_mins(i64::from(reach)),
-            aim,
-        )
+        remind(leaving, key, now, seen, reach, aim)
     }
 
     /// When the window of `direction` ends on the day of `local`.
@@ -632,6 +629,7 @@ pub(crate) fn save<T: Serialize>(path: &Path, value: &T) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::profile::Pick;
     use crate::push::testing::account;
     use crate::watch::{Cause, LineStatus, Outage};
     use wiremock::matchers::{body_string_contains, method, path, query_param};
@@ -1413,13 +1411,38 @@ mod tests {
             .mount(&setup.server)
             .await;
         setup.firebase_answers_to("leave", 200, 1).await;
+        usual(&setup, Direction::Outbound, 7, 52);
         let mut service = setup.service();
-        // Leaving at 7:30 in Paris or later, the 7:52 is the train: twelve minutes to its
+        // The usual train is the 7:52 in Paris: twelve minutes to its
         // platform, so leave at 7:40, and hear about it from 7:35.
         assert_eq!(service.poll(tuesday("06:34")).await, Poll::Sent(0));
         assert_eq!(service.poll(tuesday("06:36")).await, Poll::Sent(1));
         // Remembered across a restart.
         assert_eq!(setup.service().poll(tuesday("06:38")).await, Poll::Sent(0));
+    }
+
+    /// Sets the usual train of the way `direction`, by its time in Paris.
+    fn usual(setup: &Setup, direction: Direction, hour: i8, minute: i8) {
+        setup.store.update(|profile| {
+            profile
+                .usual
+                .set(direction, Some(jiff::civil::time(hour, minute, 0, 0)));
+        });
+    }
+
+    #[tokio::test]
+    async fn without_a_usual_train_no_reminder_is_given() {
+        let setup = Setup::with(train_routes_server().await).await;
+        setup.prim_answers(200, false, 2).await;
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(stop_list(&["j1"])))
+            .mount(&setup.server)
+            .await;
+        let mut service = setup.service();
+        assert_eq!(service.poll(tuesday("06:36")).await, Poll::Sent(0));
+        // The evening's usual train is not the morning's.
+        usual(&setup, Direction::Inbound, 7, 52);
+        assert_eq!(service.poll(tuesday("06:38")).await, Poll::Sent(0));
     }
 
     /// Picks the train `journey` of Tuesday's way `direction`, to leave at `leave` UTC.
@@ -1446,6 +1469,7 @@ mod tests {
             .mount(&setup.server)
             .await;
         setup.firebase_answers_to("leave", 200, 1).await;
+        usual(&setup, Direction::Outbound, 7, 52);
         pick(&setup, Direction::Outbound, "j2", "06:55");
         let mut service = setup.service();
         // The 7:52 in Paris would be reminded from 7:35: the 8:07 is, from 7:50.
@@ -1455,7 +1479,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn without_a_usual_time_only_a_picked_train_is_reminded() {
+    async fn without_a_usual_train_a_picked_one_is_reminded() {
         let setup = Setup::with(train_routes_server().await).await;
         setup.prim_answers(200, false, 3).await;
         // The way home boards at Gare Centrale for Les Aubépines, 25 minutes away.
@@ -1533,7 +1557,14 @@ mod tests {
         std::fs::write(setup.dir.path().join("routes.json"), saved).unwrap();
         let mut service = setup.service();
         let departures = service.departures();
-        let from = async |now| departures.view(at(now), None).await.legs[0].from.clone();
+        let from = async |now| {
+            departures
+                .view(at(now), None, &Default::default())
+                .await
+                .legs[0]
+                .from
+                .clone()
+        };
         assert_eq!(from(MORNING).await.as_deref(), Some("Saved"));
         service.poll(at(MORNING)).await;
         assert_eq!(from(TWO_MINUTES_LATER).await.as_deref(), Some("71100"));

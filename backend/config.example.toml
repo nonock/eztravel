@@ -18,13 +18,6 @@ whit_monday_off = true
 outbound = { start = "06:45", end = "08:15", trains_from = "05:30" }
 inbound = { start = "16:00", end = "17:30" }
 
-# Optional: when the way is usually set off on, within its window. A few
-# minutes before, a notification says when to leave for the first train that
-# can be caught, on the first ride with a `reach` whose station lists its
-# trains one by one (a train line, not the metro).
-[leave]
-outbound = "07:30"
-
 # How each line is named in notifications, and its color on the home screen
 # (optional, "#RRGGBB": Navitia gives it as the line's `color`).
 [[lines]]
@@ -42,6 +35,9 @@ color = "#E07A1F"
 # The rides of each way, in order. Stops are Navitia stop areas. `reach`
 # (optional) is how many minutes it takes from leaving home, or work, to the
 # platform of the ride: the app counts down to when to leave for each train.
+# The reminder to leave is for the first ride of the way with a `reach` whose
+# station lists its trains one by one (a train line, not the metro): for the
+# way's usual train, set in the app, or the one picked there that day.
 [[outbound]]
 line = "C01740"
 board = "stop_area:IDFM:71100"

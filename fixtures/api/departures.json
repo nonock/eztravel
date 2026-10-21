@@ -18,7 +18,8 @@
           "destination": "Gare Centrale",
           "platform": "2",
           "status": "on_time",
-          "picked": false
+          "picked": false,
+          "usual": false
         },
         {
           "journey": "j2",
@@ -29,7 +30,8 @@
           "destination": "Gare Centrale",
           "platform": "2",
           "status": "delayed",
-          "picked": true
+          "picked": true,
+          "usual": false
         },
         {
           "journey": "j3",
@@ -40,7 +42,8 @@
           "destination": "Gare Centrale",
           "platform": "2",
           "status": "cancelled",
-          "picked": false
+          "picked": false,
+          "usual": false
         }
       ]
     },
@@ -61,7 +64,8 @@
           "destination": "Porte Nord",
           "platform": null,
           "status": "on_time",
-          "picked": false
+          "picked": false,
+          "usual": false
         },
         {
           "journey": "m2",
@@ -72,7 +76,8 @@
           "destination": "Porte Nord",
           "platform": null,
           "status": "on_time",
-          "picked": false
+          "picked": false,
+          "usual": false
         }
       ]
     }

@@ -18,7 +18,7 @@ use crate::calendar::{Calendar, Direction, WatchWindows};
 use crate::config::Config;
 use crate::leaving::{Refusal, check_pick, reminded_leg};
 use crate::prim::{Prim, PrimError};
-use crate::profile::Pick;
+use crate::profile::{Pick, UsualTrains};
 use crate::push::{self, LineLabel};
 use crate::relevance::{Leg, Route, RouteStop};
 
@@ -266,6 +266,8 @@ pub struct Departure {
     pub status: &'static str,
     /// Picked in the app for the reminder to leave.
     pub picked: bool,
+    /// The way's usual train, when none is picked today: the first from its time.
+    pub usual: bool,
 }
 
 /// The next departures of `line` from the board stop, soonest first. With the
@@ -303,6 +305,7 @@ pub fn select(
                 platform: visit.platform.clone(),
                 status: visit.status.name(),
                 picked: false,
+                usual: false,
             })
         })
         .collect();
@@ -442,13 +445,25 @@ impl NextDepartures {
         Some((board.clone(), alight.clone()))
     }
 
-    /// `pick`, the train picked in the app, is marked when it is of this day and way.
-    pub async fn view(&self, now: Timestamp, pick: Option<&Pick>) -> View {
+    /// `pick`, the train picked in the app, is marked when it is of this day and
+    /// way; or else, on the ride reminded, the first train from the way's usual time.
+    pub async fn view(&self, now: Timestamp, pick: Option<&Pick>, usual: &UsualTrains) -> View {
         let (direction, legs) = self.shown(now);
         let today = now.to_zoned(self.time_zone.clone()).date();
         let picked = pick
             .filter(|pick| pick.day == today && pick.direction == direction)
             .map(|pick| pick.journey.as_str());
+        let reminded = reminded_leg(legs).map(|(leg, _)| leg);
+        let usual_from = usual
+            .of(direction)
+            .filter(|_| picked.is_none())
+            .map(|time| {
+                today
+                    .to_datetime(time)
+                    .to_zoned(self.time_zone.clone())
+                    .expect("a day's local time is within range")
+                    .timestamp()
+            });
         let mut cache = self.cache.lock().await;
         // Judged once per request, so that all of its legs are read or none.
         let may_read = cache.may_read(now);
@@ -464,6 +479,16 @@ impl NextDepartures {
             };
             for departure in departures.iter_mut().flatten() {
                 departure.picked = Some(departure.journey.as_str()) == picked;
+            }
+            if let Some(from) =
+                usual_from.filter(|_| reminded.is_some_and(|ride| std::ptr::eq(ride, leg)))
+            {
+                let usual = departures.iter_mut().flatten().find(|departure| {
+                    departure.status != "cancelled" && departure.expected >= from
+                });
+                if let Some(usual) = usual {
+                    usual.usual = true;
+                }
             }
             let (line, mode) = push::label(&leg.line, &self.lines);
             views.push(LegView {
@@ -487,6 +512,24 @@ impl NextDepartures {
             },
             legs: views,
         }
+    }
+
+    /// Whether a usual train leaving at `time` on the way `direction` can be
+    /// reminded of: the way has a ride with its time to the platform, and leaving
+    /// for the train falls in the way's window, when the poll loop gives reminders.
+    pub fn check_usual(&self, direction: Direction, time: Time) -> Result<(), Refusal> {
+        let (legs, window) = match direction {
+            Direction::Outbound => (&self.outbound, self.windows.outbound),
+            Direction::Inbound => (&self.inbound, self.windows.inbound),
+        };
+        let (_, reach) = reminded_leg(legs).ok_or(Refusal::Unknown)?;
+        let leave = time
+            .checked_sub(SignedDuration::from_mins(i64::from(reach)))
+            .map_err(|_| Refusal::OutsideWindow)?;
+        if leave < window.start || leave >= window.end {
+            return Err(Refusal::OutsideWindow);
+        }
+        Ok(())
     }
 
     /// The train `journey`, picked at `now` for the reminder to leave: one of
@@ -865,6 +908,7 @@ pub(crate) mod example {
 mod tests {
     use super::example::*;
     use super::*;
+    use crate::profile::UsualTrains;
     use jiff::civil::time;
     use serde_json::{Value, json};
     use wiremock::matchers::{method, path, query_param};
@@ -902,7 +946,11 @@ mod tests {
         answers(&server, "STIF:StopArea:SP:200:", morning_alight(), 1).await;
         answers(&server, "STIF:StopPoint:Q:300:", morning_metro(), 1).await;
         let departures = next_departures(&server, EXAMPLE);
-        let view = departures.view(at("06:50:00"), Some(&j2())).await;
+        let usual = UsualTrains {
+            outbound: Some(time(7, 50, 0, 0)),
+            inbound: None,
+        };
+        let view = departures.view(at("06:50:00"), Some(&j2()), &usual).await;
         assert_eq!(serde_json::to_value(&view).unwrap(), fixture("departures"));
     }
 
@@ -982,7 +1030,9 @@ mod tests {
         answers(&server, "STIF:StopArea:SP:100:", rush, 1).await;
         answers(&server, "STIF:StopArea:SP:200:", siri(vec![]), 1).await;
         let departures = next_departures(&server, EXAMPLE);
-        let view = departures.view(at("06:50:00"), None).await;
+        let view = departures
+            .view(at("06:50:00"), None, &UsualTrains::default())
+            .await;
         // Six leave before the platform can be reached: still shown, for whoever is on the way.
         let shown: Vec<_> = view.legs[0]
             .departures
@@ -1008,6 +1058,84 @@ mod tests {
             departures.pick("t11", at("06:50:00"), &calendar).await,
             Err(Refusal::Unknown)
         );
+    }
+
+    #[test]
+    fn a_usual_train_is_one_whose_time_to_leave_falls_in_the_window() {
+        let server_less = NextDepartures::new(
+            &Config::parse(EXAMPLE).unwrap(),
+            Prim::new("http://127.0.0.1:9", "key"),
+            routes(),
+        );
+        let check =
+            |direction, hour, minute| server_less.check_usual(direction, time(hour, minute, 0, 0));
+        // Twelve minutes to the platform in the morning, whose window is 6:45 to 8:15.
+        assert_eq!(check(Direction::Outbound, 6, 57), Ok(()));
+        assert_eq!(check(Direction::Outbound, 8, 26), Ok(()));
+        assert_eq!(
+            check(Direction::Outbound, 6, 56),
+            Err(Refusal::OutsideWindow)
+        );
+        assert_eq!(
+            check(Direction::Outbound, 8, 27),
+            Err(Refusal::OutsideWindow)
+        );
+        // Twenty-five in the evening, from 16:00 to 17:30; just after midnight, leaving is the day before.
+        assert_eq!(check(Direction::Inbound, 16, 25), Ok(()));
+        assert_eq!(
+            check(Direction::Inbound, 16, 24),
+            Err(Refusal::OutsideWindow)
+        );
+        assert_eq!(check(Direction::Inbound, 0, 5), Err(Refusal::OutsideWindow));
+        // A way without a time to the platform has no reminder.
+        let without = NextDepartures::new(
+            &Config::parse(&EXAMPLE.replace("reach = 12", "")).unwrap(),
+            Prim::new("http://127.0.0.1:9", "key"),
+            routes(),
+        );
+        assert_eq!(
+            without.check_usual(Direction::Outbound, time(7, 52, 0, 0)),
+            Err(Refusal::Unknown)
+        );
+    }
+
+    #[tokio::test]
+    async fn the_usual_train_is_marked_unless_one_is_picked_today() {
+        let server = MockServer::start().await;
+        answers(&server, "STIF:StopArea:SP:100:", morning_board(), 1).await;
+        answers(&server, "STIF:StopArea:SP:200:", morning_alight(), 1).await;
+        answers(&server, "STIF:StopPoint:Q:300:", morning_metro(), 1).await;
+        let departures = next_departures(&server, EXAMPLE);
+        let usual = |hour, minute| UsualTrains {
+            outbound: Some(time(hour, minute, 0, 0)),
+            inbound: None,
+        };
+        let marked = |view: &View| -> Vec<String> {
+            view.legs
+                .iter()
+                .flat_map(|leg| leg.departures.iter().flatten())
+                .filter(|departure| departure.usual)
+                .map(|departure| departure.journey.clone())
+                .collect()
+        };
+        // The first train from 8:05 in Paris: the 8:07, leaving at 8:11.
+        let view = departures.view(at("06:50:00"), None, &usual(8, 5)).await;
+        assert_eq!(marked(&view), ["j2"]);
+        // From 8:12: the 8:22 is cancelled, and none other is listed.
+        let view = departures.view(at("06:50:00"), None, &usual(8, 12)).await;
+        assert_eq!(marked(&view), Vec::<String>::new());
+        // The train picked today is the one reminded.
+        let view = departures
+            .view(at("06:50:00"), Some(&j2()), &usual(7, 50))
+            .await;
+        assert_eq!(marked(&view), Vec::<String>::new());
+        // The other way's usual train is not this one's.
+        let evening = UsualTrains {
+            outbound: None,
+            inbound: Some(time(7, 50, 0, 0)),
+        };
+        let view = departures.view(at("06:50:00"), None, &evening).await;
+        assert_eq!(marked(&view), Vec::<String>::new());
     }
 
     #[tokio::test]
@@ -1111,7 +1239,9 @@ outbound = \"07:30\"
         let mut routes = routes();
         routes.remove("C02000");
         departures.set_routes(routes);
-        let view = departures.view(at("16:20:00"), None).await;
+        let view = departures
+            .view(at("16:20:00"), None, &UsualTrains::default())
+            .await;
         assert_eq!(
             serde_json::to_value(&view).unwrap(),
             fixture("departures-unavailable")
@@ -1126,7 +1256,7 @@ outbound = \"07:30\"
             .mount(&server)
             .await;
         let view = next_departures(&server, EXAMPLE)
-            .view(at("06:50:00"), None)
+            .view(at("06:50:00"), None, &UsualTrains::default())
             .await;
         assert_eq!(
             view.legs
@@ -1145,7 +1275,9 @@ outbound = \"07:30\"
         answers(&server, "STIF:StopPoint:Q:300:", morning_metro(), 1).await;
         // No answer for the alight stop: a 404.
         let departures = next_departures(&server, EXAMPLE);
-        let view = departures.view(at("06:50:00"), None).await;
+        let view = departures
+            .view(at("06:50:00"), None, &UsualTrains::default())
+            .await;
         assert_eq!(view.legs[0].departures, None);
         assert!(view.legs[1].departures.is_some());
         // Nor with an alight stop that PRIM cannot monitor.
@@ -1153,7 +1285,11 @@ outbound = \"07:30\"
         routes.get_mut("C01740").unwrap()[0].stops[2].stop_point = "sp:elsewhere".into();
         departures.set_routes(routes);
         assert_eq!(
-            departures.view(at("06:50:30"), None).await.legs[0].departures,
+            departures
+                .view(at("06:50:30"), None, &UsualTrains::default())
+                .await
+                .legs[0]
+                .departures,
             None
         );
     }
@@ -1165,9 +1301,18 @@ outbound = \"07:30\"
         answers(&server, "STIF:StopArea:SP:200:", morning_alight(), 2).await;
         answers(&server, "STIF:StopPoint:Q:300:", morning_metro(), 2).await;
         let departures = next_departures(&server, EXAMPLE);
-        let first = departures.view(at("06:50:00"), None).await;
-        assert_eq!(departures.view(at("06:50:59"), None).await, first);
-        departures.view(at("06:51:00"), None).await;
+        let first = departures
+            .view(at("06:50:00"), None, &UsualTrains::default())
+            .await;
+        assert_eq!(
+            departures
+                .view(at("06:50:59"), None, &UsualTrains::default())
+                .await,
+            first
+        );
+        departures
+            .view(at("06:51:00"), None, &UsualTrains::default())
+            .await;
         // The mocks check their counts when the server drops.
     }
 
@@ -1178,7 +1323,9 @@ outbound = \"07:30\"
         answers(&server, "STIF:StopArea:SP:200:", morning_alight(), 1).await;
         answers(&server, "STIF:StopPoint:Q:300:", morning_metro(), 1).await;
         let departures = next_departures(&server, EXAMPLE);
-        departures.view(at("06:50:00"), None).await;
+        departures
+            .view(at("06:50:00"), None, &UsualTrains::default())
+            .await;
         let read = departures
             .read("STIF:StopArea:SP:100:", at("06:50:30"))
             .await;
@@ -1212,23 +1359,34 @@ outbound = \"07:30\"
         let departures = next_departures(&server, EXAMPLE);
         // Judged once per request: the first answer does not stop the next stop's read.
         assert!(
-            departures.view(at("06:50:00"), None).await.legs[0]
+            departures
+                .view(at("06:50:00"), None, &UsualTrains::default())
+                .await
+                .legs[0]
                 .departures
                 .is_some()
         );
         // Still served from the last answer while it is fresh, then nothing.
         assert!(
-            departures.view(at("06:50:30"), None).await.legs[0]
+            departures
+                .view(at("06:50:30"), None, &UsualTrains::default())
+                .await
+                .legs[0]
                 .departures
                 .is_some()
         );
-        let low = departures.view(at("06:52:00"), None).await;
+        let low = departures
+            .view(at("06:52:00"), None, &UsualTrains::default())
+            .await;
         assert_eq!(low.legs[0].departures, None);
         assert_eq!(low.legs[1].departures, None);
         // The quota starts again at midnight UTC.
         let next_day: Timestamp = "2026-11-04T06:50:00Z".parse().unwrap();
         assert!(
-            departures.view(next_day, None).await.legs[0]
+            departures
+                .view(next_day, None, &UsualTrains::default())
+                .await
+                .legs[0]
                 .departures
                 .is_some()
         );

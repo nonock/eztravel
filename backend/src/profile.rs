@@ -1,12 +1,13 @@
 //! What the phone sets through the API: which devices to notify, until
-//! when the user is away, and the train picked for the reminder to leave.
+//! when the user is away, the usual train of each way, and the train picked
+//! today for the reminder to leave.
 //! Shared by the API and the poll loop, saved in the data folder.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use jiff::Timestamp;
-use jiff::civil::Date;
+use jiff::civil::{Date, Time};
 use serde::{Deserialize, Serialize};
 
 use crate::calendar::Direction;
@@ -21,9 +22,35 @@ pub struct Profile {
     pub devices: Vec<String>,
     /// Last day away from the office, included.
     pub away_through: Option<Date>,
-    /// The train to be reminded of, instead of the first one at the usual time.
+    /// The train to be reminded of, instead of the usual one.
     #[serde(default)]
     pub pick: Option<Pick>,
+    #[serde(default)]
+    pub usual: UsualTrains,
+}
+
+/// The usual train of each way, by its time at the station of the ride the
+/// reminder is for: on office days, the first train from then is reminded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsualTrains {
+    pub outbound: Option<Time>,
+    pub inbound: Option<Time>,
+}
+
+impl UsualTrains {
+    pub fn of(&self, direction: Direction) -> Option<Time> {
+        match direction {
+            Direction::Outbound => self.outbound,
+            Direction::Inbound => self.inbound,
+        }
+    }
+
+    pub fn set(&mut self, direction: Direction, time: Option<Time>) {
+        match direction {
+            Direction::Outbound => self.outbound = time,
+            Direction::Inbound => self.inbound = time,
+        }
+    }
 }
 
 /// A train picked in the app, on its day and way.
@@ -92,7 +119,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jiff::civil::date;
+    use jiff::civil::{date, time};
 
     fn tokens(profile: &Profile) -> Vec<&str> {
         profile.devices.iter().map(String::as_str).collect()
@@ -139,10 +166,15 @@ mod tests {
             journey: "j1".into(),
             leave: "2026-11-03T17:05:00Z".parse().unwrap(),
         };
+        let usual = UsualTrains {
+            outbound: Some(time(8, 7, 0, 0)),
+            inbound: None,
+        };
         store.update(|profile| {
             profile.register("phone");
             profile.away_through = Some(date(2026, 12, 24));
             profile.pick = Some(pick.clone());
+            profile.usual = usual;
         });
         // The seed only applies when nothing was saved.
         let reopened = Store::open(&path, &["other seed".into()]);
@@ -152,6 +184,7 @@ mod tests {
                 devices: vec!["seed".into(), "phone".into()],
                 away_through: Some(date(2026, 12, 24)),
                 pick: Some(pick),
+                usual,
             }
         );
     }
@@ -165,5 +198,23 @@ mod tests {
         let profile = Store::open(&path, &["seed".into()]).profile();
         assert_eq!(tokens(&profile), ["old", "phone"]);
         assert_eq!(profile.pick, None);
+        assert_eq!(profile.usual, UsualTrains::default());
+    }
+
+    #[test]
+    fn each_way_has_its_usual_train() {
+        let mut usual = UsualTrains::default();
+        usual.set(Direction::Inbound, Some(time(17, 52, 0, 0)));
+        assert_eq!(usual.of(Direction::Inbound), Some(time(17, 52, 0, 0)));
+        assert_eq!(usual.of(Direction::Outbound), None);
+        usual.set(Direction::Outbound, Some(time(8, 7, 0, 0)));
+        usual.set(Direction::Inbound, None);
+        assert_eq!(
+            usual,
+            UsualTrains {
+                outbound: Some(time(8, 7, 0, 0)),
+                inbound: None
+            }
+        );
     }
 }

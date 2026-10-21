@@ -1,8 +1,8 @@
 //! When to leave for the train: a reminder a few minutes before.
 //!
-//! The train is the one picked in the app, or else the first one that can be
-//! caught when leaving at the usual time of the way, or now if later, up to
-//! half an hour after it. The reminder says how it runs, but only what PRIM knows: a train that has not
+//! The train is the one picked in the app that day, or else the way's usual
+//! train, set in the app: the first one that can be caught when leaving in time
+//! for its time, or now if later, up to half an hour after. The reminder says how it runs, but only what PRIM knows: a train that has not
 //! set off yet carries the night's timetable, so it is "still scheduled"
 //! rather than "on time". After the reminder, a delay of a few minutes is
 //! told once; a train said cancelled gives way to the next one.
