@@ -1,0 +1,31 @@
+# Updates once a month, grouped per ecosystem, and only to releases at least
+# two weeks old. Security updates come as soon as an advisory is published.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /backend
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14
+    groups:
+      backend:
+        patterns: ["*"]
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14
+    groups:
+      app:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ["*"]

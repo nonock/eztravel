@@ -1,5 +1,7 @@
 # eztravel
 
+[![CI](https://github.com/nonock/eztravel/actions/workflows/ci.yml/badge.svg)](https://github.com/nonock/eztravel/actions/workflows/ci.yml)
+
 An Android app that follows one home-to-work commute in the Paris region and notifies you when its lines are disrupted, only on the days and at the hours you travel. Data comes from [PRIM](https://prim.iledefrance-mobilites.fr), the open data portal of Île-de-France Mobilités.
 
 > **Status: milestone 2 done.** Disruption alerts on office days, next departures, cancelled trains and the reminder to leave. Next: trust and calendar (milestone 3).
@@ -117,6 +119,7 @@ Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md
 
 - Backend, from `backend/`: `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt`, coverage with `cargo llvm-cov`.
 - App, from `android/`: `./gradlew testDebugUnitTest` (JVM), `./gradlew connectedDebugAndroidTest` (on a phone, unlocked), `./gradlew lintDebug`, coverage with `createDebugUnitTestCoverageReport` and `createDebugAndroidTestCoverageReport`.
+- On GitHub, [CI](.github/workflows/ci.yml) runs the same checks at each push, except the tests on a phone, and [Dependabot](.github/dependabot.yml) proposes updates once a month, of releases at least two weeks old.
 - Git hooks, enabled with `git config core.hooksPath hooks`: before a commit, [hooks/check.py](hooks/check.py) refuses secrets (the values of `.env`, `local.properties` and the Firebase files, and keys of known formats) and personal data (the words of `local/forbidden.txt` and the stops and lines of your configuration), and Rust code left unformatted; before a push, it checks every commit pushed, authors included, then runs the backend's lint, tests and `cargo audit`, and the app's JVM tests and lint. They need Python 3, `cargo install cargo-audit` and `JAVA_HOME`. Their own tests: `python -m unittest discover -s hooks`.
 
 ## Roadmap
