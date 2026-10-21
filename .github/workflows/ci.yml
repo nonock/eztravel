@@ -1,5 +1,6 @@
 # Each push and pull request: the backend's format, lint, tests and dependency
-# audit, the app's JVM tests and lint, and the tests of the git hooks' checks.
+# audit, the app's JVM tests and lint, the age of new dependency versions, and
+# the tests of the git hooks' checks.
 # The tests on a phone stay on a phone. Actions are pinned by commit.
 name: CI
 
@@ -49,6 +50,19 @@ jobs:
       - name: A stand-in Firebase file, the real one stays out of the repository
         run: cp ../.github/ci-google-services.json app/google-services.json
       - run: ./gradlew testDebugUnitTest lintDebug
+
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Versions at least two weeks old, or fixing a known vulnerability
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          case "$BASE" in *[!0]*) ;; *) BASE=HEAD~1 ;; esac
+          python3 hooks/ages.py "$BASE"
 
   hooks:
     runs-on: ubuntu-latest

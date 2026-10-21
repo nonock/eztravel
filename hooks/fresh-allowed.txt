@@ -1,0 +1,6 @@
+# Dependency versions let through before they are two weeks old, one per line:
+#   <name> <version> <advisory> [why]
+# <name> is a crate, or "group:artifact" on the app's side; <advisory> is a
+# RUSTSEC, CVE or GHSA id. A version fixing a vulnerability of the one it
+# replaces needs no line: hooks/ages.py finds the fix on OSV.dev. A line is
+# for what that cannot show, such as a new dependency needed at once.

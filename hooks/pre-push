@@ -1,11 +1,16 @@
 #!/bin/sh
 # Before anything reaches the public repository: secrets, personal data and
-# authors of every commit pushed, then lint, tests and the dependency audit.
+# authors of every commit pushed, dependency versions at least two weeks old
+# (or fixing a known vulnerability), then lint, tests and the dependency audit.
 # Needs Python 3, cargo-audit (cargo install cargo-audit) and JAVA_HOME.
 root=$(git rev-parse --show-toplevel)
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$local_sha" in
-    *[!0]*) python -I "$root/hooks/check.py" commits "$local_sha" || exit 1 ;;
+    *[!0]*)
+      python -I "$root/hooks/check.py" commits "$local_sha" || exit 1
+      case "$remote_sha" in *[!0]*) base=$remote_sha ;; *) base=origin/main ;; esac
+      python -I "$root/hooks/ages.py" "$base" "$local_sha" || exit 1
+      ;;
   esac
 done
 python -I -m unittest discover -s "$root/hooks" -q 2>/dev/null || {
