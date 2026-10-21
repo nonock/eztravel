@@ -68,9 +68,12 @@ pub struct WatchWindows {
     pub inbound: Window,
 }
 
+/// Written in lower case, as the API does; read capitalised too, as saved before.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
+    #[serde(rename = "outbound", alias = "Outbound")]
     Outbound,
+    #[serde(rename = "inbound", alias = "Inbound")]
     Inbound,
 }
 
@@ -226,6 +229,21 @@ mod tests {
     use super::*;
     use jiff::civil::Weekday::{Friday, Monday, Thursday, Tuesday, Wednesday};
     use jiff::civil::{date, time};
+
+    #[test]
+    fn a_way_is_written_in_lower_case_and_read_as_before_too() {
+        assert_eq!(
+            serde_json::to_string(&Direction::Outbound).unwrap(),
+            r#""outbound""#
+        );
+        for (text, direction) in [
+            (r#""inbound""#, Direction::Inbound),
+            (r#""Inbound""#, Direction::Inbound),
+            (r#""Outbound""#, Direction::Outbound),
+        ] {
+            assert_eq!(serde_json::from_str::<Direction>(text).unwrap(), direction);
+        }
+    }
 
     // An example commute, not anyone's real schedule: Tuesday and Thursday one
     // week, Monday, Wednesday and Friday the next.

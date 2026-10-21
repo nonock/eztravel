@@ -9,6 +9,8 @@
 //!
 //! Only trains due to leave during the window are followed, from its
 //! `trains_from`: those cancelled early are notified when the window opens.
+//! Each train ends half an hour after its time, or with its window: how it
+//! went is then kept for the statistics.
 
 use jiff::civil::Date;
 use jiff::{SignedDuration, Timestamp};
@@ -48,6 +50,31 @@ pub enum Why {
     Announced,
 }
 
+/// How a followed train went, at its end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Outcome {
+    /// Listed until it could have left.
+    Ran,
+    /// Out of the list four polls in a row before its time.
+    Missing,
+    /// Said cancelled by the operator, last it was listed.
+    Announced,
+}
+
+/// A train followed, as it ended: for the statistics.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ended {
+    pub day: Date,
+    pub direction: Direction,
+    /// Its `expected` time is the last one listed.
+    #[serde(flatten)]
+    pub train: Train,
+    pub outcome: Outcome,
+    /// Notified as cancelled, then listed as running again.
+    pub came_back: bool,
+}
+
 /// What a train leg's stops list at one poll.
 pub struct Seen {
     pub line: String,
@@ -64,6 +91,9 @@ pub struct Seen {
 pub struct Trains {
     window: Option<(Date, Direction)>,
     followed: Vec<Followed>,
+    /// The trains that ended since this was last taken: whoever keeps them takes them.
+    #[serde(skip)]
+    pub ended: Vec<Ended>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +104,27 @@ struct Followed {
     missing: u32,
     said_cancelled: bool,
     notified: bool,
+    #[serde(default)]
+    came_back: bool,
+}
+
+impl Followed {
+    fn end(self, (day, direction): (Date, Direction)) -> Ended {
+        let outcome = if self.said_cancelled {
+            Outcome::Announced
+        } else if self.notified || self.missing >= CONFIRM {
+            Outcome::Missing
+        } else {
+            Outcome::Ran
+        };
+        Ended {
+            day,
+            direction,
+            train: self.train,
+            outcome,
+            came_back: self.came_back,
+        }
+    }
 }
 
 /// Follows the trains of one poll. `window` is when the window opens and
@@ -87,8 +138,14 @@ pub fn follow(
     notify: bool,
 ) -> Vec<Notification> {
     if trains.window != Some(key) {
+        if let Some(previous) = trains.window {
+            let ended = trains
+                .followed
+                .drain(..)
+                .map(|followed| followed.end(previous));
+            trains.ended.extend(ended.collect::<Vec<_>>());
+        }
         trains.window = Some(key);
-        trains.followed.clear();
     }
     let mut notifications = vec![];
     let mut listed: Vec<&str> = vec![];
@@ -113,6 +170,7 @@ pub fn follow(
                 followed.said_cancelled = said_cancelled;
                 if followed.notified && !said_cancelled {
                     followed.notified = false;
+                    followed.came_back = true;
                     notifications.push(Notification::TrainBack {
                         train: followed.train.clone(),
                     });
@@ -121,7 +179,10 @@ pub fn follow(
             }
             let aimed = visit.aimed_departure.unwrap_or(expected);
             let in_window = window.0 <= aimed && aimed < window.1;
-            if !in_window || serves(visit, expected, (&leg.alight, &leg.arriving)).is_none() {
+            // Long gone, though still listed: it ended already.
+            let gone = now.duration_since(expected) >= FORGET_AFTER;
+            if !in_window || gone || serves(visit, expected, (&leg.alight, &leg.arriving)).is_none()
+            {
                 continue;
             }
             trains.followed.push(Followed {
@@ -137,6 +198,7 @@ pub fn follow(
                 missing: 0,
                 said_cancelled,
                 notified: false,
+                came_back: false,
             });
         }
     }
@@ -162,9 +224,14 @@ pub fn follow(
             why,
         });
     }
+    let (kept, forgotten) = std::mem::take(&mut trains.followed)
+        .into_iter()
+        .partition(|followed| now.duration_since(followed.train.expected) < FORGET_AFTER);
+    trains.followed = kept;
+    let forgotten: Vec<Followed> = forgotten;
     trains
-        .followed
-        .retain(|followed| now.duration_since(followed.train.expected) < FORGET_AFTER);
+        .ended
+        .extend(forgotten.into_iter().map(|followed| followed.end(key)));
     notifications
 }
 
@@ -433,6 +500,76 @@ mod tests {
         let evening = (TUESDAY, Direction::Inbound);
         follow(&mut trains, evening, window(), at("15:00"), &[], true);
         assert_eq!(trains.followed, []);
+    }
+
+    /// The train j1 of 6:52 on Tuesday morning, as it ended.
+    fn ended(expected: &str, outcome: Outcome, came_back: bool) -> Ended {
+        Ended {
+            day: TUESDAY,
+            direction: Direction::Outbound,
+            train: Train {
+                expected: at(expected),
+                ..train("06:52")
+            },
+            outcome,
+            came_back,
+        }
+    }
+
+    #[test]
+    fn a_train_that_left_ends_as_it_ran_once_forgotten() {
+        let mut trains = Trains::default();
+        polls(&mut trains, "06:00", 1, true, || {
+            vec![visit("j1", "06:52", "06:55", "delayed", 200)]
+        });
+        polls(&mut trains, "07:24", 1, true, Vec::new);
+        assert_eq!(trains.ended, []);
+        polls(&mut trains, "07:25", 1, true, Vec::new);
+        assert_eq!(trains.ended, [ended("06:55", Outcome::Ran, false)]);
+        // Taken by whoever records them: not given twice.
+        trains.ended.clear();
+        polls(&mut trains, "07:27", 1, true, Vec::new);
+        assert_eq!(trains.ended, []);
+    }
+
+    #[test]
+    fn a_cancelled_train_ends_as_cancelled_and_says_why() {
+        let mut missing = Trains::default();
+        polls(&mut missing, "05:50", 1, true, || vec![j1("onTime")]);
+        polls(&mut missing, "05:52", 4, true, Vec::new);
+        polls(&mut missing, "07:22", 1, true, Vec::new);
+        assert_eq!(missing.ended, [ended("06:52", Outcome::Missing, false)]);
+        // Missing before the window, never notified since: cancelled all the same.
+        let mut early = Trains::default();
+        polls(&mut early, "04:30", 1, false, || vec![j1("onTime")]);
+        polls(&mut early, "04:32", 4, false, Vec::new);
+        polls(&mut early, "07:22", 1, false, Vec::new);
+        assert_eq!(early.ended, [ended("06:52", Outcome::Missing, false)]);
+        let mut announced = Trains::default();
+        polls(&mut announced, "06:00", 1, true, || vec![j1("cancelled")]);
+        polls(&mut announced, "07:22", 1, true, Vec::new);
+        assert_eq!(announced.ended, [ended("06:52", Outcome::Announced, false)]);
+    }
+
+    #[test]
+    fn a_train_said_cancelled_that_ran_after_all_says_so() {
+        let mut trains = Trains::default();
+        polls(&mut trains, "06:00", 1, true, || vec![j1("cancelled")]);
+        polls(&mut trains, "06:02", 1, true, || vec![j1("onTime")]);
+        polls(&mut trains, "07:22", 1, true, Vec::new);
+        assert_eq!(trains.ended, [ended("06:52", Outcome::Ran, true)]);
+    }
+
+    #[test]
+    fn the_trains_of_a_window_end_with_it() {
+        let mut trains = Trains::default();
+        polls(&mut trains, "06:00", 1, true, || vec![j1("onTime")]);
+        let evening = (TUESDAY, Direction::Inbound);
+        follow(&mut trains, evening, window(), at("15:00"), &[], true);
+        assert_eq!(trains.ended, [ended("06:52", Outcome::Ran, false)]);
+        // Remembered with the trains, as they are kept between polls.
+        let saved = serde_json::to_string(&trains).unwrap();
+        assert!(!saved.contains("ended"), "{saved}");
     }
 
     #[test]

@@ -27,7 +27,7 @@ Existing apps cover the whole network, for everyone. eztravel does the opposite:
 - a few minutes before it is time to leave: for the train picked in the app that day, or else the way's usual train, set in the app (the first train from its time that can be caught, leaving at most half an hour after it was time to), with its platform and how it runs as far as PRIM knows; then again if that train runs three minutes late or more. A picked train that is cancelled gives way to the next one;
 - when no check has succeeded for ten minutes ("watching interrupted"), then when checks work again.
 
-A line's notification goes away by itself when its window ends. Every notification sent is kept in a history, with the PRIM records behind it.
+A line's notification goes away by itself when its window ends. Every notification sent is kept in a history, with the PRIM records behind it, and every train followed in a journal, with how it went (on time, late, cancelled), for the statistics to come.
 
 **The app** shows the notifications, titled in English or French, with the operator's text as published. It has three tabs. **Commute** opens on what to know first: all fine (only when the way is watched, just checked, and every line runs), the line in trouble, or that checks fail; then the lines being watched, each with its color and state, the last check and the next watch window. A card gives the train to catch, picked or next, with a large countdown to when to leave, and below come the next departures on each leg of the way, with their delay or cancellation, platform and arrival time. On the ride with a time to the platform, the trains leaving too soon to be caught from home or work still show when they leave, for whoever is already on the way, and five that can still be caught follow. The backend reads them from PRIM when the app asks, at most once a minute per stop. A train of the ride with a time to the platform can be picked with its bell for the reminder to leave, if it leaves during the window of an office day; without a pick, the way's usual train is the one shown first. **Alerts** lists every disruption of the lines not over yet, under way first, with its period and whole text, and whether it touches the commute. **History** keeps the notifications sent. The settings, behind the gear, hold the usual train of each way, by its time, and the time away ("away until…"). A splash screen shows the logo.
 
@@ -111,6 +111,7 @@ All requests carry `Authorization: Bearer <APP_KEY>`.
 | `GET /history` | What it sent, newest first: [fixtures/api/history.json](fixtures/api/history.json) |
 | `GET /departures` | The next departures on each leg: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /alerts` | Every disruption of the lines not yet over: [fixtures/api/README.md](fixtures/api/README.md) |
+| `GET /trains` | Each train followed, as it ended, the latest first: [fixtures/api/README.md](fixtures/api/README.md) |
 | `PUT /departure` `{"journey": "…"}` | Picks a departure for the reminder to leave, or `null` for none: [fixtures/api/README.md](fixtures/api/README.md) |
 
 Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md).
