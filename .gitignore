@@ -9,6 +9,9 @@ google-services.json
 # Rust
 target/
 
+# Python
+__pycache__/
+
 # Android
 .gradle/
 build/
