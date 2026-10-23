@@ -60,6 +60,7 @@ import io.github.nonock.eztravel.notifications.Notifier
 import io.github.nonock.eztravel.notifications.PushToken
 import io.github.nonock.eztravel.settings.AwaySetting
 import io.github.nonock.eztravel.settings.UsualTrainSetting
+import io.github.nonock.eztravel.watchdog.Watchdog
 import io.github.nonock.eztravel.ui.theme.EztravelTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -81,6 +82,8 @@ class MainActivity : ComponentActivity() {
         PushToken.fetch { token ->
             lifecycleScope.launch(Dispatchers.IO) { AppBackend.register(token) }
         }
+        // The phone looks at the backend by itself during the windows: from now, the next look is set.
+        lifecycleScope.launch(Dispatchers.IO) { Watchdog.run(applicationContext, notify = false) }
         // Light icons in the system bars: the app is always navy.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
