@@ -141,4 +141,9 @@
     <string name="usual_unreachable">The usual trains cannot be read just now.</string>
     <string name="departures_hero_usual">Your usual train</string>
     <string name="departures_usual">Usual train</string>
+    <string name="watchdog_unreachable">eztravel’s server does not answer</string>
+    <string name="watchdog_unreachable_text">No alert can reach you for now: check your lines another way.</string>
+    <string name="watchdog_stopped">eztravel’s server no longer checks your lines</string>
+    <string name="watchdog_cannot_send">eztravel’s server cannot send alerts</string>
+    <string name="watchdog_since">Since %1$s: check your lines another way.</string>
 </resources>

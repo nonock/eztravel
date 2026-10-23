@@ -140,4 +140,9 @@
     <string name="usual_unreachable">Les trains habituels ne peuvent pas être lus pour l’instant.</string>
     <string name="departures_hero_usual">Votre train habituel</string>
     <string name="departures_usual">Train habituel</string>
+    <string name="watchdog_unreachable">Le serveur d’eztravel ne répond pas</string>
+    <string name="watchdog_unreachable_text">Aucune alerte ne peut vous arriver pour l’instant : vérifiez vos lignes par un autre moyen.</string>
+    <string name="watchdog_stopped">Le serveur d’eztravel ne vérifie plus vos lignes</string>
+    <string name="watchdog_cannot_send">Le serveur d’eztravel ne peut plus envoyer d’alertes</string>
+    <string name="watchdog_since">Depuis %1$s : vérifiez vos lignes par un autre moyen.</string>
 </resources>
