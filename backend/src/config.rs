@@ -96,6 +96,7 @@ mod tests {
                 second_week: vec![Monday, Wednesday, Friday],
                 whit_monday_off: true,
                 away_through: None,
+                days: std::collections::BTreeMap::new(),
             }
         );
         assert_eq!(
@@ -180,6 +181,13 @@ mod tests {
 away_through = 2026-12-31",
         );
         assert!(Config::parse(&away).unwrap_err().contains("away_through"));
+        // So are the days set one by one.
+        let days = EXAMPLE.replace(
+            "whit_monday_off = true",
+            "whit_monday_off = true
+days = { 2026-12-31 = \"office\" }",
+        );
+        assert!(Config::parse(&days).unwrap_err().contains("days"));
         let window = Config::parse(&EXAMPLE.replace("outbound = { start", "outbound = { begin"))
             .unwrap_err();
         assert!(window.contains("begin"), "{window}");

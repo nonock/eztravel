@@ -1,16 +1,17 @@
 //! What the phone sets through the API: which devices to notify, until
-//! when the user is away, the usual train of each way, and the train picked
-//! today for the reminder to leave.
+//! when the user is away, the days set one by one, the usual train of each
+//! way, and the train picked today for the reminder to leave.
 //! Shared by the API and the poll loop, saved in the data folder.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use jiff::Timestamp;
 use jiff::civil::{Date, Time};
+use jiff::{Timestamp, ToSpan};
 use serde::{Deserialize, Serialize};
 
-use crate::calendar::Direction;
+use crate::calendar::{Calendar, Day, Direction, LOOKAHEAD_DAYS};
 use crate::service::{load, save};
 
 /// Tokens change when the app is reinstalled: keep the latest few only.
@@ -27,6 +28,19 @@ pub struct Profile {
     pub pick: Option<Pick>,
     #[serde(default)]
     pub usual: UsualTrains,
+    /// Days set otherwise than planned, from today on.
+    #[serde(default)]
+    pub days: BTreeMap<Date, Day>,
+}
+
+/// Why a day cannot be set, in the shape fixed by `fixtures/api/day-refused.json`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DayRefusal {
+    /// Before today.
+    Past,
+    /// Beyond the year the backend looks ahead.
+    TooFar,
 }
 
 /// The usual train of each way, by its time at the station of the ride the
@@ -77,6 +91,40 @@ impl Profile {
     pub fn forget(&mut self, token: &str) {
         self.devices.retain(|known| known != token);
     }
+
+    /// The configured calendar, with the time away and the days set from the app.
+    pub fn calendar(&self, configured: &Calendar) -> Calendar {
+        Calendar {
+            away_through: self.away_through,
+            days: self.days.clone(),
+            ..configured.clone()
+        }
+    }
+
+    /// Sets `date` to `day`, or puts it back as planned with none. Only days
+    /// that differ from the plan are kept, from `today` on.
+    pub fn set_day(
+        &mut self,
+        configured: &Calendar,
+        today: Date,
+        date: Date,
+        day: Option<Day>,
+    ) -> Result<(), DayRefusal> {
+        if date < today {
+            return Err(DayRefusal::Past);
+        }
+        if date >= today + LOOKAHEAD_DAYS.days() {
+            return Err(DayRefusal::TooFar);
+        }
+        self.days.retain(|kept, _| *kept >= today);
+        self.days.remove(&date);
+        if let Some(day) = day
+            && self.calendar(configured).planned(date).0 != day.into()
+        {
+            self.days.insert(date, day);
+        }
+        Ok(())
+    }
 }
 
 /// The profile behind a lock, saved after each change.
@@ -119,7 +167,17 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calendar::{Calendar, Day};
+    use jiff::ToSpan;
     use jiff::civil::{date, time};
+
+    /// The example's calendar: Tuesday and Thursday the week of 2 November 2026,
+    /// Monday, Wednesday and Friday the next.
+    fn configured() -> Calendar {
+        crate::config::Config::parse(include_str!("../config.example.toml"))
+            .unwrap()
+            .calendar
+    }
 
     fn tokens(profile: &Profile) -> Vec<&str> {
         profile.devices.iter().map(String::as_str).collect()
@@ -170,11 +228,13 @@ mod tests {
             outbound: Some(time(8, 7, 0, 0)),
             inbound: None,
         };
+        let days = BTreeMap::from([(date(2026, 12, 23), Day::Remote)]);
         store.update(|profile| {
             profile.register("phone");
             profile.away_through = Some(date(2026, 12, 24));
             profile.pick = Some(pick.clone());
             profile.usual = usual;
+            profile.days = days.clone();
         });
         // The seed only applies when nothing was saved.
         let reopened = Store::open(&path, &["other seed".into()]);
@@ -185,6 +245,7 @@ mod tests {
                 away_through: Some(date(2026, 12, 24)),
                 pick: Some(pick),
                 usual,
+                days,
             }
         );
     }
@@ -199,6 +260,101 @@ mod tests {
         assert_eq!(tokens(&profile), ["old", "phone"]);
         assert_eq!(profile.pick, None);
         assert_eq!(profile.usual, UsualTrains::default());
+        assert_eq!(profile.days, BTreeMap::new());
+    }
+
+    #[test]
+    fn the_calendar_is_the_configured_one_with_what_the_app_set() {
+        let profile = Profile {
+            away_through: Some(date(2026, 11, 3)),
+            days: BTreeMap::from([(date(2026, 11, 5), Day::Remote)]),
+            ..Profile::default()
+        };
+        assert_eq!(
+            profile.calendar(&configured()),
+            Calendar {
+                away_through: Some(date(2026, 11, 3)),
+                days: BTreeMap::from([(date(2026, 11, 5), Day::Remote)]),
+                ..configured()
+            }
+        );
+    }
+
+    #[test]
+    fn a_day_is_set_or_put_back_as_planned() {
+        let (configured, today) = (configured(), date(2026, 11, 2));
+        let mut profile = Profile::default();
+        // Thursday 5 at home, Friday 6 away, Wednesday 11 (a holiday) at the office.
+        for (day, set) in [(5, Day::Remote), (6, Day::Away), (11, Day::Office)] {
+            assert_eq!(
+                profile.set_day(&configured, today, date(2026, 11, day), Some(set)),
+                Ok(())
+            );
+        }
+        assert_eq!(
+            profile.days,
+            BTreeMap::from([
+                (date(2026, 11, 5), Day::Remote),
+                (date(2026, 11, 6), Day::Away),
+                (date(2026, 11, 11), Day::Office),
+            ])
+        );
+        // Put back as planned with none, or by setting what it would be anyway.
+        profile
+            .set_day(&configured, today, date(2026, 11, 5), None)
+            .unwrap();
+        profile
+            .set_day(&configured, today, date(2026, 11, 6), Some(Day::Remote))
+            .unwrap();
+        // Tuesday 3 is an office day, and away is the plan while away.
+        profile
+            .set_day(&configured, today, date(2026, 11, 3), Some(Day::Office))
+            .unwrap();
+        profile.away_through = Some(date(2026, 11, 13));
+        profile
+            .set_day(&configured, today, date(2026, 11, 12), Some(Day::Away))
+            .unwrap();
+        assert_eq!(
+            profile.days,
+            BTreeMap::from([(date(2026, 11, 11), Day::Office)])
+        );
+    }
+
+    #[test]
+    fn days_gone_by_are_refused_then_forgotten_and_so_are_days_too_far() {
+        let configured = configured();
+        let mut profile = Profile::default();
+        profile
+            .set_day(
+                &configured,
+                date(2026, 11, 2),
+                date(2026, 11, 5),
+                Some(Day::Remote),
+            )
+            .unwrap();
+        // Today can still be set, the day before cannot.
+        let today = date(2026, 11, 6);
+        assert_eq!(
+            profile.set_day(&configured, today, date(2026, 11, 5), None),
+            Err(DayRefusal::Past)
+        );
+        assert_eq!(profile.days.len(), 1);
+        assert_eq!(
+            profile.set_day(&configured, today, today, Some(Day::Away)),
+            Ok(())
+        );
+        // Each change forgets the days gone by.
+        assert_eq!(profile.days, BTreeMap::from([(today, Day::Away)]));
+        // The backend looks a year ahead, no further.
+        let last = today + (LOOKAHEAD_DAYS - 1).days();
+        assert_eq!(
+            profile.set_day(&configured, today, last, Some(Day::Away)),
+            Ok(())
+        );
+        assert_eq!(
+            profile.set_day(&configured, today, last.tomorrow().unwrap(), None),
+            Err(DayRefusal::TooFar)
+        );
     }
 
     #[test]
