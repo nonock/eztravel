@@ -8,6 +8,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -22,7 +23,9 @@ import androidx.test.rule.GrantPermissionRule
 import io.github.nonock.eztravel.backend.AppBackend
 import io.github.nonock.eztravel.backend.FakeBackend
 import io.github.nonock.eztravel.notifications.Notifier
+import io.github.nonock.eztravel.calendar.monthTitle
 import io.github.nonock.eztravel.notifications.PushToken
+import io.github.nonock.eztravel.watchdog.Watchdog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -30,10 +33,19 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.ExternalResource
 import org.junit.runner.RunWith
+import java.time.Instant
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.concurrent.CopyOnWriteArrayList
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityTest {
     private val backend = FakeBackend()
+
+    /** The watchdog's next looks, as set: from the launch on. */
+    private val looks = CopyOnWriteArrayList<Instant?>()
 
     @get:Rule(order = 0)
     val permission: GrantPermissionRule = GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS)
@@ -43,16 +55,19 @@ class MainActivityTest {
     val fakeBackend = object : ExternalResource() {
         private val original = AppBackend.current
         private val token = PushToken.fetch
+        private val alarm = Watchdog.schedule
 
         override fun before() {
             AppBackend.current = backend
             // Firebase gives no token without Google's services, as on an emulator.
             PushToken.fetch = { onToken -> onToken("token-from-firebase") }
+            Watchdog.schedule = { _, at -> looks += at }
         }
 
         override fun after() {
             AppBackend.current = original
             PushToken.fetch = token
+            Watchdog.schedule = alarm
         }
     }
 
@@ -94,14 +109,25 @@ class MainActivityTest {
         tab(R.string.nav_history).performClick()
         tab(R.string.nav_trip).performClick()
         compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+        tab(R.string.nav_calendar).performClick()
+        tab(R.string.nav_calendar).assertIsSelected()
+        back()
+        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
     }
 
     @Test
-    fun theTimeAwayIsBehindTheGearAndBackLeavesIt() {
+    fun theCalendarTabHoldsTheMonthAndTheTimeAway() {
+        tab(R.string.nav_calendar).performClick()
+        compose.onNodeWithText(monthTitle(YearMonth.now())).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.away_title)).assertExists()
+        compose.onNodeWithText(text(R.string.away_none)).assertExists()
+    }
+
+    @Test
+    fun theUsualTrainsAreBehindTheGearAndBackLeavesIt() {
         compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
         compose.onNodeWithText(text(R.string.usual_title)).assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.away_none)).assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.away_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.away_title)).assertDoesNotExist()
         compose.onNodeWithContentDescription(text(R.string.back)).performClick()
         compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
         compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
@@ -109,24 +135,26 @@ class MainActivityTest {
         compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
     }
 
-    /** Pulls the page down, from its top, and waits for [reads] to grow. */
-    private fun pullDown(vararg reads: java.util.concurrent.atomic.AtomicInteger) {
-        compose.waitUntil(timeoutMillis = 5_000) { reads.all { it.get() > 0 } }
+    /** Pulls the page down, from its top, and waits for each count of [reads] to grow. */
+    private fun pullDown(vararg reads: () -> Int) {
+        compose.waitUntil(timeoutMillis = 5_000) { reads.all { it() > 0 } }
         compose.waitForIdle()
-        val before = reads.map { it.get() }
+        val before = reads.map { it() }
         compose.onNode(hasScrollAction()).performTouchInput { swipeDown(startY = top, endY = bottom) }
-        compose.waitUntil(timeoutMillis = 5_000) { reads.zip(before).all { (read, was) -> read.get() > was } }
+        compose.waitUntil(timeoutMillis = 5_000) { reads.zip(before).all { (read, was) -> read() > was } }
     }
 
     @Test
     fun pullingEachTabDownReadsItAgain() {
-        pullDown(backend.statusReads, backend.departuresReads)
+        pullDown({ backend.statusReads.get() }, { backend.departuresReads.get() })
         tab(R.string.nav_alerts).performClick()
-        pullDown(backend.alertsReads)
+        pullDown({ backend.alertsReads.get() })
         tab(R.string.nav_history).performClick()
-        pullDown(backend.historyReads)
+        pullDown({ backend.historyReads.get() })
         // And again: the spinner went away after the last read.
-        pullDown(backend.historyReads)
+        pullDown({ backend.historyReads.get() })
+        tab(R.string.nav_calendar).performClick()
+        pullDown({ backend.monthReads.size })
     }
 
     @Test
@@ -145,17 +173,32 @@ class MainActivityTest {
         compose.waitUntil(timeoutMillis = 5_000) { backend.departuresReads.get() > atLaunch }
     }
 
-    @Test
-    fun savingTheTimeAwayReadsTheStatusAgain() {
-        // Counted from the reads at launch, however many: the screen may resume more than once.
-        compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > 0 }
+    /** Waits for the calendar and the watchdog's look at launch, then counts each from there. */
+    private fun calendarRead(): Pair<Int, Int> {
+        tab(R.string.nav_calendar).performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { backend.monthReads.isNotEmpty() && looks.isNotEmpty() }
         compose.waitForIdle()
-        val atLaunch = backend.statusReads.get()
-        compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
+        return backend.monthReads.size to looks.size
+    }
+
+    @Test
+    fun savingTheTimeAwayReadsTheMonthAgainAndLooksAtTheBackend() {
+        // The time away changes the days, and may move the next watch: the watchdog's next look with it.
+        val (months, looked) = calendarRead()
         compose.onNodeWithText(text(R.string.away_choose)).performClick()
         compose.onNodeWithText(text(R.string.ok)).performClick()
-        compose.onNodeWithContentDescription(text(R.string.back)).performClick()
-        compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > atLaunch }
+        compose.waitUntil(timeoutMillis = 5_000) { backend.monthReads.size > months && looks.size > looked }
+    }
+
+    @Test
+    fun settingADayLooksAtTheBackendAgain() {
+        // A day at the office may come before the next look: it is set again.
+        val (_, looked) = calendarRead()
+        val today = DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).format(LocalDate.now())
+        compose.onNode(hasContentDescription(today, substring = true) and hasClickAction()).performClick()
+        compose.onNode(hasText(text(R.string.calendar_away)) and hasClickAction()).performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { looks.size > looked }
+        assertEquals(LocalDate.now(), backend.daysSet.single().first)
     }
 
     @Test

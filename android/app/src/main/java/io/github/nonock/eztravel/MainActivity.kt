@@ -22,8 +22,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Warning
@@ -43,15 +45,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import io.github.nonock.eztravel.backend.AppBackend
+import io.github.nonock.eztravel.calendar.CalendarPage
 import io.github.nonock.eztravel.home.AlertsPage
 import io.github.nonock.eztravel.home.CommuteStatus
 import io.github.nonock.eztravel.home.NextDepartures
@@ -100,12 +105,14 @@ enum class Tab(@StringRes val label: Int, @StringRes val title: Int, val icon: I
     TRIP(R.string.nav_trip, R.string.app_name, Icons.Outlined.Home, Icons.Filled.Home),
     ALERTS(R.string.nav_alerts, R.string.nav_alerts, Icons.Outlined.Warning, Icons.Filled.Warning),
     HISTORY(R.string.nav_history, R.string.history_title, Icons.AutoMirrored.Outlined.List, Icons.AutoMirrored.Filled.List),
+    CALENDAR(R.string.nav_calendar, R.string.nav_calendar, Icons.Outlined.DateRange, Icons.Filled.DateRange),
 }
 
 /**
- * The commute, the lines' alerts and the history of notifications, one tab
- * each, read again when pulled down; the settings behind the gear. Back
- * leaves the settings, then goes back to the commute.
+ * The commute, the lines' alerts, the history of notifications and the
+ * calendar with the time away, one tab each, read again when pulled down;
+ * the usual trains behind the gear. Back leaves the settings, then goes back
+ * to the commute.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,6 +123,13 @@ fun App() {
     var refresh by remember { mutableIntStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
     val read = { refreshing = false }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // A day changed may move the next watch: the status is read again, and the watchdog's next look set again.
+    val daysSaved: () -> Unit = {
+        refresh++
+        scope.launch(Dispatchers.IO) { Watchdog.run(context.applicationContext, notify = false) }
+    }
     BackHandler(enabled = settings || tab != Tab.TRIP) {
         if (settings) settings = false else tab = Tab.TRIP
     }
@@ -167,15 +181,19 @@ fun App() {
             ) {
                 when {
                     settings -> {
+                        if (!backend.configured) Text(stringResource(R.string.away_not_configured))
                         UsualTrainSetting(backend, onSaved = { refresh++ })
-                        AwaySetting(backend, Modifier.padding(top = 24.dp), onSaved = { refresh++ })
                     }
                     tab == Tab.TRIP -> {
                         CommuteStatus(backend, refresh = refresh)
                         NextDepartures(backend, Modifier.padding(top = 16.dp), refresh = refresh, onRead = read)
                     }
                     tab == Tab.ALERTS -> AlertsPage(backend, refresh = refresh, onRead = read)
-                    else -> NotificationHistory(backend, refresh = refresh, onRead = read)
+                    tab == Tab.HISTORY -> NotificationHistory(backend, refresh = refresh, onRead = read)
+                    else -> {
+                        CalendarPage(backend, refresh = refresh, onRead = read, onSaved = daysSaved)
+                        AwaySetting(backend, Modifier.padding(top = 24.dp), onSaved = daysSaved)
+                    }
                 }
             }
         }
