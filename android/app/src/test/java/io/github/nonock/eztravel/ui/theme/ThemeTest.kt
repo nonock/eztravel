@@ -38,4 +38,14 @@ class ThemeTest {
             }
         }
     }
+
+    @Test
+    fun eachDayOfTheCalendarIsReadableAndStandsOutFromTheGround() {
+        for ((name, day) in listOf("office" to OfficeDay, "remote" to RemoteDay, "away" to AwayDay)) {
+            // Its date, in navy.
+            assertTrue("$name date: ${contrast(Navy, day)}", contrast(Navy, day) >= 4.5f)
+            // The day itself, 3 at least for a shape that carries meaning.
+            assertTrue("$name day: ${contrast(day, EztravelColors.background)}", contrast(day, EztravelColors.background) >= 3f)
+        }
+    }
 }

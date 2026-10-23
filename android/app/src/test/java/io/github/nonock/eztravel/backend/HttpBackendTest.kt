@@ -16,9 +16,10 @@ import java.io.IOException
 import java.net.InetSocketAddress
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.YearMonth
 
 class HttpBackendTest {
-    private data class Received(val method: String, val path: String, val authorization: String?, val body: String)
+    private data class Received(val method: String, val path: String, val authorization: String?, val body: String, val query: String? = null)
 
     private val received = mutableListOf<Received>()
     private var status = 204
@@ -27,7 +28,8 @@ class HttpBackendTest {
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
         createContext("/") { exchange ->
             val body = exchange.requestBody.readBytes().decodeToString()
-            received += Received(exchange.requestMethod, exchange.requestURI.path, exchange.requestHeaders.getFirst("Authorization"), body)
+            val uri = exchange.requestURI
+            received += Received(exchange.requestMethod, uri.path, exchange.requestHeaders.getFirst("Authorization"), body, uri.query)
             val bytes = answer.toByteArray()
             exchange.sendResponseHeaders(status, if (bytes.isEmpty()) -1 else bytes.size.toLong())
             if (bytes.isNotEmpty()) exchange.responseBody.use { it.write(bytes) }
@@ -137,6 +139,44 @@ class HttpBackendTest {
         answer = File("../../fixtures/api/alerts.json").readText()
         assertEquals(Alerts.parse(answer), backend.alerts())
         assertEquals(listOf("GET /alerts"), received.map { "${it.method} ${it.path}" })
+    }
+
+    @Test
+    fun readsAMonthOfTheCalendar() = runBlocking {
+        status = 200
+        answer = File("../../fixtures/api/calendar.json").readText()
+        assertEquals(CalendarDay.parse(answer), backend.month(YearMonth.of(2026, 11)))
+        assertEquals(listOf("GET /calendar month=2026-11"), received.map { "${it.method} ${it.path} ${it.query}" })
+    }
+
+    @Test
+    fun setsADayAndPutsItBack() = runBlocking {
+        assertNull(backend.setDay(LocalDate.of(2026, 11, 5), CalendarDay.Kind.REMOTE))
+        assertNull(backend.setDay(LocalDate.of(2026, 11, 5), null))
+        assertEquals(listOf("PUT /calendar"), received.map { "${it.method} ${it.path}" }.distinct())
+        val (first, second) = received.map { JSONObject(it.body) }
+        assertEquals("2026-11-05" to "remote", first.getString("date") to first.getString("kind"))
+        assertTrue(second.isNull("kind"))
+    }
+
+    @Test
+    fun aDayThatCannotBeSetSaysWhy() = runBlocking {
+        status = 422
+        answer = File("../../fixtures/api/day-refused.json").readText()
+        assertEquals(DayRefusal.PAST, backend.setDay(LocalDate.of(2020, 1, 6), CalendarDay.Kind.OFFICE))
+        answer = """{"refused":"too_far"}"""
+        assertEquals(DayRefusal.TOO_FAR, backend.setDay(LocalDate.of(2100, 1, 4), null))
+        // Without a reason it knows, or from a backend without the calendar: it was not saved.
+        for ((code, body) in listOf(422 to """{"refused":"outside_window"}""", 422 to "not JSON", 404 to "")) {
+            status = code
+            answer = body
+            try {
+                backend.setDay(LocalDate.of(2026, 11, 5), null)
+                fail("a day not saved must not pass silently")
+            } catch (error: BackendError) {
+                assertEquals(code, error.status)
+            }
+        }
     }
 
     @Test

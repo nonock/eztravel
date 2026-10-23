@@ -8,6 +8,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.YearMonth
 
 /** The eztravel backend, as the app sees it. Tests replace it with a fake. */
 interface Backend {
@@ -27,6 +28,15 @@ interface Backend {
 
     /** Sets the usual train of [direction], or none: null once saved, or why the backend refuses it. */
     suspend fun setUsualTrain(direction: Status.Direction, time: LocalTime?): Refusal?
+
+    /** Each day of [month], what it is and why. */
+    suspend fun month(month: YearMonth): List<CalendarDay>
+
+    /**
+     * Sets [date] to [kind], office, remote or away, or back as planned with
+     * null: null once saved, or why the backend refuses it.
+     */
+    suspend fun setDay(date: LocalDate, kind: CalendarDay.Kind?): DayRefusal?
 
     /** What the backend sees: the lines being watched and whether checks work. */
     suspend fun status(): Status
@@ -75,7 +85,16 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
 
     override suspend fun setUsualTrain(direction: Status.Direction, time: LocalTime?): Refusal? = withContext(Dispatchers.IO) {
         val usual = JSONObject().put("direction", direction.name.lowercase()).put("time", time?.toString() ?: JSONObject.NULL)
-        refusable("PUT", "/usual-train", usual)
+        refusable("PUT", "/usual-train", usual, Refusal::parse)
+    }
+
+    override suspend fun month(month: YearMonth): List<CalendarDay> = withContext(Dispatchers.IO) {
+        CalendarDay.parse(request("GET", "/calendar?month=$month", null))
+    }
+
+    override suspend fun setDay(date: LocalDate, kind: CalendarDay.Kind?): DayRefusal? = withContext(Dispatchers.IO) {
+        val day = JSONObject().put("date", date.toString()).put("kind", kind?.name?.lowercase() ?: JSONObject.NULL)
+        refusable("PUT", "/calendar", day, DayRefusal::parse)
     }
 
     override suspend fun status(): Status = withContext(Dispatchers.IO) {
@@ -95,15 +114,15 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
     }
 
     override suspend fun pick(journey: String?): Refusal? = withContext(Dispatchers.IO) {
-        refusable("PUT", "/departure", JSONObject().put("journey", journey ?: JSONObject.NULL))
+        refusable("PUT", "/departure", JSONObject().put("journey", journey ?: JSONObject.NULL), Refusal::parse)
     }
 
-    /** Null once saved, or why the backend refuses it; any other failure throws. */
-    private fun refusable(method: String, path: String, body: JSONObject): Refusal? = try {
+    /** Null once saved, or why the backend refuses it, as [reason] reads it; any other failure throws. */
+    private fun <R> refusable(method: String, path: String, body: JSONObject, reason: (String) -> R?): R? = try {
         request(method, path, body)
         null
     } catch (error: BackendError) {
-        error.body?.takeIf { error.status == UNPROCESSABLE }?.let(Refusal::parse) ?: throw error
+        error.body?.takeIf { error.status == UNPROCESSABLE }?.let(reason) ?: throw error
     }
 
     private fun request(method: String, path: String, body: JSONObject?): String {
