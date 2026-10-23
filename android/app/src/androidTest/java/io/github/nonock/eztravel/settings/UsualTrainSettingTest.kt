@@ -1,5 +1,6 @@
 package io.github.nonock.eztravel.settings
 
+import android.os.ParcelFileDescriptor
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
@@ -18,7 +19,9 @@ import io.github.nonock.eztravel.backend.FakeBackend
 import io.github.nonock.eztravel.backend.Refusal
 import io.github.nonock.eztravel.backend.Status.Direction
 import io.github.nonock.eztravel.backend.UsualTrains
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -39,6 +42,26 @@ class UsualTrainSettingTest {
     private fun clock(hour: Int, minute: Int) = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).format(LocalTime.of(hour, minute))
 
     private val saves = AtomicInteger()
+
+    private fun shell(command: String): String =
+        ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command))
+            .bufferedReader()
+            .use { it.readText().trim() }
+
+    /** The phone's own choice of 12 or 24 hours, put back after each test. */
+    private var hours = "null"
+
+    /** Hours are typed from 0 to 23, whatever the device's language: an emulator tells time in 12 hours. */
+    @Before
+    fun twentyFourHours() {
+        hours = shell("settings get system time_12_24")
+        shell("settings put system time_12_24 24")
+    }
+
+    @After
+    fun putTheHoursBack() {
+        shell(if (hours == "null") "settings delete system time_12_24" else "settings put system time_12_24 $hours")
+    }
 
     private fun show(backend: FakeBackend) = compose.setContent { UsualTrainSetting(backend, onSaved = { saves.incrementAndGet() }) }
 
