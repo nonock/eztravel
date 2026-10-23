@@ -12,7 +12,6 @@ import java.util.concurrent.atomic.AtomicInteger
 /** A backend kept in memory, to test the app without a network. */
 class FakeBackend(
     override val configured: Boolean = true,
-    var away: LocalDate? = null,
     var failing: Boolean = false,
     /** Answers that cannot be read, as from a server in a bad state. */
     var garbled: Boolean = false,
@@ -37,13 +36,13 @@ class FakeBackend(
 ) : Backend {
     /** Days set otherwise than planned, as the backend keeps them. */
     val set = java.util.concurrent.ConcurrentHashMap<LocalDate, CalendarDay>()
-    val daysSet = CopyOnWriteArrayList<Pair<LocalDate, CalendarDay.Kind?>>()
+    /** Each change: its first day, its last, and what they are set to. */
+    val daysSet = CopyOnWriteArrayList<Triple<LocalDate, LocalDate, CalendarDay.Kind?>>()
     val monthReads = CopyOnWriteArrayList<YearMonth>()
 
     val registered = CopyOnWriteArrayList<String>()
     val picks = CopyOnWriteArrayList<String?>()
     val usualSaved = CopyOnWriteArrayList<Pair<Status.Direction, LocalTime?>>()
-    val saved = CopyOnWriteArrayList<String>()
     val statusReads = AtomicInteger()
     val departuresReads = AtomicInteger()
     val alertsReads = AtomicInteger()
@@ -52,18 +51,6 @@ class FakeBackend(
     override fun register(token: String) {
         if (failing) throw IOException("unreachable")
         registered += token
-    }
-
-    override suspend fun awayThrough(): LocalDate? {
-        if (failing) throw IOException("unreachable")
-        if (garbled) throw JSONException("not JSON")
-        return away
-    }
-
-    override suspend fun setAwayThrough(date: LocalDate?) {
-        if (failing) throw IOException("unreachable")
-        saved += date.toString()
-        away = date
     }
 
     override suspend fun history(): List<HistoryEntry> {
@@ -114,12 +101,14 @@ class FakeBackend(
         return (1..month.lengthOfMonth()).map(month::atDay).map { set[it] ?: plan(it) }
     }
 
-    override suspend fun setDay(date: LocalDate, kind: CalendarDay.Kind?): DayRefusal? {
+    override suspend fun setDays(first: LocalDate, last: LocalDate, kind: CalendarDay.Kind?): DayRefusal? {
         if (failing) throw IOException("unreachable")
-        daysSet += date to kind
+        daysSet += Triple(first, last, kind)
         if (dayRefusal != null) return dayRefusal
-        // As the backend: a day set as planned is not kept.
-        if (kind == null || kind == plan(date).kind) set.remove(date) else set[date] = CalendarDay(date, kind, CalendarDay.Why.SET)
+        for (date in generateSequence(first) { it.plusDays(1) }.takeWhile { it <= last }) {
+            // As the backend: a day set as planned is not kept.
+            if (kind == null || kind == plan(date).kind) set.remove(date) else set[date] = CalendarDay(date, kind, CalendarDay.Why.SET)
+        }
         return null
     }
 

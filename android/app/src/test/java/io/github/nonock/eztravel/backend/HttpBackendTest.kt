@@ -52,33 +52,14 @@ class HttpBackendTest {
     }
 
     @Test
-    fun readsTheTimeAway() = runBlocking {
-        status = 200
-        answer = """{"away_through":"2026-12-24"}"""
-        assertEquals(LocalDate.of(2026, 12, 24), backend.awayThrough())
-        answer = """{"away_through":null}"""
-        assertNull(backend.awayThrough())
-        assertEquals(listOf("GET"), received.map { it.method }.distinct())
-    }
-
-    @Test
-    fun setsAndClearsTheTimeAway() = runBlocking {
-        backend.setAwayThrough(LocalDate.of(2026, 12, 24))
-        backend.setAwayThrough(null)
-        assertEquals(listOf("PUT", "PUT"), received.map { it.method })
-        assertEquals("2026-12-24", JSONObject(received[0].body).getString("away_through"))
-        assertTrue(JSONObject(received[1].body).isNull("away_through"))
-    }
-
-    @Test
     fun readsTheUsualTrains() = runBlocking {
         status = 200
         answer = File("../../fixtures/api/settings.json").readText()
         assertEquals(UsualTrains(LocalTime.of(8, 7), LocalTime.of(17, 52)), backend.usualTrains())
-        answer = """{"away_through":null,"usual_trains":{"outbound":null,"inbound":"17:52:00"}}"""
+        answer = """{"usual_trains":{"outbound":null,"inbound":"17:52:00"}}"""
         assertEquals(UsualTrains(null, LocalTime.of(17, 52)), backend.usualTrains())
         // From a backend that has none.
-        answer = """{"away_through":null}"""
+        answer = """{}"""
         assertEquals(UsualTrains(null, null), backend.usualTrains())
         assertEquals(listOf("GET /settings"), received.map { "${it.method} ${it.path}" }.distinct())
     }
@@ -150,28 +131,34 @@ class HttpBackendTest {
     }
 
     @Test
-    fun setsADayAndPutsItBack() = runBlocking {
-        assertNull(backend.setDay(LocalDate.of(2026, 11, 5), CalendarDay.Kind.REMOTE))
-        assertNull(backend.setDay(LocalDate.of(2026, 11, 5), null))
+    fun setsADayDaysThroughAnotherAndPutsThemBack() = runBlocking {
+        val (fifth, ninth) = LocalDate.of(2026, 11, 5) to LocalDate.of(2026, 11, 9)
+        assertNull(backend.setDays(fifth, fifth, CalendarDay.Kind.REMOTE))
+        assertNull(backend.setDays(fifth, ninth, CalendarDay.Kind.AWAY))
+        assertNull(backend.setDays(fifth, ninth, null))
         assertEquals(listOf("PUT /calendar"), received.map { "${it.method} ${it.path}" }.distinct())
-        val (first, second) = received.map { JSONObject(it.body) }
-        assertEquals("2026-11-05" to "remote", first.getString("date") to first.getString("kind"))
-        assertTrue(second.isNull("kind"))
+        val (one, through, back) = received.map { JSONObject(it.body) }
+        // A single day without `through`, as the first backend with the calendar takes it.
+        assertEquals("2026-11-05" to "remote", one.getString("date") to one.getString("kind"))
+        assertFalse(one.has("through"))
+        assertEquals(listOf("2026-11-05", "2026-11-09", "away"), listOf("date", "through", "kind").map(through::getString))
+        assertTrue(back.isNull("kind"))
     }
 
     @Test
     fun aDayThatCannotBeSetSaysWhy() = runBlocking {
         status = 422
         answer = File("../../fixtures/api/day-refused.json").readText()
-        assertEquals(DayRefusal.PAST, backend.setDay(LocalDate.of(2020, 1, 6), CalendarDay.Kind.OFFICE))
+        val (past, far) = LocalDate.of(2020, 1, 6) to LocalDate.of(2100, 1, 4)
+        assertEquals(DayRefusal.PAST, backend.setDays(past, past, CalendarDay.Kind.OFFICE))
         answer = """{"refused":"too_far"}"""
-        assertEquals(DayRefusal.TOO_FAR, backend.setDay(LocalDate.of(2100, 1, 4), null))
+        assertEquals(DayRefusal.TOO_FAR, backend.setDays(far, far, null))
         // Without a reason it knows, or from a backend without the calendar: it was not saved.
         for ((code, body) in listOf(422 to """{"refused":"outside_window"}""", 422 to "not JSON", 404 to "")) {
             status = code
             answer = body
             try {
-                backend.setDay(LocalDate.of(2026, 11, 5), null)
+                backend.setDays(LocalDate.of(2026, 11, 9), LocalDate.of(2026, 11, 5), null)
                 fail("a day not saved must not pass silently")
             } catch (error: BackendError) {
                 assertEquals(code, error.status)

@@ -23,9 +23,6 @@ data class CalendarDay(val date: LocalDate, val kind: Kind, val why: Why) {
         CYCLE,
         HOLIDAY,
 
-        /** The time away covers it. */
-        AWAY,
-
         /** Set from the app. */
         SET,
     }

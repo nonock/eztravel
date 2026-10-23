@@ -73,8 +73,8 @@ fun NotificationHistory(backend: Backend, modifier: Modifier = Modifier, refresh
 
     Column(modifier) {
         when (val current = sent) {
-            Sent.Loading -> Text(stringResource(R.string.away_loading))
-            Sent.Unreachable -> Text(stringResource(R.string.away_unreachable), color = MaterialTheme.colorScheme.error)
+            Sent.Loading -> Text(stringResource(R.string.loading))
+            Sent.Unreachable -> Text(stringResource(R.string.unreachable), color = MaterialTheme.colorScheme.error)
             is Sent.Known -> if (current.entries.isEmpty()) {
                 Text(stringResource(R.string.history_empty))
             } else {

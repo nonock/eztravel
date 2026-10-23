@@ -21,13 +21,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,6 +61,8 @@ import io.github.nonock.eztravel.backend.CalendarDay
 import io.github.nonock.eztravel.backend.CalendarDay.Kind
 import io.github.nonock.eztravel.backend.CalendarDay.Why
 import io.github.nonock.eztravel.backend.DayRefusal
+import io.github.nonock.eztravel.settings.toUtcDate
+import io.github.nonock.eztravel.settings.toUtcMillis
 import io.github.nonock.eztravel.ui.theme.AwayDay
 import io.github.nonock.eztravel.ui.theme.Navy
 import io.github.nonock.eztravel.ui.theme.OfficeDay
@@ -79,6 +87,9 @@ private sealed interface Shown {
 /** The months shown after this one: the backend looks a year ahead. */
 private const val AHEAD = 11L
 
+/** The last day that can be set, from today: the backend looks a year ahead. */
+private const val LAST_DAY = 365L
+
 private val DayShape = RoundedCornerShape(10.dp)
 
 /** "November 2026", as a month heads the calendar. */
@@ -88,9 +99,9 @@ fun monthTitle(month: YearMonth, locale: Locale = Locale.getDefault()): String =
 /**
  * A month of days, office, remote work and days off each in its own color, a
  * week a row from Monday, as the two weeks' cycle goes: a tap sets a single
- * day, from today on. `onSaved` follows each day set; the month is read again
- * when [refresh] changes, then `onRead`. A build without a server shows
- * nothing: the time away says why.
+ * day, from today on, or days off through a date. `onSaved` follows each
+ * change saved; the month is read again when [refresh] changes, then
+ * `onRead`. A build without a server shows nothing.
  */
 @Composable
 fun CalendarPage(
@@ -107,6 +118,8 @@ fun CalendarPage(
     var shown by remember { mutableStateOf<Shown>(Shown.Loading) }
     var refused by remember { mutableStateOf<DayRefusal?>(null) }
     var saves by remember { mutableIntStateOf(0) }
+    // The first day off, while its last is chosen.
+    var awayFrom by remember { mutableStateOf<LocalDate?>(null) }
     val scope = rememberCoroutineScope()
     val locale = LocalLocale.current.platformLocale
 
@@ -115,12 +128,12 @@ fun CalendarPage(
         onRead()
     }
 
-    fun set(date: LocalDate, kind: Kind?) {
+    fun set(first: LocalDate, last: LocalDate, kind: Kind?) {
         scope.launch {
             refused = null
             // Once saved, the month is read again.
             shown = reach {
-                refused = backend.setDay(date, kind)
+                refused = backend.setDays(first, last, kind)
                 if (refused == null) {
                     onSaved()
                     saves++
@@ -157,10 +170,14 @@ fun CalendarPage(
             }
         }
         when (val current = shown) {
-            Shown.Loading -> Text(stringResource(R.string.away_loading))
+            Shown.Loading -> Text(stringResource(R.string.loading))
             Shown.Unreachable -> Text(stringResource(R.string.calendar_unreachable))
             // Another month's days are not shown under this one's title.
-            is Shown.Known -> if (current.month == month) Weeks(current.days, today, ::set) else Text(stringResource(R.string.away_loading))
+            is Shown.Known -> if (current.month == month) {
+                Weeks(current.days, today, onSet = { date, kind -> set(date, date, kind) }, onAwayUntil = { awayFrom = it })
+            } else {
+                Text(stringResource(R.string.loading))
+            }
         }
         refused?.let {
             Text(
@@ -172,6 +189,17 @@ fun CalendarPage(
                 ),
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+        awayFrom?.let { first ->
+            LastDayOffPicker(
+                first = first,
+                last = today.plusDays(LAST_DAY),
+                onPick = { last ->
+                    awayFrom = null
+                    set(first, last, Kind.AWAY)
+                },
+                onDismiss = { awayFrom = null },
             )
         }
         Legend()
@@ -195,7 +223,7 @@ private suspend fun reach(call: suspend () -> Shown): Shown = try {
 
 /** The month's days, a week a row from Monday. */
 @Composable
-private fun Weeks(days: List<CalendarDay>, today: LocalDate, onSet: (LocalDate, Kind?) -> Unit) {
+private fun Weeks(days: List<CalendarDay>, today: LocalDate, onSet: (LocalDate, Kind?) -> Unit, onAwayUntil: (LocalDate) -> Unit) {
     val before = days.firstOrNull()?.date?.dayOfWeek?.ordinal ?: 0
     val cells = List<CalendarDay?>(before) { null } + days
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -207,7 +235,7 @@ private fun Weeks(days: List<CalendarDay>, today: LocalDate, onSet: (LocalDate, 
                             .weight(1f)
                             .aspectRatio(1f),
                     ) {
-                        week.getOrNull(index)?.let { Day(it, today, onSet) }
+                        week.getOrNull(index)?.let { Day(it, today, onSet, onAwayUntil) }
                     }
                 }
             }
@@ -230,9 +258,9 @@ private fun Kind.fill(): Color = when (this) {
     Kind.OFF -> Color.Transparent
 }
 
-/** A day of the grid; from today on, a tap opens what it can be set to. */
+/** A day of the grid; from today on, a tap opens what it can be set to, or days off from it. */
 @Composable
-private fun Day(day: CalendarDay, today: LocalDate, onSet: (LocalDate, Kind?) -> Unit) {
+private fun Day(day: CalendarDay, today: LocalDate, onSet: (LocalDate, Kind?) -> Unit, onAwayUntil: (LocalDate) -> Unit) {
     var choosing by remember { mutableStateOf(false) }
     val past = day.date < today
     val colors = MaterialTheme.colorScheme
@@ -293,6 +321,13 @@ private fun Day(day: CalendarDay, today: LocalDate, onSet: (LocalDate, Kind?) ->
                     modifier = Modifier.semantics { selected = current },
                 )
             }
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.calendar_away_until)) },
+                onClick = {
+                    choosing = false
+                    onAwayUntil(day.date)
+                },
+            )
             if (day.why == Why.SET) {
                 HorizontalDivider()
                 DropdownMenuItem(
@@ -304,6 +339,35 @@ private fun Day(day: CalendarDay, today: LocalDate, onSet: (LocalDate, Kind?) ->
                 )
             }
         }
+    }
+}
+
+/** The last day off from [first], up to [last]: [first] itself unless another is chosen. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LastDayOffPicker(first: LocalDate, last: LocalDate, onPick: (LocalDate) -> Unit, onDismiss: () -> Unit) {
+    val state = rememberDatePickerState(
+        initialSelectedDateMillis = first.toUtcMillis(),
+        selectableDates = object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis.toUtcDate() in first..last
+        },
+    )
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = { onPick(state.selectedDateMillis?.toUtcDate() ?: first) }) { Text(stringResource(R.string.ok)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    ) {
+        DatePicker(
+            state,
+            title = {
+                Text(
+                    stringResource(R.string.calendar_away_until_title),
+                    modifier = Modifier.padding(start = 24.dp, end = 12.dp, top = 16.dp),
+                )
+            },
+        )
     }
 }
 
