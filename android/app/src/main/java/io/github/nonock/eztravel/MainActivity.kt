@@ -51,13 +51,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
-import com.google.firebase.messaging.FirebaseMessaging
 import io.github.nonock.eztravel.backend.AppBackend
 import io.github.nonock.eztravel.home.AlertsPage
 import io.github.nonock.eztravel.home.CommuteStatus
 import io.github.nonock.eztravel.home.NextDepartures
 import io.github.nonock.eztravel.home.NotificationHistory
 import io.github.nonock.eztravel.notifications.Notifier
+import io.github.nonock.eztravel.notifications.PushToken
 import io.github.nonock.eztravel.settings.AwaySetting
 import io.github.nonock.eztravel.settings.UsualTrainSetting
 import io.github.nonock.eztravel.ui.theme.EztravelTheme
@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
             askToNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         // The backend learns where to send notifications; again at each launch, in case it failed.
-        FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+        PushToken.fetch { token ->
             lifecycleScope.launch(Dispatchers.IO) { AppBackend.register(token) }
         }
         // Light icons in the system bars: the app is always navy.
