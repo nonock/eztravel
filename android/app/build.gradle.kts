@@ -56,6 +56,19 @@ android {
         compose = true
         buildConfig = true
     }
+    testOptions {
+        // An emulator that Gradle starts and stops itself, for the tests on a
+        // device in CI: an image made for automated tests, without Google's apps.
+        managedDevices {
+            localDevices {
+                create("ciDevice") {
+                    device = "Pixel 6"
+                    apiLevel = 36
+                    systemImageSource = "aosp-atd"
+                }
+            }
+        }
+    }
     lint {
         // Every text shown to the user must exist in French too.
         error += "MissingTranslation"
