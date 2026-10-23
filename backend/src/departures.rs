@@ -1142,7 +1142,10 @@ mod tests {
     async fn a_pick_is_refused_when_it_would_never_be_reminded() {
         let config = Config::parse(EXAMPLE).unwrap();
         let away = Calendar {
-            away_through: Some(jiff::civil::date(2026, 11, 3)),
+            days: std::collections::BTreeMap::from([(
+                jiff::civil::date(2026, 11, 3),
+                crate::calendar::Day::Away,
+            )]),
             ..config.calendar
         };
         assert_eq!(

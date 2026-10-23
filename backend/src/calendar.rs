@@ -1,8 +1,8 @@
 //! Which days and hours the commute is watched.
 //!
-//! Office days follow a two-week cycle, minus French public holidays and time
-//! away, unless a day is set otherwise from the app. Watch windows are in the
-//! user's local time, so the caller passes the current instant and the time zone.
+//! Office days follow a two-week cycle, minus French public holidays, unless a
+//! day is set otherwise from the app. Watch windows are in the user's local
+//! time, so the caller passes the current instant and the time zone.
 
 use std::collections::BTreeMap;
 
@@ -14,8 +14,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::profile::Profile;
 
-/// Office days as a two-week cycle, minus public holidays and time away, unless
-/// a day is set otherwise.
+/// Office days as a two-week cycle, minus public holidays, unless a day is set
+/// otherwise.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Calendar {
@@ -28,10 +28,7 @@ pub struct Calendar {
     /// Whit Monday is a public holiday, but many employers make it a working "solidarity day".
     #[serde(default = "yes")]
     pub whit_monday_off: bool,
-    /// Last day away from the office, included. Set from the app, not from the configuration file.
-    #[serde(skip)]
-    pub away_through: Option<Date>,
-    /// Days set one by one from the app, before all else.
+    /// Days set one by one from the app, not from the configuration file, before all else.
     #[serde(skip)]
     pub days: BTreeMap<Date, Day>,
 }
@@ -74,8 +71,6 @@ pub enum Why {
     /// The two weeks' cycle.
     Cycle,
     Holiday,
-    /// The time away.
-    Away,
     /// Set from the app.
     Set,
 }
@@ -142,8 +137,8 @@ impl Calendar {
         self.day(date).kind == Kind::Office
     }
 
-    /// What `date` is, and why: a day set from the app comes first, then the
-    /// time away, then public holidays, then the cycle.
+    /// What `date` is, and why: a day set from the app comes first, then public
+    /// holidays, then the cycle.
     pub fn day(&self, date: Date) -> DayPlan {
         let (kind, why) = match self.days.get(&date) {
             Some(day) => (Kind::from(*day), Why::Set),
@@ -154,9 +149,6 @@ impl Calendar {
 
     /// What `date` would be without a day set from the app.
     pub fn planned(&self, date: Date) -> (Kind, Why) {
-        if self.away_through.is_some_and(|last| date <= last) {
-            return (Kind::Away, Why::Away);
-        }
         if is_public_holiday(date, self.whit_monday_off) {
             return (Kind::Off, Why::Holiday);
         }
@@ -291,8 +283,7 @@ impl Schedule {
     }
 }
 
-/// How far `next_window` looks ahead: no time away lasts longer, and no day
-/// is set further.
+/// How far `next_window` looks ahead: no day is set further.
 pub const LOOKAHEAD_DAYS: i64 = 366;
 
 /// When the next watch window opens, strictly after `now`.
@@ -343,7 +334,6 @@ mod tests {
             first_week: vec![Tuesday, Thursday],
             second_week: vec![Monday, Wednesday, Friday],
             whit_monday_off: true,
-            away_through: None,
             days: BTreeMap::new(),
         }
     }
@@ -437,9 +427,12 @@ mod tests {
     }
 
     #[test]
-    fn no_office_while_away_last_day_included() {
+    fn no_office_on_a_day_off() {
         let calendar = Calendar {
-            away_through: Some(date(2026, 11, 9)),
+            days: BTreeMap::from([
+                (date(2026, 11, 3), Day::Away),
+                (date(2026, 11, 9), Day::Away),
+            ]),
             ..calendar()
         };
         assert!(!calendar.is_office_day(date(2026, 11, 3)));
@@ -449,17 +442,14 @@ mod tests {
 
     #[test]
     fn each_day_says_what_it_is_and_why() {
-        let calendar = Calendar {
-            away_through: Some(date(2026, 11, 3)),
-            ..calendar()
-        };
+        let calendar = calendar();
         let day = |day| {
             let plan = calendar.day(date(2026, 11, day));
             (plan.kind, plan.why)
         };
-        // Away through Tuesday 3 November, the Sunday holiday before it included.
-        assert_eq!(day(1), (Kind::Away, Why::Away));
-        assert_eq!(day(3), (Kind::Away, Why::Away));
+        // Sunday 1 November is a holiday, Tuesday 3 an office day.
+        assert_eq!(day(1), (Kind::Off, Why::Holiday));
+        assert_eq!(day(3), (Kind::Office, Why::Cycle));
         // Wednesday 4 is not in the first week, Thursday 5 is.
         assert_eq!(day(4), (Kind::Remote, Why::Cycle));
         assert_eq!(day(5), (Kind::Office, Why::Cycle));
@@ -472,10 +462,9 @@ mod tests {
     #[test]
     fn a_day_set_from_the_app_comes_before_all_else() {
         let calendar = Calendar {
-            away_through: Some(date(2026, 11, 3)),
             days: BTreeMap::from([
-                // While away, on an office day, on a remote day, on a holiday.
-                (date(2026, 11, 3), Day::Office),
+                // On a remote day, on an office day, on a remote day, on a holiday.
+                (date(2026, 11, 4), Day::Office),
                 (date(2026, 11, 5), Day::Remote),
                 (date(2026, 11, 6), Day::Away),
                 (date(2026, 11, 11), Day::Office),
@@ -486,12 +475,12 @@ mod tests {
             let plan = calendar.day(date(2026, 11, day));
             (plan.kind, plan.why)
         };
-        assert_eq!(day(3), (Kind::Office, Why::Set));
+        assert_eq!(day(4), (Kind::Office, Why::Set));
         assert_eq!(day(5), (Kind::Remote, Why::Set));
         assert_eq!(day(6), (Kind::Away, Why::Set));
         assert_eq!(day(11), (Kind::Office, Why::Set));
         // Only office days are watched.
-        for (day, office) in [(2, false), (3, true), (5, false), (6, false), (11, true)] {
+        for (day, office) in [(3, true), (4, true), (5, false), (6, false), (11, true)] {
             assert_eq!(calendar.is_office_day(date(2026, 11, day)), office, "{day}");
         }
     }
@@ -681,10 +670,10 @@ mod tests {
     }
 
     #[test]
-    fn the_next_window_skips_time_away_and_holidays() {
+    fn the_next_window_skips_days_off_and_holidays() {
         let (windows, tz) = (windows(), paris());
         let calendar = Calendar {
-            away_through: Some(date(2026, 11, 9)),
+            days: BTreeMap::from([(date(2026, 11, 9), Day::Away)]),
             ..calendar()
         };
         // From Thursday 5 November: away on Monday 9, Wednesday 11 is a holiday, Friday 13 it is.
@@ -740,9 +729,9 @@ mod tests {
             schedule.next_window(evening, &Profile::default()),
             Some(at("2026-11-05T05:45:00Z"))
         );
-        // Away through Thursday: Monday 9 November.
+        // Away on Thursday: Monday 9 November.
         let away = Profile {
-            away_through: Some(date(2026, 11, 5)),
+            days: BTreeMap::from([(date(2026, 11, 5), Day::Away)]),
             ..Profile::default()
         };
         assert_eq!(

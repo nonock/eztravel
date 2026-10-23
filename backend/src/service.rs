@@ -202,12 +202,10 @@ impl Service {
             &profile.calendar(&self.config.calendar),
             &self.config.windows,
         );
-        let away = profile.away_through.map_or("not away".to_string(), |last| {
-            format!("away through {last}")
-        });
         format!(
-            "local time {}, watching {direction:?}, {away}, {} device(s)",
+            "local time {}, watching {direction:?}, {} day(s) set, {} device(s)",
             now.to_zoned(time_zone).strftime("%A %Y-%m-%d %H:%M %Z"),
+            profile.days.len(),
             profile.devices.len()
         )
     }
@@ -833,12 +831,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn nothing_is_watched_while_away() {
+    async fn nothing_is_watched_on_a_day_off() {
         let setup = Setup::new().await;
         setup.prim_answers(200, true, 0).await;
-        setup
-            .store
-            .update(|profile| profile.away_through = Some(jiff::civil::date(2026, 11, 3)));
+        setup.store.update(|profile| {
+            profile.days = std::collections::BTreeMap::from([(
+                jiff::civil::date(2026, 11, 3),
+                crate::calendar::Day::Away,
+            )])
+        });
         assert_eq!(setup.service().poll(at(MORNING)).await, Poll::Idle);
     }
 
@@ -951,12 +952,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let startup =
             Service::from_env(environment(&[("EZTRAVEL_DATA", Some(&data_folder(&dir)))])).unwrap();
+        // A month from now, whatever the day the test runs.
+        let day = Timestamp::now().in_tz("Europe/Paris").unwrap().date() + jiff::ToSpan::days(30);
         let request = axum::http::Request::builder()
             .method("PUT")
-            .uri("/settings")
+            .uri("/calendar")
             .header("authorization", format!("Bearer {APP_KEY}"))
             .header("content-type", "application/json")
-            .body(axum::body::Body::from(r#"{"away_through":"2026-11-03"}"#))
+            .body(axum::body::Body::from(format!(
+                r#"{{"date":"{day}","kind":"away"}}"#
+            )))
             .unwrap();
         let response = tower::ServiceExt::oneshot(startup.api, request)
             .await
@@ -966,7 +971,7 @@ mod tests {
             startup
                 .service
                 .describe(at(MORNING))
-                .contains("away through 2026-11-03")
+                .contains(", 1 day(s) set,")
         );
     }
 
@@ -996,11 +1001,11 @@ mod tests {
         let startup = Service::from_env(environment(&[])).unwrap();
         assert_eq!(
             startup.service.describe(at(MORNING)),
-            "local time Tuesday 2026-11-03 07:00 CET, watching Some(Outbound), not away, 3 device(s)"
+            "local time Tuesday 2026-11-03 07:00 CET, watching Some(Outbound), 0 day(s) set, 3 device(s)"
         );
         assert_eq!(
             startup.service.describe(at(LATE_MORNING)),
-            "local time Tuesday 2026-11-03 11:00 CET, watching None, not away, 3 device(s)"
+            "local time Tuesday 2026-11-03 11:00 CET, watching None, 0 day(s) set, 3 device(s)"
         );
     }
 

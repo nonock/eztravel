@@ -491,7 +491,10 @@ mod tests {
             Err(Refusal::NotOfficeDay)
         );
         let away = Calendar {
-            away_through: Some(date(2026, 11, 3)),
+            days: std::collections::BTreeMap::from([(
+                date(2026, 11, 3),
+                crate::calendar::Day::Away,
+            )]),
             ..calendar.clone()
         };
         assert_eq!(
