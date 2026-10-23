@@ -22,6 +22,8 @@ import androidx.test.rule.GrantPermissionRule
 import io.github.nonock.eztravel.backend.AppBackend
 import io.github.nonock.eztravel.backend.FakeBackend
 import io.github.nonock.eztravel.notifications.Notifier
+import io.github.nonock.eztravel.notifications.PushToken
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Rule
@@ -40,13 +42,17 @@ class MainActivityTest {
     @get:Rule(order = 1)
     val fakeBackend = object : ExternalResource() {
         private val original = AppBackend.current
+        private val token = PushToken.fetch
 
         override fun before() {
             AppBackend.current = backend
+            // Firebase gives no token without Google's services, as on an emulator.
+            PushToken.fetch = { onToken -> onToken("token-from-firebase") }
         }
 
         override fun after() {
             AppBackend.current = original
+            PushToken.fetch = token
         }
     }
 
@@ -171,5 +177,6 @@ class MainActivityTest {
     fun thePhoneRegistersWithTheBackendAtLaunch() {
         // Firebase gives the token, then the app hands it to the backend.
         compose.waitUntil(timeoutMillis = 15_000) { backend.registered.isNotEmpty() }
+        assertEquals(listOf("token-from-firebase"), backend.registered.distinct())
     }
 }
