@@ -81,7 +81,7 @@ class NotificationHistoryTest {
     @Test
     fun anUnreachableServerIsSaid() {
         show(FakeBackend(failing = true))
-        compose.onNodeWithText(text(R.string.away_unreachable)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.unreachable)).assertIsDisplayed()
     }
 
     @Test
@@ -108,6 +108,6 @@ class NotificationHistoryTest {
     @Test
     fun aGarbledAnswerIsTakenAsAnUnreachableServer() {
         show(FakeBackend(garbled = true))
-        compose.onNodeWithText(text(R.string.away_unreachable)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.unreachable)).assertIsDisplayed()
     }
 }

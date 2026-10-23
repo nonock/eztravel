@@ -97,41 +97,48 @@ class MainActivityTest {
 
     @Test
     fun eachTabOpensItsPageAndBackComesToTheCommute() {
-        tab(R.string.nav_history).performClick()
-        compose.onNodeWithText(text(R.string.history_title)).assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.history_empty)).assertIsDisplayed()
         tab(R.string.nav_alerts).performClick()
         tab(R.string.nav_alerts).assertIsSelected()
         compose.onNodeWithText(text(R.string.alerts_none_at_all)).assertIsDisplayed()
         // The phone's own back gesture comes to the commute, as its tab does.
         back()
         compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
-        tab(R.string.nav_history).performClick()
+        tab(R.string.nav_alerts).performClick()
         tab(R.string.nav_trip).performClick()
         compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
-        tab(R.string.nav_calendar).performClick()
-        tab(R.string.nav_calendar).assertIsSelected()
-        back()
-        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+        // The history and the calendar are behind the gear.
+        tab(R.string.nav_history).assertDoesNotExist()
+        tab(R.string.nav_calendar).assertDoesNotExist()
+    }
+
+    /** Opens a page behind the gear by its entry. */
+    private fun open(label: Int) {
+        compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
+        compose.onNode(hasText(text(label)) and hasClickAction()).performClick()
     }
 
     @Test
-    fun theCalendarTabHoldsTheMonthAndTheTimeAway() {
-        tab(R.string.nav_calendar).performClick()
+    fun theGearOpensTheCalendarTheUsualTrainsAndTheHistory() {
+        compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
+        for (entry in listOf(R.string.nav_calendar, R.string.usual_title, R.string.nav_history)) {
+            compose.onNode(hasText(text(entry)) and hasClickAction()).assertIsDisplayed()
+        }
+        tab(R.string.nav_trip).assertDoesNotExist()
+        compose.onNode(hasText(text(R.string.nav_calendar)) and hasClickAction()).performClick()
         compose.onNodeWithText(monthTitle(YearMonth.now())).assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.away_title)).assertExists()
-        compose.onNodeWithText(text(R.string.away_none)).assertExists()
-    }
-
-    @Test
-    fun theUsualTrainsAreBehindTheGearAndBackLeavesIt() {
-        compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
-        compose.onNodeWithText(text(R.string.usual_title)).assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.away_title)).assertDoesNotExist()
+        // Back comes to the list, then to the commute.
         compose.onNodeWithContentDescription(text(R.string.back)).performClick()
+        compose.onNode(hasText(text(R.string.usual_title)) and hasClickAction()).performClick()
+        compose.onNodeWithText(text(R.string.usual_explained)).assertIsDisplayed()
+        back()
+        compose.onNode(hasText(text(R.string.nav_history)) and hasClickAction()).performClick()
+        compose.onNodeWithText(text(R.string.history_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.history_empty)).assertIsDisplayed()
+        back()
+        back()
         compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
         compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
-        back()
+        compose.onNodeWithContentDescription(text(R.string.back)).performClick()
         compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
     }
 
@@ -145,15 +152,16 @@ class MainActivityTest {
     }
 
     @Test
-    fun pullingEachTabDownReadsItAgain() {
+    fun pullingEachPageDownReadsItAgain() {
         pullDown({ backend.statusReads.get() }, { backend.departuresReads.get() })
         tab(R.string.nav_alerts).performClick()
         pullDown({ backend.alertsReads.get() })
-        tab(R.string.nav_history).performClick()
+        open(R.string.nav_history)
         pullDown({ backend.historyReads.get() })
         // And again: the spinner went away after the last read.
         pullDown({ backend.historyReads.get() })
-        tab(R.string.nav_calendar).performClick()
+        back()
+        compose.onNode(hasText(text(R.string.nav_calendar)) and hasClickAction()).performClick()
         pullDown({ backend.monthReads.size })
     }
 
@@ -162,38 +170,25 @@ class MainActivityTest {
         compose.waitUntil(timeoutMillis = 5_000) { backend.departuresReads.get() > 0 }
         compose.waitForIdle()
         val atLaunch = backend.departuresReads.get()
-        compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
+        open(R.string.usual_title)
         compose.onNode(
             SemanticsMatcher("tapped to choose") {
                 it.config.getOrNull(SemanticsActions.OnClick)?.label == text(R.string.usual_choose_outbound)
             },
         ).performClick()
         compose.onNodeWithText(text(R.string.ok)).performClick()
-        compose.onNodeWithContentDescription(text(R.string.back)).performClick()
+        back()
+        back()
         compose.waitUntil(timeoutMillis = 5_000) { backend.departuresReads.get() > atLaunch }
-    }
-
-    /** Waits for the calendar and the watchdog's look at launch, then counts each from there. */
-    private fun calendarRead(): Pair<Int, Int> {
-        tab(R.string.nav_calendar).performClick()
-        compose.waitUntil(timeoutMillis = 5_000) { backend.monthReads.isNotEmpty() && looks.isNotEmpty() }
-        compose.waitForIdle()
-        return backend.monthReads.size to looks.size
-    }
-
-    @Test
-    fun savingTheTimeAwayReadsTheMonthAgainAndLooksAtTheBackend() {
-        // The time away changes the days, and may move the next watch: the watchdog's next look with it.
-        val (months, looked) = calendarRead()
-        compose.onNodeWithText(text(R.string.away_choose)).performClick()
-        compose.onNodeWithText(text(R.string.ok)).performClick()
-        compose.waitUntil(timeoutMillis = 5_000) { backend.monthReads.size > months && looks.size > looked }
     }
 
     @Test
     fun settingADayLooksAtTheBackendAgain() {
         // A day at the office may come before the next look: it is set again.
-        val (_, looked) = calendarRead()
+        open(R.string.nav_calendar)
+        compose.waitUntil(timeoutMillis = 5_000) { backend.monthReads.isNotEmpty() && looks.isNotEmpty() }
+        compose.waitForIdle()
+        val looked = looks.size
         val today = DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).format(LocalDate.now())
         compose.onNode(hasContentDescription(today, substring = true) and hasClickAction()).performClick()
         compose.onNode(hasText(text(R.string.calendar_away)) and hasClickAction()).performClick()

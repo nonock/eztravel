@@ -9,9 +9,11 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -73,6 +75,13 @@ class CalendarPageTest {
     /** An entry of a day's menu. */
     private fun choice(id: Int) = compose.onNode(hasText(text(id)) and hasClickAction())
 
+    /** A day of the date picker, named as the picker writes it in the phone's language. */
+    private fun pickerDay(date: LocalDate) {
+        val pattern = android.text.format.DateFormat.getBestDateTimePattern(java.util.Locale.getDefault(), "yMMMMEEEEd")
+        val name = DateTimeFormatter.ofPattern(pattern).format(date)
+        compose.onNode(hasText(name, ignoreCase = true) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
+    }
+
     @Test
     fun eachDayOfTheMonthSaysWhatItIs() {
         val backend = FakeBackend(plan = { if (it == day(11)) CalendarDay(it, Kind.OFF, Why.HOLIDAY) else plannedWeekdays(it) })
@@ -116,12 +125,12 @@ class CalendarPageTest {
         choice(R.string.calendar_as_planned).assertDoesNotExist()
         choice(R.string.calendar_office).performClick()
         waitForCell(day(5), R.string.calendar_office, set = true)
-        assertEquals(listOf(day(5) to Kind.OFFICE), backend.daysSet.toList())
+        assertEquals(listOf(Triple(day(5), day(5), Kind.OFFICE)), backend.daysSet.toList())
         assertEquals(1, saves.get())
         cell(day(5), R.string.calendar_office, set = true).performClick()
         choice(R.string.calendar_as_planned).performClick()
         waitForCell(day(5), R.string.calendar_remote)
-        assertEquals(day(5) to null, backend.daysSet.last())
+        assertEquals(Triple(day(5), day(5), null), backend.daysSet.last())
         assertEquals(2, saves.get())
     }
 
@@ -132,7 +141,46 @@ class CalendarPageTest {
         cell(day(4), R.string.calendar_office).performClick()
         choice(R.string.calendar_away).performClick()
         waitForCell(day(4), R.string.calendar_away, set = true)
-        assertEquals(listOf(day(4) to Kind.AWAY), backend.daysSet.toList())
+        assertEquals(listOf(Triple(day(4), day(4), Kind.AWAY)), backend.daysSet.toList())
+    }
+
+    @Test
+    fun daysOffAreSetThroughADayChosen() {
+        val backend = FakeBackend()
+        show(backend)
+        cell(day(5), R.string.calendar_remote).performClick()
+        choice(R.string.calendar_away_until).performClick()
+        compose.onNodeWithText(text(R.string.calendar_away_until_title)).assertIsDisplayed()
+        pickerDay(day(12))
+        compose.onNodeWithText(text(R.string.ok)).performClick()
+        waitForCell(day(12), R.string.calendar_away, set = true)
+        assertEquals(listOf(Triple(day(5), day(12), Kind.AWAY)), backend.daysSet.toList())
+        // Every day between, the weekend too.
+        for (date in listOf(day(5), day(7), day(9))) cell(date, R.string.calendar_away, set = true).assertExists()
+        assertEquals(1, saves.get())
+    }
+
+    @Test
+    fun theLastDayOffIsTheFirstUnlessAnotherIsChosen() {
+        val backend = FakeBackend()
+        show(backend)
+        cell(day(5), R.string.calendar_remote).performClick()
+        choice(R.string.calendar_away_until).performClick()
+        compose.onNodeWithText(text(R.string.ok)).performClick()
+        waitForCell(day(5), R.string.calendar_away, set = true)
+        assertEquals(listOf(Triple(day(5), day(5), Kind.AWAY)), backend.daysSet.toList())
+    }
+
+    @Test
+    fun theLastDayOffCanBeLeftUnchosen() {
+        val backend = FakeBackend()
+        show(backend)
+        cell(day(5), R.string.calendar_remote).performClick()
+        choice(R.string.calendar_away_until).performClick()
+        compose.onNodeWithText(text(R.string.cancel)).performClick()
+        compose.onNodeWithText(text(R.string.calendar_away_until_title)).assertDoesNotExist()
+        compose.waitForIdle()
+        assertTrue(backend.daysSet.isEmpty())
     }
 
     @Test
@@ -175,11 +223,11 @@ class CalendarPageTest {
         backend.monthGate = gate
         compose.onNodeWithContentDescription(text(R.string.calendar_next)).performClick()
         compose.onNodeWithText(monthTitle(YearMonth.of(2026, 12))).assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.away_loading)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.loading)).assertIsDisplayed()
         cell(day(5), R.string.calendar_remote).assertDoesNotExist()
         gate.complete(Unit)
         waitForCell(LocalDate.of(2026, 12, 3), R.string.calendar_remote)
-        compose.onNodeWithText(text(R.string.away_loading)).assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.loading)).assertDoesNotExist()
     }
 
     @Test

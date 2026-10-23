@@ -102,7 +102,7 @@ fun AlertsPage(
 
     Column(modifier) {
         when (val current = read) {
-            Read.Loading -> Text(stringResource(R.string.away_loading))
+            Read.Loading -> Text(stringResource(R.string.loading))
             Read.Unreadable -> Text(stringResource(R.string.alerts_unavailable), color = MaterialTheme.colorScheme.error)
             is Read.Known -> {
                 if (current.lines.all { it.alerts.isEmpty() }) {

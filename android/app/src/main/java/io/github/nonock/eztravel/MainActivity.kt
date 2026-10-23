@@ -20,12 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.automirrored.outlined.List
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Warning
@@ -63,7 +59,8 @@ import io.github.nonock.eztravel.home.NextDepartures
 import io.github.nonock.eztravel.home.NotificationHistory
 import io.github.nonock.eztravel.notifications.Notifier
 import io.github.nonock.eztravel.notifications.PushToken
-import io.github.nonock.eztravel.settings.AwaySetting
+import io.github.nonock.eztravel.settings.SettingsMenu
+import io.github.nonock.eztravel.settings.SettingsPage
 import io.github.nonock.eztravel.settings.UsualTrainSetting
 import io.github.nonock.eztravel.watchdog.Watchdog
 import io.github.nonock.eztravel.ui.theme.EztravelTheme
@@ -104,22 +101,23 @@ class MainActivity : ComponentActivity() {
 enum class Tab(@StringRes val label: Int, @StringRes val title: Int, val icon: ImageVector, val selected: ImageVector) {
     TRIP(R.string.nav_trip, R.string.app_name, Icons.Outlined.Home, Icons.Filled.Home),
     ALERTS(R.string.nav_alerts, R.string.nav_alerts, Icons.Outlined.Warning, Icons.Filled.Warning),
-    HISTORY(R.string.nav_history, R.string.history_title, Icons.AutoMirrored.Outlined.List, Icons.AutoMirrored.Filled.List),
-    CALENDAR(R.string.nav_calendar, R.string.nav_calendar, Icons.Outlined.DateRange, Icons.Filled.DateRange),
 }
 
 /**
- * The commute, the lines' alerts, the history of notifications and the
- * calendar with the time away, one tab each, read again when pulled down;
- * the usual trains behind the gear. Back leaves the settings, then goes back
- * to the commute.
+ * The commute and the lines' alerts, one tab each; behind the gear, a list
+ * of the calendar, the usual trains and the history of notifications, each
+ * its own page. Pages are read again when pulled down, but for the list and
+ * the usual trains. Back leaves a page for the list, the list for the tabs,
+ * then goes back to the commute.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App() {
     var tab by rememberSaveable { mutableStateOf(Tab.TRIP) }
+    // Behind the gear: the list, then the page opened from it.
     var settings by rememberSaveable { mutableStateOf(false) }
-    // Read again when pulled down, and after the time away changes: it moves the next watch.
+    var opened by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
+    // Read again when pulled down, and after the days change: they move the next watch.
     var refresh by remember { mutableIntStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
     val read = { refreshing = false }
@@ -130,17 +128,27 @@ fun App() {
         refresh++
         scope.launch(Dispatchers.IO) { Watchdog.run(context.applicationContext, notify = false) }
     }
+    val leave = {
+        if (opened != null) opened = null else settings = false
+    }
     BackHandler(enabled = settings || tab != Tab.TRIP) {
-        if (settings) settings = false else tab = Tab.TRIP
+        if (settings) leave() else tab = Tab.TRIP
     }
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(if (settings) R.string.settings_title else tab.title)) },
+                title = {
+                    val title = when {
+                        opened != null -> opened!!.title
+                        settings -> R.string.settings_title
+                        else -> tab.title
+                    }
+                    Text(stringResource(title))
+                },
                 navigationIcon = {
                     if (settings) {
-                        IconButton(onClick = { settings = false }) {
+                        IconButton(onClick = leave) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                         }
                     }
@@ -180,25 +188,24 @@ fun App() {
                     .verticalScroll(rememberScrollState()),
             ) {
                 when {
+                    opened == SettingsPage.CALENDAR -> CalendarPage(backend, refresh = refresh, onRead = read, onSaved = daysSaved)
+                    opened == SettingsPage.USUAL_TRAINS -> UsualTrainSetting(backend, onSaved = { refresh++ })
+                    opened == SettingsPage.HISTORY -> NotificationHistory(backend, refresh = refresh, onRead = read)
                     settings -> {
-                        if (!backend.configured) Text(stringResource(R.string.away_not_configured))
-                        UsualTrainSetting(backend, onSaved = { refresh++ })
+                        if (!backend.configured) Text(stringResource(R.string.not_configured))
+                        SettingsMenu(onOpen = { opened = it })
                     }
                     tab == Tab.TRIP -> {
                         CommuteStatus(backend, refresh = refresh)
                         NextDepartures(backend, Modifier.padding(top = 16.dp), refresh = refresh, onRead = read)
                     }
-                    tab == Tab.ALERTS -> AlertsPage(backend, refresh = refresh, onRead = read)
-                    tab == Tab.HISTORY -> NotificationHistory(backend, refresh = refresh, onRead = read)
-                    else -> {
-                        CalendarPage(backend, refresh = refresh, onRead = read, onSaved = daysSaved)
-                        AwaySetting(backend, Modifier.padding(top = 24.dp), onSaved = daysSaved)
-                    }
+                    else -> AlertsPage(backend, refresh = refresh, onRead = read)
                 }
             }
         }
-        // Without a server, nothing would be read again.
-        if (settings || !backend.configured) {
+        // Without a server, nothing would be read again; nor is the list, nor the usual trains.
+        val readAgain = !settings || opened == SettingsPage.CALENDAR || opened == SettingsPage.HISTORY
+        if (!readAgain || !backend.configured) {
             Box(Modifier.padding(padding)) { page() }
         } else {
             PullToRefreshBox(

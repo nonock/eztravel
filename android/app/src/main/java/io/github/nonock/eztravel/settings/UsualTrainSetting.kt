@@ -54,7 +54,7 @@ private sealed interface Usual {
 /**
  * The usual train of each way, by its time: on office days, the reminder to
  * leave is for the first train from then. `onSaved` follows each change saved.
- * A build without a server shows nothing: the time away says why.
+ * A build without a server shows nothing: the settings say why.
  */
 @Composable
 fun UsualTrainSetting(backend: Backend, modifier: Modifier = Modifier, onSaved: () -> Unit = {}) {
@@ -85,11 +85,9 @@ fun UsualTrainSetting(backend: Backend, modifier: Modifier = Modifier, onSaved: 
     }
 
     Column(modifier) {
-        Text(stringResource(R.string.usual_title), style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(4.dp))
         Text(stringResource(R.string.usual_explained), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         when (val current = usual) {
-            Usual.Loading -> Text(stringResource(R.string.away_loading), modifier = Modifier.padding(top = 8.dp))
+            Usual.Loading -> Text(stringResource(R.string.loading), modifier = Modifier.padding(top = 8.dp))
             Usual.Unreachable -> Text(stringResource(R.string.usual_unreachable), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
             is Usual.Known -> {
                 for (direction in Direction.entries) {

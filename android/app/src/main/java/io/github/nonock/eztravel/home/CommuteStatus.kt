@@ -97,7 +97,7 @@ fun CommuteStatus(backend: Backend, refresh: Int, modifier: Modifier = Modifier,
             )
             Spacer(Modifier.height(8.dp))
             when (val current = seen) {
-                Seen.Loading -> Text(stringResource(R.string.away_loading))
+                Seen.Loading -> Text(stringResource(R.string.loading))
                 Seen.Unreachable -> {
                     HeadlineRow(Icons.Filled.Warning, MaterialTheme.colorScheme.error, stringResource(R.string.status_headline_unreachable))
                     Text(stringResource(R.string.status_unreachable), color = MaterialTheme.colorScheme.error)

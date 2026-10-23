@@ -163,6 +163,6 @@ class UsualTrainSettingTest {
     fun aBuildWithoutServerShowsNoUsualTrain() {
         show(FakeBackend(configured = false))
         compose.waitForIdle()
-        compose.onNodeWithText(text(R.string.usual_title)).assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.usual_explained)).assertDoesNotExist()
     }
 }

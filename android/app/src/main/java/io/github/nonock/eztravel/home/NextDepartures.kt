@@ -138,7 +138,7 @@ fun NextDepartures(
         )
         when {
             unreadable -> Text(stringResource(R.string.departures_unavailable), color = MaterialTheme.colorScheme.error)
-            current == null -> Text(stringResource(R.string.away_loading))
+            current == null -> Text(stringResource(R.string.loading))
             else -> {
                 val reminded = current.reminded
                 for (leg in current.legs) {

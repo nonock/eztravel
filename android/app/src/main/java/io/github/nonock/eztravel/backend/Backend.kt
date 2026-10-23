@@ -18,11 +18,6 @@ interface Backend {
     /** Blocking: call it off the main thread. */
     fun register(token: String)
 
-    /** The last day away from the office, included, if any. */
-    suspend fun awayThrough(): LocalDate?
-
-    suspend fun setAwayThrough(date: LocalDate?)
-
     /** The usual train of each way. */
     suspend fun usualTrains(): UsualTrains
 
@@ -33,10 +28,11 @@ interface Backend {
     suspend fun month(month: YearMonth): List<CalendarDay>
 
     /**
-     * Sets [date] to [kind], office, remote or away, or back as planned with
-     * null: null once saved, or why the backend refuses it.
+     * Sets each day from [first] through [last] to [kind], office, remote or
+     * away, or back as planned with null: null once saved, or why the backend
+     * refuses it.
      */
-    suspend fun setDay(date: LocalDate, kind: CalendarDay.Kind?): DayRefusal?
+    suspend fun setDays(first: LocalDate, last: LocalDate, kind: CalendarDay.Kind?): DayRefusal?
 
     /** What the backend sees: the lines being watched and whether checks work. */
     suspend fun status(): Status
@@ -68,17 +64,6 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
         request("POST", "/devices", JSONObject().put("token", token))
     }
 
-    override suspend fun awayThrough(): LocalDate? = withContext(Dispatchers.IO) {
-        val settings = JSONObject(request("GET", "/settings", null))
-        // Android's org.json may read a null as the text "null": check for it first.
-        if (settings.isNull("away_through")) null else LocalDate.parse(settings.getString("away_through"))
-    }
-
-    override suspend fun setAwayThrough(date: LocalDate?) = withContext(Dispatchers.IO) {
-        request("PUT", "/settings", JSONObject().put("away_through", date?.toString() ?: JSONObject.NULL))
-        Unit
-    }
-
     override suspend fun usualTrains(): UsualTrains = withContext(Dispatchers.IO) {
         UsualTrains.parse(request("GET", "/settings", null))
     }
@@ -92,9 +77,11 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
         CalendarDay.parse(request("GET", "/calendar?month=$month", null))
     }
 
-    override suspend fun setDay(date: LocalDate, kind: CalendarDay.Kind?): DayRefusal? = withContext(Dispatchers.IO) {
-        val day = JSONObject().put("date", date.toString()).put("kind", kind?.name?.lowercase() ?: JSONObject.NULL)
-        refusable("PUT", "/calendar", day, DayRefusal::parse)
+    override suspend fun setDays(first: LocalDate, last: LocalDate, kind: CalendarDay.Kind?): DayRefusal? = withContext(Dispatchers.IO) {
+        val days = JSONObject().put("date", first.toString()).put("kind", kind?.name?.lowercase() ?: JSONObject.NULL)
+        // A single day without it, as the first backend with the calendar takes it.
+        if (last != first) days.put("through", last.toString())
+        refusable("PUT", "/calendar", days, DayRefusal::parse)
     }
 
     override suspend fun status(): Status = withContext(Dispatchers.IO) {

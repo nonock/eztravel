@@ -18,7 +18,7 @@ class CalendarDayTest {
     fun readsEachDayOfTheMonthWithWhatItIsAndWhy() {
         val days = CalendarDay.parse(fixture)
         assertEquals((1..30).map(::day), days.map { it.date })
-        assertEquals(CalendarDay(day(1), Kind.AWAY, Why.AWAY), days[0])
+        assertEquals(CalendarDay(day(1), Kind.AWAY, Why.SET), days[0])
         assertEquals(CalendarDay(day(3), Kind.OFFICE, Why.CYCLE), days[2])
         assertEquals(CalendarDay(day(4), Kind.REMOTE, Why.CYCLE), days[3])
         assertEquals(CalendarDay(day(5), Kind.REMOTE, Why.SET), days[4])
@@ -30,8 +30,12 @@ class CalendarDayTest {
     @Test
     fun valuesFromANewerBackendFallBackSafely() {
         val json = JSONObject(fixture)
-        // A kind it does not know is not watched; a reason it does not know is the plan.
+        // A kind it does not know is not watched; a reason it does not know is the plan,
+        // as the time away the first backend with the calendar gave.
         json.getJSONArray("days").getJSONObject(2).put("kind", "elsewhere").put("why", "strike").put("school", true)
-        assertEquals(CalendarDay(day(3), Kind.OFF, Why.CYCLE), CalendarDay.parse(json.toString())[2])
+        json.getJSONArray("days").getJSONObject(3).put("why", "away")
+        val days = CalendarDay.parse(json.toString())
+        assertEquals(CalendarDay(day(3), Kind.OFF, Why.CYCLE), days[2])
+        assertEquals(Why.CYCLE, days[3].why)
     }
 }
