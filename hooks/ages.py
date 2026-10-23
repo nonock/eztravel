@@ -2,9 +2,9 @@
 
     python hooks/ages.py <base> [<head>]
 
-Looks at the crates of backend/Cargo.lock and the versioned artifacts and
-plugins of android/gradle/libs.versions.toml that changed from <base> to <head>
-(HEAD by default). A version newly published may be a compromised one, pulled
+Looks at the crates of backend/Cargo.lock, the versioned artifacts and plugins
+of android/gradle/libs.versions.toml and the Gradle version of its wrapper that
+changed from <base> to <head> (HEAD by default). A version newly published may be a compromised one, pulled
 days later: it waits two weeks. It passes at once when the version it replaces
 has a vulnerability it no longer has (OSV.dev), or when hooks/fresh-allowed.txt
 lists it with its advisory: "<name> <version> <advisory> [why]".
@@ -55,6 +55,20 @@ def artifacts(catalog_text):
         if version_of(plugin):
             found.add((f"{plugin['id']}:{plugin['id']}.gradle.plugin", version_of(plugin)))
     return found
+
+
+def wrapper(properties_text):
+    """("gradle", version) of the Gradle wrapper, from its distribution's address."""
+    found = re.search(r"distributions/gradle-([0-9][^-/]*)-(?:bin|all)\.zip", properties_text)
+    return {("gradle", found.group(1))} if found else set()
+
+
+def gradle_build_time(versions, version):
+    """When `version` was built, from services.gradle.org's list of versions."""
+    for release in versions:
+        if release.get("version") == version:
+            return datetime.datetime.strptime(release["buildTime"], "%Y%m%d%H%M%S%z")
+    return None
 
 
 def allowed(text):
@@ -130,6 +144,21 @@ def artifact_published(coordinate, version):
     return None
 
 
+def gradle_published(name, version):
+    request = urllib.request.Request("https://services.gradle.org/versions/all")
+    request.add_header("User-Agent", USER_AGENT)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return gradle_build_time(json.load(response), version)
+    except (urllib.error.URLError, ValueError):
+        return None
+
+
+def none_known(name, version):
+    """Gradle's own advisories are not looked up: a fresh Gradle needs a line of fresh-allowed.txt."""
+    return set()
+
+
 def vulnerabilities_in(ecosystem):
     def look_up(name, version):
         query = json.dumps({"version": version, "package": {"name": name, "ecosystem": ecosystem}}).encode()
@@ -162,6 +191,7 @@ def main(arguments):
     checks = [
         ("backend/Cargo.lock", crates, crate_published, vulnerabilities_in("crates.io")),
         ("android/gradle/libs.versions.toml", artifacts, artifact_published, vulnerabilities_in("Maven")),
+        ("android/gradle/wrapper/gradle-wrapper.properties", wrapper, gradle_published, none_known),
     ]
     refused = 0
     for path, read, published, vulnerabilities in checks:

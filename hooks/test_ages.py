@@ -70,6 +70,22 @@ class Reading(unittest.TestCase):
             },
         )
 
+    def test_the_gradle_version_is_read_from_the_wrapper(self):
+        text = "distributionBase=GRADLE_USER_HOME\ndistributionUrl=https\\://services.gradle.org/distributions/gradle-9.8.1-bin.zip\n"
+        self.assertEqual(ages.wrapper(text), {("gradle", "9.8.1")})
+        self.assertEqual(ages.wrapper(""), set())
+
+    def test_a_gradle_release_is_dated_by_its_build(self):
+        versions = [
+            {"version": "9.8.1", "buildTime": "20261007165746+0000"},
+            {"version": "9.8.0", "buildTime": "20260924134000+0000"},
+        ]
+        self.assertEqual(
+            ages.gradle_build_time(versions, "9.8.1"),
+            datetime.datetime(2026, 10, 7, 16, 57, 46, tzinfo=datetime.timezone.utc),
+        )
+        self.assertIsNone(ages.gradle_build_time(versions, "9.9.0"))
+
     def test_allowed_versions_need_an_advisory(self):
         text = "# comment\nrustls-webpki 0.103.16 RUSTSEC-2026-0382 certificates\nlonely 1.0.0\n\n"
         self.assertEqual(ages.allowed(text), {("rustls-webpki", "0.103.16"): "RUSTSEC-2026-0382"})
