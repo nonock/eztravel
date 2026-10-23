@@ -1,7 +1,6 @@
-//! The API the app calls: register the phone, read and set the time away,
-//! the days of the calendar and the usual train of each way, see what the
-//! backend sees, the next departures, and pick one of them for the reminder
-//! to leave.
+//! The API the app calls: register the phone, read and set the days of the
+//! calendar and the usual train of each way, see what the backend sees, the
+//! next departures, and pick one of them for the reminder to leave.
 //!
 //! Every request carries the app key (`Authorization: Bearer …`), compiled
 //! into the user's own build of the app and kept out of the repository.
@@ -36,18 +35,9 @@ const MAX_TOKEN_LENGTH: usize = 4096;
 /// Journeys are named in a few dozen characters.
 const MAX_JOURNEY_LENGTH: usize = 256;
 
-#[derive(Debug, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Settings {
-    /// Last day away from the office, included. Required, but may be null.
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub away_through: Option<Date>,
-}
-
 /// `GET /settings`, in the shape fixed by `fixtures/api/settings.json`.
 #[derive(Serialize)]
 struct SettingsView {
-    away_through: Option<Date>,
     usual_trains: UsualTrains,
 }
 
@@ -104,7 +94,11 @@ struct MonthView {
 #[serde(deny_unknown_fields)]
 struct SetDay {
     date: Date,
-    /// What the day is set to. Required, but null puts it back as planned.
+    /// The last day set the same, included; without it, `date` only, as the
+    /// first app with the calendar sends it.
+    #[serde(default)]
+    through: Option<Date>,
+    /// What the days are set to. Required, but null puts them back as planned.
     #[serde(deserialize_with = "Option::deserialize")]
     kind: Option<Day>,
 }
@@ -186,7 +180,7 @@ pub fn router(sources: Sources, key: String) -> Router {
     } = sources;
     Router::new()
         .route("/devices", post(register))
-        .route("/settings", get(settings).put(set_settings))
+        .route("/settings", get(settings))
         .route("/status", get(status_now))
         .route("/history", get(sent))
         .route("/departures", get(next_departures))
@@ -231,10 +225,8 @@ async fn register(State(store): State<Arc<Store>>, Json(device): Json<Device>) -
 }
 
 async fn settings(State(store): State<Arc<Store>>) -> Json<SettingsView> {
-    let profile = store.profile();
     Json(SettingsView {
-        away_through: profile.away_through,
-        usual_trains: profile.usual,
+        usual_trains: store.profile().usual,
     })
 }
 
@@ -245,7 +237,7 @@ async fn status_now(
     State(schedule): State<Arc<Schedule>>,
 ) -> Json<View> {
     let now = Timestamp::now();
-    // From the time away as it is now, not as of the last poll: the app reads this right after a change.
+    // From the days as set now, not as of the last poll: the app reads this right after a change.
     let next = schedule.next_window(now, &store.profile());
     Json(
         status
@@ -411,12 +403,13 @@ async fn put_day(
     set_day(&store, &schedule, today, request)
 }
 
-/// Sets a day from the app, or puts it back as planned.
+/// Sets a day from the app, or several in a row, or puts them back as planned.
 fn set_day(store: &Store, schedule: &Schedule, today: Date, request: SetDay) -> Response {
     let mut refused = None;
+    let last = request.through.unwrap_or(request.date);
     store.update(|profile| {
         refused = profile
-            .set_day(&schedule.calendar, today, request.date, request.kind)
+            .set_days(&schedule.calendar, today, request.date, last, request.kind)
             .err();
     });
     match refused {
@@ -425,14 +418,6 @@ fn set_day(store: &Store, schedule: &Schedule, today: Date, request: SetDay) -> 
             (StatusCode::UNPROCESSABLE_ENTITY, Json(Refused { refused })).into_response()
         }
     }
-}
-
-async fn set_settings(
-    State(store): State<Arc<Store>>,
-    Json(settings): Json<Settings>,
-) -> StatusCode {
-    store.update(|profile| profile.away_through = settings.away_through);
-    StatusCode::NO_CONTENT
 }
 
 #[cfg(test)]
@@ -539,7 +524,6 @@ mod tests {
         for (method, uri, body) in [
             (Method::POST, "/devices", Some(r#"{"token":"t"}"#)),
             (Method::GET, "/settings", None),
-            (Method::PUT, "/settings", Some(r#"{"away_through":null}"#)),
             (Method::GET, "/status", None),
             (Method::GET, "/history", None),
             (Method::GET, "/departures", None),
@@ -630,32 +614,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_time_away_is_read_set_and_cleared() {
+    async fn the_settings_are_read_only() {
         let api = Api::new();
         assert_eq!(
             api.authorized(Method::GET, "/settings", None).await,
             (
                 StatusCode::OK,
-                r#"{"away_through":null,"usual_trains":{"outbound":null,"inbound":null}}"#.into()
+                r#"{"usual_trains":{"outbound":null,"inbound":null}}"#.into()
             )
         );
-        let set = api
-            .authorized(
+        // The time away is given up for days set one by one.
+        assert_eq!(
+            api.authorized(
                 Method::PUT,
                 "/settings",
-                Some(r#"{"away_through":"2026-12-24"}"#),
+                Some(r#"{"away_through":"2026-12-24"}"#)
             )
-            .await;
-        assert_eq!(set.0, StatusCode::NO_CONTENT);
-        assert_eq!(api.store.profile().away_through, Some(date(2026, 12, 24)));
-        let (_, body) = api.authorized(Method::GET, "/settings", None).await;
-        assert!(
-            body.starts_with(r#"{"away_through":"2026-12-24","#),
-            "{body}"
+            .await
+            .0,
+            StatusCode::METHOD_NOT_ALLOWED
         );
-        api.authorized(Method::PUT, "/settings", Some(r#"{"away_through":null}"#))
-            .await;
-        assert_eq!(api.store.profile().away_through, None);
     }
 
     #[tokio::test]
@@ -676,12 +654,6 @@ mod tests {
         );
         let fixture: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        api.authorized(
-            Method::PUT,
-            "/settings",
-            Some(r#"{"away_through":"2026-12-24"}"#),
-        )
-        .await;
         let (_, body) = api.authorized(Method::GET, "/settings", None).await;
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&body).unwrap(),
@@ -774,20 +746,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_next_watch_follows_the_time_away_at_once() {
+    async fn the_next_watch_follows_a_day_set_at_once() {
         // The app reads the status right after saving: it must already show the change.
         let api = Api::new();
         let before = next_watch(&api).await;
-        let away = format!(r#"{{"away_through":"{}"}}"#, before.date());
-        api.authorized(Method::PUT, "/settings", Some(&away)).await;
-        let after = next_watch(&api).await;
-        assert!(after.date() > before.date(), "{before} then {after}");
-    }
-
-    #[tokio::test]
-    async fn the_next_watch_follows_a_day_set_at_once() {
-        let api = Api::new();
-        let before = next_watch(&api).await;
+        // Without `through`, as the first app with the calendar sends it: that day only.
         let home = format!(r#"{{"date":"{}","kind":"remote"}}"#, before.date());
         assert_eq!(
             api.authorized(Method::PUT, "/calendar", Some(&home))
@@ -803,8 +766,9 @@ mod tests {
     async fn a_month_answers_as_in_the_fixture() {
         let api = Api::new();
         api.store.update(|profile| {
-            profile.away_through = Some(date(2026, 11, 2));
             profile.days = BTreeMap::from([
+                (date(2026, 11, 1), Day::Away),
+                (date(2026, 11, 2), Day::Away),
                 (date(2026, 11, 5), Day::Remote),
                 (date(2026, 11, 12), Day::Office),
                 (date(2026, 11, 20), Day::Away),
@@ -861,6 +825,7 @@ mod tests {
                 today,
                 SetDay {
                     date: date(2026, 11, 5),
+                    through: None,
                     kind,
                 },
             )
@@ -884,6 +849,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn days_off_are_set_through_a_day() {
+        let api = Api::new();
+        let schedule = Config::parse(include_str!("../config.example.toml"))
+            .unwrap()
+            .schedule();
+        let set = |from, through| {
+            set_day(
+                &api.store,
+                &schedule,
+                date(2026, 11, 2),
+                SetDay {
+                    date: date(2026, 11, from),
+                    through: Some(date(2026, 11, through)),
+                    kind: Some(Day::Away),
+                },
+            )
+        };
+        assert_eq!(set(5, 9).status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            api.store.profile().days,
+            (5..=9)
+                .map(|day| (date(2026, 11, day), Day::Away))
+                .collect()
+        );
+        let backwards = set(9, 5);
+        assert_eq!(backwards.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = backwards.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body, r#"{"refused":"backwards"}"#);
+    }
+
+    #[tokio::test]
     async fn a_day_gone_by_or_too_far_ahead_is_refused() {
         let api = Api::new();
         let put = |body: &'static str| api.authorized(Method::PUT, "/calendar", Some(body));
@@ -902,6 +898,7 @@ mod tests {
         );
         for body in [
             r#"{"date":"2026-11-05","kind":"off"}"#,
+            r#"{"date":"2026-11-05","through":"soon","kind":null}"#,
             r#"{"date":"2026-11-05"}"#,
             r#"{"kind":null}"#,
             r#"{"date":"2026-13-01","kind":null}"#,
@@ -1040,8 +1037,9 @@ mod tests {
             )
         );
         // Away that day: refused, and the pick stays as it was.
-        api.store
-            .update(|profile| profile.away_through = Some(date(2026, 11, 3)));
+        api.store.update(|profile| {
+            profile.days = BTreeMap::from([(date(2026, 11, 3), Day::Away)]);
+        });
         let response = pick(
             &api.store,
             &departures,
@@ -1054,7 +1052,6 @@ mod tests {
         assert_eq!(api.store.profile().pick, Some(picked.clone()));
         // At home that day, set from the app: refused too.
         api.store.update(|profile| {
-            profile.away_through = None;
             profile.days = BTreeMap::from([(date(2026, 11, 3), Day::Remote)]);
         });
         let response = pick(
@@ -1089,19 +1086,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn malformed_settings_are_refused() {
+    async fn other_methods_and_paths_are_refused() {
         let api = Api::new();
-        for body in [
-            r#"{"away_through":"2026-13-40"}"#,
-            r#"{"away_through":null,"other":1}"#,
-            r#"{}"#,
-        ] {
-            assert_eq!(
-                api.authorized(Method::PUT, "/settings", Some(body)).await.0,
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "{body}"
-            );
-        }
         assert_eq!(
             api.authorized(Method::DELETE, "/settings", None).await.0,
             StatusCode::METHOD_NOT_ALLOWED

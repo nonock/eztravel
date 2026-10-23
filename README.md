@@ -37,7 +37,7 @@ A line's notification goes away by itself when its window ends. Every notificati
 |---|---|---|
 | Backend | Polls PRIM during the watch windows, applies the office-day calendar, places disruptions on the commute's branches, decides what to notify, keeps state and history | Rust (tokio, axum, reqwest, jiff), JSON files on a volume, fly.io |
 | Push | Delivers notifications to the phone | Firebase Cloud Messaging (HTTP v1) |
-| App | Notifications, home screen, calendar and time away, history | Kotlin, Jetpack Compose |
+| App | Notifications, home screen, calendar, history | Kotlin, Jetpack Compose |
 
 The logic lives in the backend; the app only displays. Two reasons: Android cannot reliably watch a line in the background, and the PRIM key cannot ship inside an app whose code is public. The backend is not an open relay: the app authenticates to it with a key compiled into the user's own build.
 
@@ -105,10 +105,10 @@ All requests carry `Authorization: Bearer <APP_KEY>`.
 | Request | |
 |---|---|
 | `POST /devices` `{"token": "…"}` | Registers the phone's Firebase token |
-| `GET /settings`, `PUT /settings` `{"away_through": "2026-12-24"}` | The last day away, or `null`, and the usual trains: [fixtures/api/README.md](fixtures/api/README.md) |
+| `GET /settings` | The usual trains: [fixtures/api/README.md](fixtures/api/README.md) |
 | `PUT /usual-train` `{"direction": "outbound", "time": "08:07"}` | Sets the usual train of a way, or `null` for none: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /calendar?month=2026-11` | Each day of the month, what it is and why: [fixtures/api/README.md](fixtures/api/README.md) |
-| `PUT /calendar` `{"date": "2026-11-05", "kind": "remote"}` | Sets a single day, or `null` to put it back as planned: [fixtures/api/README.md](fixtures/api/README.md) |
+| `PUT /calendar` `{"date": "2026-11-05", "kind": "remote"}` | Sets a day, or every day `through` another, or `null` to put them back as planned: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /status` | What the backend sees: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /history` | What it sent, newest first: [fixtures/api/history.json](fixtures/api/history.json) |
 | `GET /departures` | The next departures on each leg: [fixtures/api/README.md](fixtures/api/README.md) |
@@ -132,7 +132,7 @@ Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md
 2. **Done.** Next departures, cancelled trains, "leave in X min" countdown, notification before departure, and the usual train of each way, set once in the app.
 3. Trust and calendar:
    - when a window opens, the phone checks the backend itself and says so if it does not answer or has stopped checking, since the backend cannot report its own failure;
-   - a month calendar in the app, with office days, remote-work days and time away each in their own color, where a tap sets a single day: office, remote work or day off;
+   - a month calendar in the app, with office days, remote-work days and days off each in their own color, where a tap sets a single day: office, remote work or day off, or days off through a date;
    - school holidays on that calendar, from the French open data: some lines run fewer trains then, and the app says so on those days (what PRIM shows of it is to be checked);
    - each day's trains recorded (delay, cancelled) for the statistics, kept beyond the history;
    - continuous integration on GitHub: backend and app tests, lint.

@@ -95,7 +95,6 @@ mod tests {
                 first_week: vec![Tuesday, Thursday],
                 second_week: vec![Monday, Wednesday, Friday],
                 whit_monday_off: true,
-                away_through: None,
                 days: std::collections::BTreeMap::new(),
             }
         );
@@ -174,14 +173,7 @@ mod tests {
         let field =
             Config::parse(&EXAMPLE.replace("whit_monday_off", "whit_monday_of")).unwrap_err();
         assert!(field.contains("whit_monday_of"), "{field}");
-        // Time away comes from the app only: two sources would contradict each other.
-        let away = EXAMPLE.replace(
-            "whit_monday_off = true",
-            "whit_monday_off = true
-away_through = 2026-12-31",
-        );
-        assert!(Config::parse(&away).unwrap_err().contains("away_through"));
-        // So are the days set one by one.
+        // Days are set from the app only: two sources would contradict each other.
         let days = EXAMPLE.replace(
             "whit_monday_off = true",
             "whit_monday_off = true
@@ -194,7 +186,7 @@ days = { 2026-12-31 = \"office\" }",
         let windows =
             Config::parse(&EXAMPLE.replace("inbound = { start", "evening = { start")).unwrap_err();
         assert!(windows.contains("evening"), "{windows}");
-        // The usual train of each way is set in the app, as the time away is.
+        // The usual train of each way is set in the app, as the days are.
         let leave = format!("{EXAMPLE}\n[leave]\noutbound = \"07:30\"\n");
         assert!(Config::parse(&leave).unwrap_err().contains("leave"));
         // Trains are followed before their window, not after it opens.

@@ -10,7 +10,7 @@ first_week = ["tuesday", "thursday"]
 second_week = ["monday", "wednesday", "friday"]
 # Whit Monday is a public holiday, but many employers make it a working day.
 whit_monday_off = true
-# Time away (holidays, days off) is set in the app.
+# Days off and days changed one by one are set in the app's calendar.
 
 [windows]
 # Optional `trains_from`: trains are followed from then, without notifying,

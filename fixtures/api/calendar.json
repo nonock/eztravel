@@ -1,7 +1,7 @@
 {
   "days": [
-    {"date": "2026-11-01", "kind": "away", "why": "away"},
-    {"date": "2026-11-02", "kind": "away", "why": "away"},
+    {"date": "2026-11-01", "kind": "away", "why": "set"},
+    {"date": "2026-11-02", "kind": "away", "why": "set"},
     {"date": "2026-11-03", "kind": "office", "why": "cycle"},
     {"date": "2026-11-04", "kind": "remote", "why": "cycle"},
     {"date": "2026-11-05", "kind": "remote", "why": "set"},
