@@ -107,6 +107,8 @@ All requests carry `Authorization: Bearer <APP_KEY>`.
 | `POST /devices` `{"token": "…"}` | Registers the phone's Firebase token |
 | `GET /settings`, `PUT /settings` `{"away_through": "2026-12-24"}` | The last day away, or `null`, and the usual trains: [fixtures/api/README.md](fixtures/api/README.md) |
 | `PUT /usual-train` `{"direction": "outbound", "time": "08:07"}` | Sets the usual train of a way, or `null` for none: [fixtures/api/README.md](fixtures/api/README.md) |
+| `GET /calendar?month=2026-11` | Each day of the month, what it is and why: [fixtures/api/README.md](fixtures/api/README.md) |
+| `PUT /calendar` `{"date": "2026-11-05", "kind": "remote"}` | Sets a single day, or `null` to put it back as planned: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /status` | What the backend sees: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /history` | What it sent, newest first: [fixtures/api/history.json](fixtures/api/history.json) |
 | `GET /departures` | The next departures on each leg: [fixtures/api/README.md](fixtures/api/README.md) |
@@ -130,7 +132,7 @@ Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md
 2. **Done.** Next departures, cancelled trains, "leave in X min" countdown, notification before departure, and the usual train of each way, set once in the app.
 3. Trust and calendar:
    - when a window opens, the phone checks the backend itself and says so if it does not answer or has stopped checking, since the backend cannot report its own failure;
-   - a month calendar in the app, with office days, remote-work days and time away each in their own color, where a tap switches a single day;
+   - a month calendar in the app, with office days, remote-work days and time away each in their own color, where a tap sets a single day: office, remote work or day off;
    - school holidays on that calendar, from the French open data: some lines run fewer trains then, and the app says so on those days (what PRIM shows of it is to be checked);
    - each day's trains recorded (delay, cancelled) for the statistics, kept beyond the history;
    - continuous integration on GitHub: backend and app tests, lint.

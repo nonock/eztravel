@@ -1,8 +1,10 @@
 //! Which days and hours the commute is watched.
 //!
 //! Office days follow a two-week cycle, minus French public holidays and time
-//! away. Watch windows are in the user's local time, so the caller passes the
-//! current instant and the time zone.
+//! away, unless a day is set otherwise from the app. Watch windows are in the
+//! user's local time, so the caller passes the current instant and the time zone.
+
+use std::collections::BTreeMap;
 
 use jiff::civil::{Date, Time, Weekday};
 use jiff::tz::TimeZone;
@@ -10,7 +12,10 @@ use jiff::{Timestamp, ToSpan};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// Office days as a two-week cycle, minus public holidays and time away.
+use crate::profile::Profile;
+
+/// Office days as a two-week cycle, minus public holidays and time away, unless
+/// a day is set otherwise.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Calendar {
@@ -26,6 +31,61 @@ pub struct Calendar {
     /// Last day away from the office, included. Set from the app, not from the configuration file.
     #[serde(skip)]
     pub away_through: Option<Date>,
+    /// Days set one by one from the app, before all else.
+    #[serde(skip)]
+    pub days: BTreeMap<Date, Day>,
+}
+
+/// What a day is set to from the app.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Day {
+    Office,
+    Remote,
+    Away,
+}
+
+/// What a day is: only office days are watched.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    Office,
+    /// A weekday away from the office, working from home.
+    Remote,
+    Away,
+    /// A weekend day, or a public holiday.
+    Off,
+}
+
+impl From<Day> for Kind {
+    fn from(day: Day) -> Self {
+        match day {
+            Day::Office => Kind::Office,
+            Day::Remote => Kind::Remote,
+            Day::Away => Kind::Away,
+        }
+    }
+}
+
+/// Why a day is what it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Why {
+    /// The two weeks' cycle.
+    Cycle,
+    Holiday,
+    /// The time away.
+    Away,
+    /// Set from the app.
+    Set,
+}
+
+/// A day of the calendar, in the shape `GET /calendar` gives each.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct DayPlan {
+    pub date: Date,
+    pub kind: Kind,
+    pub why: Why,
 }
 
 fn yes() -> bool {
@@ -79,10 +139,26 @@ pub enum Direction {
 
 impl Calendar {
     pub fn is_office_day(&self, date: Date) -> bool {
-        if self.away_through.is_some_and(|last| date <= last)
-            || is_public_holiday(date, self.whit_monday_off)
-        {
-            return false;
+        self.day(date).kind == Kind::Office
+    }
+
+    /// What `date` is, and why: a day set from the app comes first, then the
+    /// time away, then public holidays, then the cycle.
+    pub fn day(&self, date: Date) -> DayPlan {
+        let (kind, why) = match self.days.get(&date) {
+            Some(day) => (Kind::from(*day), Why::Set),
+            None => self.planned(date),
+        };
+        DayPlan { date, kind, why }
+    }
+
+    /// What `date` would be without a day set from the app.
+    pub fn planned(&self, date: Date) -> (Kind, Why) {
+        if self.away_through.is_some_and(|last| date <= last) {
+            return (Kind::Away, Why::Away);
+        }
+        if is_public_holiday(date, self.whit_monday_off) {
+            return (Kind::Off, Why::Holiday);
         }
         // Count whole weeks from the anchor's Monday. ISO week numbers would not
         // do: a year with 53 weeks puts two odd weeks in a row.
@@ -94,7 +170,14 @@ impl Calendar {
         } else {
             &self.second_week
         };
-        days.contains(&date.weekday())
+        let kind = if days.contains(&date.weekday()) {
+            Kind::Office
+        } else if date.weekday().to_monday_one_offset() <= 5 {
+            Kind::Remote
+        } else {
+            Kind::Off
+        };
+        (kind, Why::Cycle)
     }
 }
 
@@ -192,18 +275,25 @@ pub struct Schedule {
 }
 
 impl Schedule {
-    /// When the next window opens after `now`, with the time away set from the app.
-    pub fn next_window(&self, now: Timestamp, away_through: Option<Date>) -> Option<Timestamp> {
-        let calendar = Calendar {
-            away_through,
-            ..self.calendar.clone()
-        };
-        next_window(now, &self.time_zone, &calendar, &self.windows)
+    /// When the next window opens after `now`, with what is set from the app.
+    pub fn next_window(&self, now: Timestamp, profile: &Profile) -> Option<Timestamp> {
+        next_window(
+            now,
+            &self.time_zone,
+            &profile.calendar(&self.calendar),
+            &self.windows,
+        )
+    }
+
+    /// The local date at `now`.
+    pub fn today(&self, now: Timestamp) -> Date {
+        now.to_zoned(self.time_zone.clone()).date()
     }
 }
 
-/// How far `next_window` looks ahead: no time away lasts longer.
-const LOOKAHEAD_DAYS: i64 = 366;
+/// How far `next_window` looks ahead: no time away lasts longer, and no day
+/// is set further.
+pub const LOOKAHEAD_DAYS: i64 = 366;
 
 /// When the next watch window opens, strictly after `now`.
 pub fn next_window(
@@ -254,6 +344,7 @@ mod tests {
             second_week: vec![Monday, Wednesday, Friday],
             whit_monday_off: true,
             away_through: None,
+            days: BTreeMap::new(),
         }
     }
 
@@ -354,6 +445,72 @@ mod tests {
         assert!(!calendar.is_office_day(date(2026, 11, 3)));
         assert!(!calendar.is_office_day(date(2026, 11, 9)));
         assert!(calendar.is_office_day(date(2026, 11, 13)));
+    }
+
+    #[test]
+    fn each_day_says_what_it_is_and_why() {
+        let calendar = Calendar {
+            away_through: Some(date(2026, 11, 3)),
+            ..calendar()
+        };
+        let day = |day| {
+            let plan = calendar.day(date(2026, 11, day));
+            (plan.kind, plan.why)
+        };
+        // Away through Tuesday 3 November, the Sunday holiday before it included.
+        assert_eq!(day(1), (Kind::Away, Why::Away));
+        assert_eq!(day(3), (Kind::Away, Why::Away));
+        // Wednesday 4 is not in the first week, Thursday 5 is.
+        assert_eq!(day(4), (Kind::Remote, Why::Cycle));
+        assert_eq!(day(5), (Kind::Office, Why::Cycle));
+        // A weekend day, then Wednesday 11 November.
+        assert_eq!(day(7), (Kind::Off, Why::Cycle));
+        assert_eq!(day(11), (Kind::Off, Why::Holiday));
+        assert_eq!(calendar.day(date(2026, 11, 5)).date, date(2026, 11, 5));
+    }
+
+    #[test]
+    fn a_day_set_from_the_app_comes_before_all_else() {
+        let calendar = Calendar {
+            away_through: Some(date(2026, 11, 3)),
+            days: BTreeMap::from([
+                // While away, on an office day, on a remote day, on a holiday.
+                (date(2026, 11, 3), Day::Office),
+                (date(2026, 11, 5), Day::Remote),
+                (date(2026, 11, 6), Day::Away),
+                (date(2026, 11, 11), Day::Office),
+            ]),
+            ..calendar()
+        };
+        let day = |day| {
+            let plan = calendar.day(date(2026, 11, day));
+            (plan.kind, plan.why)
+        };
+        assert_eq!(day(3), (Kind::Office, Why::Set));
+        assert_eq!(day(5), (Kind::Remote, Why::Set));
+        assert_eq!(day(6), (Kind::Away, Why::Set));
+        assert_eq!(day(11), (Kind::Office, Why::Set));
+        // Only office days are watched.
+        for (day, office) in [(2, false), (3, true), (5, false), (6, false), (11, true)] {
+            assert_eq!(calendar.is_office_day(date(2026, 11, day)), office, "{day}");
+        }
+    }
+
+    #[test]
+    fn days_are_written_as_the_api_says() {
+        assert_eq!(serde_json::to_string(&Day::Remote).unwrap(), r#""remote""#);
+        assert_eq!(serde_json::from_str::<Day>(r#""away""#).unwrap(), Day::Away);
+        // A day off is what the calendar says, not something to set.
+        assert!(serde_json::from_str::<Day>(r#""off""#).is_err());
+        let plan = DayPlan {
+            date: date(2026, 11, 11),
+            kind: Kind::Off,
+            why: Why::Holiday,
+        };
+        assert_eq!(
+            serde_json::to_string(&plan).unwrap(),
+            r#"{"date":"2026-11-11","kind":"off","why":"holiday"}"#
+        );
     }
 
     #[test]
@@ -538,6 +695,29 @@ mod tests {
     }
 
     #[test]
+    fn the_next_window_follows_the_days_set() {
+        let (windows, tz) = (windows(), paris());
+        // At the office on Wednesday 4 November, at home on Thursday 5.
+        let calendar = Calendar {
+            days: BTreeMap::from([
+                (date(2026, 11, 4), Day::Office),
+                (date(2026, 11, 5), Day::Remote),
+            ]),
+            ..calendar()
+        };
+        let next = |now| next_window(at(now), &tz, &calendar, &windows);
+        assert_eq!(
+            next("2026-11-03T17:00:00Z"),
+            Some(at("2026-11-04T05:45:00Z"))
+        );
+        // From Wednesday evening, not Thursday: Monday 9.
+        assert_eq!(
+            next("2026-11-04T17:00:00Z"),
+            Some(at("2026-11-09T05:45:00Z"))
+        );
+    }
+
+    #[test]
     fn the_next_window_is_in_local_time_across_the_change_to_winter_time() {
         let (calendar, windows, tz) = (calendar(), windows(), paris());
         // Friday 23 October, in summer time; Monday 26 October, 6:45 in winter time.
@@ -548,7 +728,7 @@ mod tests {
     }
 
     #[test]
-    fn the_schedule_takes_the_time_away_it_is_given() {
+    fn the_schedule_takes_the_days_the_app_set() {
         let schedule = Schedule {
             calendar: calendar(),
             windows: windows(),
@@ -557,13 +737,29 @@ mod tests {
         // From Tuesday 3 November, 18:00 in Paris.
         let evening = at("2026-11-03T17:00:00Z");
         assert_eq!(
-            schedule.next_window(evening, None),
+            schedule.next_window(evening, &Profile::default()),
             Some(at("2026-11-05T05:45:00Z"))
         );
         // Away through Thursday: Monday 9 November.
+        let away = Profile {
+            away_through: Some(date(2026, 11, 5)),
+            ..Profile::default()
+        };
         assert_eq!(
-            schedule.next_window(evening, Some(date(2026, 11, 5))),
+            schedule.next_window(evening, &away),
             Some(at("2026-11-09T05:45:00Z"))
+        );
+        // At home on Thursday too, but at the office on Friday 6.
+        let set = Profile {
+            days: BTreeMap::from([
+                (date(2026, 11, 5), Day::Remote),
+                (date(2026, 11, 6), Day::Office),
+            ]),
+            ..Profile::default()
+        };
+        assert_eq!(
+            schedule.next_window(evening, &set),
+            Some(at("2026-11-06T05:45:00Z"))
         );
     }
 

@@ -17,7 +17,7 @@ use serde::de::DeserializeOwned;
 
 use crate::alerts::{Commute, Notification, State, WatchedLeg, decide};
 use crate::api;
-use crate::calendar::{Calendar, Direction, Phase, phase, watched_direction};
+use crate::calendar::{Direction, Phase, phase, watched_direction};
 use crate::config::Config;
 use crate::departures::{NextDepartures, leg_stops, monitoring_ref, one_way};
 use crate::history::{self, Entry, History};
@@ -199,7 +199,7 @@ impl Service {
         let direction = watched_direction(
             now,
             &time_zone,
-            &self.calendar(&profile.away_through),
+            &profile.calendar(&self.config.calendar),
             &self.config.windows,
         );
         let away = profile.away_through.map_or("not away".to_string(), |last| {
@@ -212,20 +212,12 @@ impl Service {
         )
     }
 
-    /// The configured calendar, with the time away set from the app.
-    fn calendar(&self, away_through: &Option<jiff::civil::Date>) -> Calendar {
-        Calendar {
-            away_through: *away_through,
-            ..self.config.calendar.clone()
-        }
-    }
-
     pub async fn poll(&mut self, now: Timestamp) -> Poll {
         // A copy: no lock is held while PRIM and Firebase are called.
         let profile = self.store.profile();
         let time_zone = self.config.time_zone();
         let local = now.to_zoned(time_zone.clone()).datetime();
-        let calendar = self.calendar(&profile.away_through);
+        let calendar = profile.calendar(&self.config.calendar);
         let followed = phase(now, &time_zone, &calendar, &self.config.windows);
         let direction = match followed {
             Some((direction, Phase::Watching)) => Some(direction),
@@ -847,6 +839,19 @@ mod tests {
         setup
             .store
             .update(|profile| profile.away_through = Some(jiff::civil::date(2026, 11, 3)));
+        assert_eq!(setup.service().poll(at(MORNING)).await, Poll::Idle);
+    }
+
+    #[tokio::test]
+    async fn nothing_is_watched_on_a_day_set_at_home() {
+        let setup = Setup::new().await;
+        setup.prim_answers(200, true, 0).await;
+        setup.store.update(|profile| {
+            profile.days = std::collections::BTreeMap::from([(
+                jiff::civil::date(2026, 11, 3),
+                crate::calendar::Day::Remote,
+            )])
+        });
         assert_eq!(setup.service().poll(at(MORNING)).await, Poll::Idle);
     }
 
