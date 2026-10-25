@@ -1,17 +1,13 @@
 package io.github.nonock.eztravel.home
 
+import io.github.nonock.eztravel.ScreenTest
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.backend.FakeBackend
 import io.github.nonock.eztravel.backend.Status
@@ -23,34 +19,16 @@ import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
 import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import org.junit.Assert.assertEquals
-import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.Duration
 import java.time.Instant
 
 @RunWith(AndroidJUnit4::class)
-class CommuteStatusTest {
-    @get:Rule
-    val compose = createComposeRule()
-
-    private val context = InstrumentationRegistry.getInstrumentation().targetContext
-
-    private fun text(id: Int, vararg args: Any) = context.getString(id, *args)
-
+class CommuteStatusTest : ScreenTest() {
     private var refresh by mutableIntStateOf(0)
 
     private fun show(backend: FakeBackend) = compose.setContent { CommuteStatus(backend, refresh) }
-
-    /** The status is read once the screen is resumed: wait for it. */
-    private fun waitFor(text: String) = waitFor(hasText(text))
-
-    private fun waitFor(matcher: SemanticsMatcher) {
-        compose.waitUntil(timeoutMillis = 5_000) {
-            compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNode(matcher).assertIsDisplayed()
-    }
 
     /** A line's row: its badge names the line, its text says how it runs. */
     private fun row(line: String, state: Int) = hasContentDescription(line) and hasText(text(state))

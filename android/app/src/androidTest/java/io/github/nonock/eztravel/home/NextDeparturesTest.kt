@@ -1,5 +1,6 @@
 package io.github.nonock.eztravel.home
 
+import io.github.nonock.eztravel.ScreenTest
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -11,12 +12,10 @@ import androidx.compose.ui.test.filter
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.backend.Departures
 import io.github.nonock.eztravel.backend.Departures.Departure
@@ -30,21 +29,13 @@ import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
 import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import org.junit.Assert.assertEquals
-import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.Duration
 import java.time.Instant
 
 @RunWith(AndroidJUnit4::class)
-class NextDeparturesTest {
-    @get:Rule
-    val compose = createComposeRule()
-
-    private val context = InstrumentationRegistry.getInstrumentation().targetContext
-
-    private fun text(id: Int, vararg args: Any) = context.getString(id, *args)
-
+class NextDeparturesTest : ScreenTest() {
     private fun at(time: String) = Instant.parse("2026-11-03T${time}Z")
 
     private val now = at("06:50:00")
@@ -53,16 +44,6 @@ class NextDeparturesTest {
     private fun show(backend: FakeBackend) = compose.setContent {
         Column(Modifier.verticalScroll(rememberScrollState())) { NextDepartures(backend, now = { now }) }
     }
-
-    /** The departures are read once the screen is resumed: wait for them. */
-    private fun waitFor(matcher: SemanticsMatcher) {
-        compose.waitUntil(timeoutMillis = 5_000) {
-            compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNode(matcher).assertIsDisplayed()
-    }
-
-    private fun waitFor(text: String) = waitFor(hasText(text))
 
     /** Below the fold: scrolled to, once read. */
     private fun scrolledTo(matcher: SemanticsMatcher) {

@@ -81,7 +81,7 @@ fun NextDepartures(
     refresh: Int = 0,
     onRead: () -> Unit = {},
 ) {
-    // The time away section already says that this build has no server.
+    // The commute tab already says that this build has no server.
     if (!backend.configured) return
     // Null until read, or when it cannot be.
     var departures by remember { mutableStateOf<Departures?>(null) }

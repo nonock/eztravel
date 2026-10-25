@@ -1,5 +1,6 @@
 package io.github.nonock.eztravel.settings
 
+import io.github.nonock.eztravel.ScreenTest
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
@@ -7,7 +8,6 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -22,7 +22,6 @@ import io.github.nonock.eztravel.backend.UsualTrains
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
-import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.LocalTime
@@ -31,14 +30,7 @@ import java.time.format.FormatStyle
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
-class UsualTrainSettingTest {
-    @get:Rule
-    val compose = createComposeRule()
-
-    private val context = InstrumentationRegistry.getInstrumentation().targetContext
-
-    private fun text(id: Int, vararg args: Any) = context.getString(id, *args)
-
+class UsualTrainSettingTest : ScreenTest() {
     private fun clock(hour: Int, minute: Int) = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).format(LocalTime.of(hour, minute))
 
     private val saves = AtomicInteger()
@@ -64,11 +56,6 @@ class UsualTrainSettingTest {
     }
 
     private fun show(backend: FakeBackend) = compose.setContent { UsualTrainSetting(backend, onSaved = { saves.incrementAndGet() }) }
-
-    private fun waitFor(matcher: SemanticsMatcher) {
-        compose.waitUntil(timeoutMillis = 5_000) { compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNode(matcher).assertIsDisplayed()
-    }
 
     /** A way's row, tapped to choose its usual train. */
     private fun way(label: Int) = SemanticsMatcher("tapped to ${text(label)}") {
