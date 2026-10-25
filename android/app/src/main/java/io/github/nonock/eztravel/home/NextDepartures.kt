@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -144,6 +145,7 @@ fun NextDepartures(
                 for (leg in current.legs) {
                     if (leg === reminded) LegDepartures(leg, clock, refused, pick) else LegDepartures(leg, clock)
                 }
+                for (backup in current.backups) BackupRoute(backup, clock)
             }
         }
     }
@@ -247,6 +249,26 @@ private fun Refusal.message() = when (this) {
     Refusal.UNAVAILABLE -> R.string.departures_refused_unavailable
 }
 
+/** A backup needed now: the lines of the way it stands in for, as they run, then its rides. */
+@Composable
+private fun BackupRoute(backup: Departures.Backup, now: Instant) {
+    Text(
+        stringResource(R.string.backup_title),
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(top = 24.dp),
+    )
+    for (state in backup.insteadOf) {
+        val (words, color) = lineState(state.severity)
+        // Read as one: "Metro 12, interrupted".
+        Row(Modifier.padding(top = 8.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
+            LineBadge(state.line, state.color)
+            Spacer(Modifier.width(12.dp))
+            Text(words, color = color)
+        }
+    }
+    for (leg in backup.legs) LegDepartures(leg, now)
+}
+
 /** A leg in its card. [onPick], on the leg the reminder is for, with why the last pick was [refused]. */
 @Composable
 private fun LegDepartures(leg: Departures.Leg, now: Instant, refused: Int? = null, onPick: ((Departure) -> Unit)? = null) {
@@ -255,19 +277,29 @@ private fun LegDepartures(leg: Departures.Leg, now: Instant, refused: Int? = nul
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            // Read as one: "Line J, Les Aubépines to Gare Centrale".
-            Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
-                LineBadge(leg.line, leg.color)
-                if (leg.from != null && leg.to != null) {
-                    Spacer(Modifier.width(12.dp))
-                    StopName(leg.from, Modifier.weight(1f, fill = false))
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = stringResource(R.string.departures_leg_to),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 6.dp).size(16.dp),
-                    )
-                    StopName(leg.to, Modifier.weight(1f, fill = false))
+            // Read as one: "Line J, Les Aubépines to Gare Centrale", and how a backup's ride runs.
+            Column(Modifier.semantics(mergeDescendants = true) {}) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LineBadge(leg.line, leg.color)
+                    if (leg.from != null && leg.to != null) {
+                        Spacer(Modifier.width(12.dp))
+                        StopName(leg.from, Modifier.weight(1f, fill = false))
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = stringResource(R.string.departures_leg_to),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 6.dp).size(16.dp),
+                        )
+                        StopName(leg.to, Modifier.weight(1f, fill = false))
+                    }
+                }
+                leg.severity?.let { severity ->
+                    val (words, color) = lineState(severity)
+                    Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Warning, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(words, color = color)
+                    }
                 }
             }
             refused?.let {

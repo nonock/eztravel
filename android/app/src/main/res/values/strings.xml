@@ -65,6 +65,7 @@
     <string name="not_configured">This build of the app has no server address or key (see local.properties).</string>
     <string name="unreachable">The server cannot be reached. Try again later.</string>
     <string name="departures_title">Next departures</string>
+    <string name="backup_title">Backup route</string>
     <string name="departures_leg_to">to</string>
     <string name="departures_unavailable">Departures cannot be read right now.</string>
     <string name="departures_none">No departure in the coming hours.</string>

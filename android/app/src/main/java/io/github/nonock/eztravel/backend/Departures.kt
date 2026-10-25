@@ -7,13 +7,20 @@ import java.time.Instant
 
 /**
  * The next departures on each leg of the way shown: the way to work until
- * its watch window ends, the way home after. The format is fixed by
- * `fixtures/api/departures.json` in the repository, which the backend tests read too.
+ * its watch window ends, the way home after; and its [backups] needed now.
+ * The format is fixed by `fixtures/api/departures.json` in the repository,
+ * which the backend tests read too.
  */
-data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
+data class Departures(val direction: Status.Direction, val legs: List<Leg>, val backups: List<Backup> = emptyList()) {
     /** The ride the reminder is for: the first with its time to the platform, as the backend has it. */
     val reminded: Leg?
         get() = legs.firstOrNull { it.reach != null }
+
+    /**
+     * Rides on other lines that stand in for [insteadOf], lines of the way
+     * disrupted now; a ride can be disrupted too. Never picked.
+     */
+    data class Backup(val insteadOf: List<Status.LineState>, val legs: List<Leg>)
 
     /** The train shown first, on [leg], the ride reminded, and when to leave for it. */
     data class Featured(val leg: Leg, val departure: Departure, val leave: Instant)
@@ -50,7 +57,8 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
     /**
      * `from` and `to` are null until the backend knows the line's stops;
      * `departures` is null when they cannot be read. `reach` is the time from
-     * leaving home, or work, to the platform, when configured.
+     * leaving home, or work, to the platform, when configured. A backup's ride
+     * has its line's [severity] when disrupted too.
      */
     data class Leg(
         val line: PushMessage.Line,
@@ -59,6 +67,7 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
         val to: String?,
         val departures: List<Departure>?,
         val reach: Duration? = null,
+        val severity: PushMessage.Severity? = null,
     ) {
         /** When to leave for [departure], from its expected time; null without a time to the platform. */
         fun leaveAt(departure: Departure): Instant? = reach?.let { departure.expected.minus(it) }
@@ -102,18 +111,26 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>) {
             val departures = JSONObject(json)
             return Departures(
                 if (departures.optString("direction") == "inbound") Status.Direction.INBOUND else Status.Direction.OUTBOUND,
-                departures.getJSONArray("legs").objects().map { leg ->
-                    Leg(
-                        PushMessage.Line(leg.getString("line"), PushMessage.mode(leg.getString("mode"))),
-                        leg.stringOrNull("color")?.let(::hexColor),
-                        leg.stringOrNull("from"),
-                        leg.stringOrNull("to"),
-                        if (leg.isNull("departures")) null else leg.getJSONArray("departures").objects().map(::departure),
-                        if (leg.isNull("reach")) null else Duration.ofMinutes(leg.getLong("reach")),
+                departures.getJSONArray("legs").objects().map(::leg),
+                // None from a backend without backups.
+                departures.optJSONArray("backups")?.objects().orEmpty().map { backup ->
+                    Backup(
+                        backup.getJSONArray("instead_of").objects().map(Status::lineState),
+                        backup.getJSONArray("legs").objects().map(::leg),
                     )
                 },
             )
         }
+
+        private fun leg(json: JSONObject) = Leg(
+            PushMessage.Line(json.getString("line"), PushMessage.mode(json.getString("mode"))),
+            json.stringOrNull("color")?.let(::hexColor),
+            json.stringOrNull("from"),
+            json.stringOrNull("to"),
+            if (json.isNull("departures")) null else json.getJSONArray("departures").objects().map(::departure),
+            if (json.isNull("reach")) null else Duration.ofMinutes(json.getLong("reach")),
+            Status.severity(json),
+        )
 
         private fun departure(json: JSONObject) = Departure(
             aimed = json.instantOrNull("aimed"),

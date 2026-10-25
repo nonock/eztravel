@@ -1,5 +1,9 @@
 package io.github.nonock.eztravel.home
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -10,6 +14,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nonock.eztravel.R
@@ -20,8 +25,10 @@ import io.github.nonock.eztravel.backend.Departures.State
 import io.github.nonock.eztravel.backend.FakeBackend
 import io.github.nonock.eztravel.backend.Refusal
 import io.github.nonock.eztravel.backend.Status.Direction
+import io.github.nonock.eztravel.backend.Status.LineState
 import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
+import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -42,7 +49,10 @@ class NextDeparturesTest {
 
     private val now = at("06:50:00")
 
-    private fun show(backend: FakeBackend) = compose.setContent { NextDepartures(backend, now = { now }) }
+    /** In a column that scrolls, as on the Trajet tab. */
+    private fun show(backend: FakeBackend) = compose.setContent {
+        Column(Modifier.verticalScroll(rememberScrollState())) { NextDepartures(backend, now = { now }) }
+    }
 
     /** The departures are read once the screen is resumed: wait for them. */
     private fun waitFor(matcher: SemanticsMatcher) {
@@ -53,6 +63,14 @@ class NextDeparturesTest {
     }
 
     private fun waitFor(text: String) = waitFor(hasText(text))
+
+    /** Below the fold: scrolled to, once read. */
+    private fun scrolledTo(matcher: SemanticsMatcher) {
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNode(matcher).performScrollTo().assertIsDisplayed()
+    }
 
     /** A leg's header: from one stop to the other. */
     private fun leg(from: String, to: String) = hasText(from) and hasContentDescription(text(R.string.departures_leg_to)) and hasText(to)
@@ -133,6 +151,57 @@ class NextDeparturesTest {
     private fun bell(aimed: String) = hasContentDescription(text(R.string.departures_pick, at(aimed).clock()))
 
     private fun picked(aimed: String) = hasContentDescription(text(R.string.departures_unpick, at(aimed).clock()))
+
+    /** Instead of the metro, interrupted: metro Y, then train Z, disrupted too. */
+    private val withBackup = morning.copy(
+        backups = listOf(
+            Departures.Backup(
+                listOf(LineState(metro, Severity.BLOCKING, 0xFFE07A1F.toInt())),
+                listOf(
+                    Leg(
+                        Line("Y", Mode.METRO),
+                        0xFF3E9C6B.toInt(),
+                        "Gare Centrale",
+                        "Le Port",
+                        listOf(Departure(null, at("06:54:00"), null, null, "Porte Sud", null, State.ON_TIME, "y1")),
+                    ),
+                    Leg(
+                        Line("Z", Mode.TRAIN),
+                        null,
+                        "Le Port",
+                        "Mairie",
+                        listOf(Departure(at("07:05:00"), at("07:05:00"), at("07:12:00"), "ZOLA", "Mairie", "1", State.ON_TIME, "z1")),
+                        severity = Severity.DISRUPTED,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    @Test
+    fun aBackupShowsItsRidesInsteadOfTheLineDisrupted() {
+        show(FakeBackend(departures = withBackup))
+        scrolledTo(hasText(text(R.string.backup_title)))
+        // The line it stands in for, read as one: "Metro X, interrupted".
+        scrolledTo(hasContentDescription(text(R.string.line_metro, "X")) and hasText(text(R.string.status_state_blocking)))
+        scrolledTo(hasContentDescription(text(R.string.line_metro, "Y")) and leg("Gare Centrale", "Le Port"))
+        scrolledTo(hasText(text(R.string.departures_minutes, 4)) and hasText("Porte Sud"))
+        // A ride disrupted too says so, with its line.
+        scrolledTo(hasContentDescription(text(R.string.line_train, "Z")) and leg("Le Port", "Mairie") and hasText(text(R.string.status_state_disrupted)))
+        compose.onNode(hasContentDescription(text(R.string.line_metro, "Y")) and hasText(text(R.string.status_state_disrupted)))
+            .assertDoesNotExist()
+        scrolledTo(hasText(at("07:05:00").clock()) and hasText("ZOLA"))
+        // Never picked: the reminder is for the way's own train.
+        compose.onNode(bell("07:05:00")).assertDoesNotExist()
+        scrolledTo(bell("07:07:00"))
+    }
+
+    @Test
+    fun noBackupWhileTheWayRuns() {
+        show(FakeBackend(departures = morning))
+        waitFor(leg("Gare Centrale", "Mairie"))
+        compose.onNodeWithText(text(R.string.backup_title)).assertDoesNotExist()
+    }
 
     @Test
     fun aTrainIsPickedForTheReminderAndDropped() {
