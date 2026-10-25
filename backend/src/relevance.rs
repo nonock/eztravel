@@ -20,6 +20,16 @@ pub struct RouteStop {
     pub stop_point: String,
     pub stop_area: String,
     pub name: String,
+    /// None in the routes saved before, until read again.
+    #[serde(default)]
+    pub coord: Option<Coord>,
+}
+
+/// Where a stop is, in decimal degrees, as Navitia writes them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Coord {
+    pub lat: String,
+    pub lon: String,
 }
 
 /// A ride on one line, between two stop areas.
@@ -62,6 +72,7 @@ pub fn parse_route(json: &[u8]) -> Result<Route, serde_json::Error> {
             stop_point: row.stop_point.id,
             stop_area: row.stop_point.stop_area.id,
             name: row.stop_point.name,
+            coord: row.stop_point.coord,
         })
         .collect();
     Ok(Route { stops })
@@ -143,6 +154,8 @@ struct NavitiaStop {
     id: String,
     name: String,
     stop_area: NavitiaArea,
+    #[serde(default)]
+    coord: Option<Coord>,
 }
 
 #[derive(Deserialize)]
@@ -170,6 +183,7 @@ mod tests {
                     stop_point: format!("sp:{name}"),
                     stop_area: format!("sa:{name}"),
                     name: name.to_string(),
+                    coord: None,
                 })
                 .collect(),
         }
@@ -358,6 +372,25 @@ mod tests {
             parse_route(json.to_string().as_bytes()).unwrap(),
             route(&["N1", "T1", "P"])
         );
+    }
+
+    #[test]
+    fn a_stop_keeps_where_it_is() {
+        let json = serde_json::json!({ "route_schedules": [{ "table": { "rows": [
+            { "stop_point": { "id": "sp:N1", "name": "N1", "coord": { "lat": "48.876", "lon": "2.325" }, "stop_area": { "id": "sa:N1" } } },
+            { "stop_point": { "id": "sp:T1", "name": "T1", "stop_area": { "id": "sa:T1" } } }
+        ]}}]});
+        let route = parse_route(json.to_string().as_bytes()).unwrap();
+        let coord = Coord {
+            lat: "48.876".into(),
+            lon: "2.325".into(),
+        };
+        assert_eq!(route.stops[0].coord, Some(coord));
+        assert_eq!(route.stops[1].coord, None);
+        // Routes saved by the previous version are read without.
+        let saved = r#"[{"stops":[{"stop_point":"sp:1","stop_area":"sa:1","name":"One"}]}]"#;
+        let saved: Vec<Route> = serde_json::from_str(saved).unwrap();
+        assert_eq!(saved[0].stops[0].coord, None);
     }
 
     #[test]

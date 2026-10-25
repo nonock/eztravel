@@ -22,7 +22,7 @@ use crate::line_alerts::LineAlerts;
 use crate::prim::{Prim, PrimError};
 use crate::profile::{Pick, UsualTrains};
 use crate::push::{self, LineLabel};
-use crate::relevance::{Leg, Route, RouteStop};
+use crate::relevance::{Coord, Leg, Route, RouteStop};
 use crate::watch::LineStatus;
 
 /// Departures shown per leg, after those too soon to leave for on a ride with its time to the platform.
@@ -385,10 +385,29 @@ pub struct LegView {
     /// Stop names, unknown until the line's routes are.
     pub from: Option<String>,
     pub to: Option<String>,
+    /// Where `from` is, for the app to put the ride nearest the phone first.
+    pub from_position: Option<Position>,
     /// Minutes from leaving to the platform, when configured: the app counts down from it.
     pub reach: Option<u32>,
     /// None when they cannot be read.
     pub departures: Option<Vec<Departure>>,
+}
+
+/// A place in decimal degrees.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct Position {
+    pub lat: serde_json::Number,
+    pub lon: serde_json::Number,
+}
+
+impl Position {
+    /// None when Navitia's figures are not numbers.
+    fn of(coord: &Coord) -> Option<Self> {
+        Some(Position {
+            lat: coord.lat.parse().ok()?,
+            lon: coord.lon.parse().ok()?,
+        })
+    }
 }
 
 /// Reads stops when the app asks, at most once a minute each.
@@ -599,6 +618,10 @@ impl NextDepartures {
             mode,
             color: self.color(&leg.line),
             from: stops.as_ref().map(|(board, _)| board.name.clone()),
+            from_position: stops
+                .as_ref()
+                .and_then(|(board, _)| board.coord.as_ref())
+                .and_then(Position::of),
             to: stops.map(|(_, alight)| alight.name),
             reach: leg.reach,
             departures,
@@ -944,21 +967,41 @@ pub(crate) mod example {
             stop_point: stop_point.into(),
             stop_area: stop_area.into(),
             name: name.into(),
+            coord: None,
+        }
+    }
+
+    /// `stop` at a made-up place.
+    fn placed(stop: RouteStop, lat: &str, lon: &str) -> RouteStop {
+        RouteStop {
+            coord: Some(Coord {
+                lat: lat.into(),
+                lon: lon.into(),
+            }),
+            ..stop
         }
     }
 
     /// The example commute's routes: L between its two stations, both ways,
     /// X with one platform per way, and Y, the backup of X, one way.
     pub(crate) fn routes() -> BTreeMap<String, Vec<Route>> {
-        let aubepines = stop(
-            "stop_point:IDFM:monomodalStopPlace:100",
-            "stop_area:IDFM:71100",
-            "Les Aubépines",
+        let aubepines = placed(
+            stop(
+                "stop_point:IDFM:monomodalStopPlace:100",
+                "stop_area:IDFM:71100",
+                "Les Aubépines",
+            ),
+            "48.947",
+            "2.248",
         );
-        let centrale = stop(
-            "stop_point:IDFM:monomodalStopPlace:200",
-            "stop_area:IDFM:71370",
-            "Gare Centrale",
+        let centrale = placed(
+            stop(
+                "stop_point:IDFM:monomodalStopPlace:200",
+                "stop_area:IDFM:71370",
+                "Gare Centrale",
+            ),
+            "48.876",
+            "2.325",
         );
         let peupliers = stop(
             "stop_point:IDFM:monomodalStopPlace:50",
@@ -982,17 +1025,25 @@ pub(crate) mod example {
                 vec![
                     Route {
                         stops: vec![
-                            stop(
-                                "stop_point:IDFM:300",
-                                "stop_area:IDFM:71380",
-                                "Gare Centrale",
+                            placed(
+                                stop(
+                                    "stop_point:IDFM:300",
+                                    "stop_area:IDFM:71380",
+                                    "Gare Centrale",
+                                ),
+                                "48.875",
+                                "2.326",
                             ),
                             stop("stop_point:IDFM:400", "stop_area:IDFM:71400", "Mairie"),
                         ],
                     },
                     Route {
                         stops: vec![
-                            stop("stop_point:IDFM:401", "stop_area:IDFM:71400", "Mairie"),
+                            placed(
+                                stop("stop_point:IDFM:401", "stop_area:IDFM:71400", "Mairie"),
+                                "48.891",
+                                "2.349",
+                            ),
                             stop(
                                 "stop_point:IDFM:301",
                                 "stop_area:IDFM:71380",
@@ -1006,10 +1057,14 @@ pub(crate) mod example {
                 "C03000".to_string(),
                 vec![Route {
                     stops: vec![
-                        stop(
-                            "stop_point:IDFM:390",
-                            "stop_area:IDFM:71390",
-                            "Gare Centrale",
+                        placed(
+                            stop(
+                                "stop_point:IDFM:390",
+                                "stop_area:IDFM:71390",
+                                "Gare Centrale",
+                            ),
+                            "48.874",
+                            "2.327",
                         ),
                         stop("stop_point:IDFM:410", "stop_area:IDFM:71400", "Mairie"),
                     ],
@@ -1301,6 +1356,16 @@ mod tests {
             message: String::new(),
             sections: vec![],
         }
+    }
+
+    #[test]
+    fn a_stop_placed_with_words_has_no_position() {
+        let coord = |lat: &str| Coord {
+            lat: lat.into(),
+            lon: "2.325".into(),
+        };
+        assert!(Position::of(&coord("48.876")).is_some());
+        assert_eq!(Position::of(&coord("north")), None);
     }
 
     #[tokio::test]
