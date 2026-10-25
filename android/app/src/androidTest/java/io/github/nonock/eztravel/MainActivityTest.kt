@@ -49,7 +49,7 @@ class MainActivityTest {
     private val looks = CopyOnWriteArrayList<Instant?>()
 
     @get:Rule(order = 0)
-    val permission: GrantPermissionRule = GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS)
+    val permission: GrantPermissionRule = GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.ACCESS_COARSE_LOCATION)
 
     /** In place before the activity starts, so that no test reaches the real backend. */
     @get:Rule(order = 1)

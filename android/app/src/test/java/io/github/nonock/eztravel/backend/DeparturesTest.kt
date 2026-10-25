@@ -30,6 +30,7 @@ class DeparturesTest {
         val (train, metro) = departures.legs
         assertEquals(Line("L", Mode.TRAIN), train.line)
         assertEquals(0xFF7B61C9.toInt(), train.color)
+        assertEquals(Position(48.947, 2.248), train.fromPosition)
         assertEquals("Les Aubépines" to "Gare Centrale", train.from to train.to)
         assertEquals(Duration.ofMinutes(12), train.reach)
         assertEquals(
@@ -55,7 +56,15 @@ class DeparturesTest {
         assertEquals(
             listOf(
                 Leg(Line("X", Mode.METRO), 0xFFE07A1F.toInt(), from = null, to = null, departures = null),
-                Leg(Line("L", Mode.TRAIN), color = null, "Gare Centrale", "Les Aubépines", emptyList(), Duration.ofMinutes(25)),
+                Leg(
+                    Line("L", Mode.TRAIN),
+                    color = null,
+                    "Gare Centrale",
+                    "Les Aubépines",
+                    emptyList(),
+                    Duration.ofMinutes(25),
+                    fromPosition = Position(48.876, 2.325),
+                ),
             ),
             departures.legs,
         )
@@ -249,6 +258,7 @@ class DeparturesTest {
                         Departure(null, at("06:51:00"), null, null, "Porte Nord", null, State.ON_TIME, "y1"),
                         Departure(null, at("06:57:00"), null, null, "Porte Nord", null, State.ON_TIME, "y2"),
                     ),
+                    fromPosition = Position(48.874, 2.327),
                 ),
             ),
             backup.legs,
@@ -260,6 +270,24 @@ class DeparturesTest {
         assertEquals(Severity.DISRUPTED, Departures.parse(json.toString()).backups[0].legs[0].severity)
         ride.put("severity", "blocking")
         assertEquals(Severity.BLOCKING, Departures.parse(json.toString()).backups[0].legs[0].severity)
+    }
+
+    @Test
+    fun theRideNearestThePhoneComesFirst() {
+        val departures = Departures.parse(fixture("departures"))
+        fun order(here: Position?, of: Departures = departures) = of.nearestFirst(here).map { it.line.name }
+        // L from Les Aubépines, then X from Gare Centrale, as the way goes.
+        assertEquals(listOf("L", "X"), order(null))
+        assertEquals(listOf("L", "X"), order(Position(48.94, 2.25)))
+        // At Gare Centrale, the train is behind: the metro first.
+        assertEquals(listOf("X", "L"), order(Position(48.8752, 2.3262)))
+        // A ride whose stop is not placed yet keeps the way's order.
+        val unplaced = departures.copy(legs = departures.legs.map { it.copy(fromPosition = null) })
+        assertEquals(listOf("L", "X"), order(Position(48.8752, 2.3262), unplaced))
+        // From the nearest on, then those behind: three rides.
+        val third = departures.legs[0].copy(line = Line("Z", Mode.TRAIN), fromPosition = Position(48.95, 2.40))
+        val three = departures.copy(legs = departures.legs + third)
+        assertEquals(listOf("X", "Z", "L"), order(Position(48.8752, 2.3262), three))
     }
 
     @Test

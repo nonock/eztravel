@@ -38,6 +38,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -52,6 +53,7 @@ import io.github.nonock.eztravel.backend.Backend
 import io.github.nonock.eztravel.backend.Departures
 import io.github.nonock.eztravel.backend.Departures.Departure
 import io.github.nonock.eztravel.backend.Departures.State
+import io.github.nonock.eztravel.backend.Position
 import io.github.nonock.eztravel.backend.Refusal
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -80,11 +82,14 @@ fun NextDepartures(
     tickMs: Long = TICK_MS,
     refresh: Int = 0,
     onRead: () -> Unit = {},
+    where: suspend () -> Position? = phoneWhere(),
 ) {
     // The commute tab already says that this build has no server.
     if (!backend.configured) return
     var clock by remember { mutableStateOf(now()) }
     val read = polled(backend, refresh, everyMs = REFRESH_MS, onRead = { onRead(); clock = now() }) { backend.departures() }
+    // Where the phone is, read on its own: the departures do not wait for it.
+    val here = (polled(refresh, everyMs = REFRESH_MS) { where() }.value as? Reading.Known)?.value
     // Why the last pick was not saved.
     var refused by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
@@ -124,7 +129,8 @@ fun NextDepartures(
             Reading.Loading -> Text(stringResource(R.string.loading))
             is Reading.Known -> {
                 val reminded = current.value.reminded
-                for (leg in current.value.legs) {
+                // The ride nearest the phone first: at the station of the second ride, it comes first.
+                for (leg in current.value.nearestFirst(here)) {
                     if (leg === reminded) LegDepartures(leg, clock, refused, pick) else LegDepartures(leg, clock)
                 }
                 for (backup in current.value.backups) BackupRoute(backup, clock)
@@ -217,6 +223,13 @@ private fun NextTrainContent(featured: Departures.Featured, departure: Departure
             }
         }
     }
+}
+
+/** Where the phone is, as this app's context tells. */
+@Composable
+private fun phoneWhere(): suspend () -> Position? {
+    val context = LocalContext.current.applicationContext
+    return { context.position() }
 }
 
 /** When [departure] leaves: in so many minutes, or now. */

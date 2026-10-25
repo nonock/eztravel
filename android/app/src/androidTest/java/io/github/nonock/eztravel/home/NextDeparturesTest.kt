@@ -21,6 +21,7 @@ import io.github.nonock.eztravel.backend.Departures
 import io.github.nonock.eztravel.backend.Departures.Departure
 import io.github.nonock.eztravel.backend.Departures.Leg
 import io.github.nonock.eztravel.backend.Departures.State
+import io.github.nonock.eztravel.backend.Position
 import io.github.nonock.eztravel.backend.FakeBackend
 import io.github.nonock.eztravel.backend.Refusal
 import io.github.nonock.eztravel.backend.Status.Direction
@@ -208,6 +209,27 @@ class NextDeparturesTest : ScreenTesting() {
         assertEquals(listOf("j3", "j5", null), backend.picks)
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(hasText(text(R.string.departures_picked))).fetchSemanticsNodes().isEmpty()
+        }
+    }
+
+    @Test
+    fun theRideNearestThePhoneComesFirst() {
+        val placed = morning.copy(
+            legs = listOf(
+                morning.legs[0].copy(fromPosition = Position(48.947, 2.248)),
+                morning.legs[1].copy(fromPosition = Position(48.875, 2.326)),
+            ),
+        )
+        compose.setContent {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                NextDepartures(FakeBackend(departures = placed), now = { now }, where = { Position(48.8752, 2.3262) })
+            }
+        }
+        // At Gare Centrale: the metro above the train.
+        waitFor(leg("Gare Centrale", "Mairie"))
+        val top = { matcher: SemanticsMatcher -> compose.onNode(matcher).fetchSemanticsNode().boundsInRoot.top }
+        compose.waitUntil(timeoutMillis = 5_000) {
+            top(leg("Gare Centrale", "Mairie")) < top(leg("Les Aubépines", "Gare Centrale"))
         }
     }
 
