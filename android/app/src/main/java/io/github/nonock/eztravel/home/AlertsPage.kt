@@ -22,10 +22,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,18 +39,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.backend.Alerts
 import io.github.nonock.eztravel.backend.Alerts.Alert
 import io.github.nonock.eztravel.backend.Alerts.Severity
 import io.github.nonock.eztravel.backend.Backend
 import io.github.nonock.eztravel.notifications.label
-import kotlinx.coroutines.delay
-import org.json.JSONException
-import java.io.IOException
 import java.time.Instant
 import java.time.ZoneId
 
@@ -61,12 +53,6 @@ private const val REFRESH_MS = 120_000L
 
 /** Lines folded to their first lines of text, until the card is tapped. */
 private const val FOLDED_LINES = 3
-
-private sealed interface Read {
-    data object Loading : Read
-    data object Unreadable : Read
-    data class Known(val lines: List<Alerts.LineAlerts>) : Read
-}
 
 /**
  * Every disruption of the lines that is not over yet, line by line: under way
@@ -81,34 +67,18 @@ fun AlertsPage(
     refresh: Int = 0,
     onRead: () -> Unit = {},
 ) {
-    var read by remember { mutableStateOf<Read>(Read.Loading) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(backend, refresh) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                read = try {
-                    // Unreadable is not "no alert": the backend says when it could not read them.
-                    backend.alerts().lines?.let { Read.Known(it) } ?: Read.Unreadable
-                } catch (_: IOException) {
-                    Read.Unreadable
-                } catch (_: JSONException) {
-                    Read.Unreadable
-                }
-                onRead()
-                delay(REFRESH_MS)
-            }
-        }
-    }
+    // Unreadable is not "no alert": the backend says when it could not read them.
+    val read by polled(backend, refresh, everyMs = REFRESH_MS, onRead = onRead) { backend.alerts().lines }
 
     Column(modifier) {
         when (val current = read) {
-            Read.Loading -> Text(stringResource(R.string.loading))
-            Read.Unreadable -> Text(stringResource(R.string.alerts_unavailable), color = MaterialTheme.colorScheme.error)
-            is Read.Known -> {
-                if (current.lines.all { it.alerts.isEmpty() }) {
+            Reading.Loading -> Text(stringResource(R.string.loading))
+            Reading.Failed -> Text(stringResource(R.string.alerts_unavailable), color = MaterialTheme.colorScheme.error)
+            is Reading.Known -> {
+                if (current.value.all { it.alerts.isEmpty() }) {
                     Text(stringResource(R.string.alerts_none_at_all), style = MaterialTheme.typography.titleMedium)
                 }
-                for (line in current.lines) LineSection(line, now())
+                for (line in current.value) LineSection(line, now())
             }
         }
     }

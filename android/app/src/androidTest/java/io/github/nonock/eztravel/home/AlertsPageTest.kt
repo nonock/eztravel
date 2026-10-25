@@ -1,5 +1,6 @@
 package io.github.nonock.eztravel.home
 
+import io.github.nonock.eztravel.ScreenTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
@@ -7,11 +8,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.backend.Alerts
 import io.github.nonock.eztravel.backend.Alerts.Alert
@@ -21,7 +20,6 @@ import io.github.nonock.eztravel.backend.Alerts.Severity
 import io.github.nonock.eztravel.backend.FakeBackend
 import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
-import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.Duration
@@ -29,14 +27,7 @@ import java.time.Instant
 import java.time.ZoneId
 
 @RunWith(AndroidJUnit4::class)
-class AlertsPageTest {
-    @get:Rule
-    val compose = createComposeRule()
-
-    private val context = InstrumentationRegistry.getInstrumentation().targetContext
-
-    private fun text(id: Int, vararg args: Any) = context.getString(id, *args)
-
+class AlertsPageTest : ScreenTest() {
     private val now = Instant.now()
     private val today = now.atZone(ZoneId.systemDefault()).toLocalDate()
 
@@ -61,15 +52,6 @@ class AlertsPageTest {
     private val slowed = alert("slow-x", Severity.DISRUPTED, "Métro X : trafic ralenti", active = true)
 
     private fun show(backend: FakeBackend) = compose.setContent { AlertsPage(backend, now = { now }) }
-
-    private fun waitFor(matcher: SemanticsMatcher) {
-        compose.waitUntil(timeoutMillis = 5_000) {
-            compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNode(matcher).assertIsDisplayed()
-    }
-
-    private fun waitFor(text: String) = waitFor(hasText(text))
 
     private fun tapLabel(label: Int) = SemanticsMatcher("tapped to ${text(label)}") {
         it.config.getOrNull(SemanticsActions.OnClick)?.label == text(label)

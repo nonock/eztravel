@@ -30,8 +30,7 @@ class CalendarDayTest {
     @Test
     fun valuesFromANewerBackendFallBackSafely() {
         val json = JSONObject(fixture)
-        // A kind it does not know is not watched; a reason it does not know is the plan,
-        // as the time away the first backend with the calendar gave.
+        // A kind it does not know is not watched; a reason it does not know is the plan.
         json.getJSONArray("days").getJSONObject(2).put("kind", "elsewhere").put("why", "strike").put("school", true)
         json.getJSONArray("days").getJSONObject(3).put("why", "away")
         val days = CalendarDay.parse(json.toString())

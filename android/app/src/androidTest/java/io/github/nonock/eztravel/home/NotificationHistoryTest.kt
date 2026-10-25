@@ -1,10 +1,9 @@
 package io.github.nonock.eztravel.home
 
+import io.github.nonock.eztravel.ScreenTest
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.backend.FakeBackend
 import io.github.nonock.eztravel.backend.HistoryEntry
@@ -15,7 +14,6 @@ import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import io.github.nonock.eztravel.notifications.text
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
-import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.Instant
@@ -25,14 +23,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
 @RunWith(AndroidJUnit4::class)
-class NotificationHistoryTest {
-    @get:Rule
-    val compose = createComposeRule()
-
-    private val context = InstrumentationRegistry.getInstrumentation().targetContext
-
-    private fun text(id: Int, vararg args: Any) = context.getString(id, *args)
-
+class NotificationHistoryTest : ScreenTest() {
     private fun show(backend: FakeBackend) = compose.setContent { NotificationHistory(backend) }
 
     /** Noon on the day `daysAgo` days before today, in the phone's time zone. */

@@ -1,5 +1,6 @@
 package io.github.nonock.eztravel.calendar
 
+import io.github.nonock.eztravel.ScreenTest
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
@@ -14,12 +15,10 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.backend.CalendarDay
 import io.github.nonock.eztravel.backend.CalendarDay.Kind
@@ -29,7 +28,6 @@ import io.github.nonock.eztravel.backend.FakeBackend
 import io.github.nonock.eztravel.backend.plannedWeekdays
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
-import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.LocalDate
@@ -39,14 +37,7 @@ import java.time.format.FormatStyle
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
-class CalendarPageTest {
-    @get:Rule
-    val compose = createComposeRule()
-
-    private val context = InstrumentationRegistry.getInstrumentation().targetContext
-
-    private fun text(id: Int, vararg args: Any) = context.getString(id, *args)
-
+class CalendarPageTest : ScreenTest() {
     /** Wednesday 4 November 2026: the Sunday, Monday and Tuesday before are gone by. */
     private val today = LocalDate.of(2026, 11, 4)
     private val november = YearMonth.of(2026, 11)
@@ -311,7 +302,7 @@ class CalendarPageTest {
         refresh++
         compose.waitUntil(timeoutMillis = 5_000) { reads.get() == 2 }
         assertEquals(listOf(november, november), backend.monthReads.toList())
-        // A day changed elsewhere, as the time away does, shows once read again.
+        // A day changed elsewhere shows once read again.
         backend.set[day(5)] = CalendarDay(day(5), Kind.AWAY, Why.SET)
         refresh++
         waitForCell(day(5), R.string.calendar_away, set = true)

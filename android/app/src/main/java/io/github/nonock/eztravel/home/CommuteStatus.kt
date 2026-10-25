@@ -19,11 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -33,9 +29,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.backend.Backend
 import io.github.nonock.eztravel.backend.Status
@@ -45,19 +38,10 @@ import io.github.nonock.eztravel.backend.Status.Headline
 import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import io.github.nonock.eztravel.notifications.label
 import io.github.nonock.eztravel.ui.theme.Good
-import kotlinx.coroutines.delay
-import org.json.JSONException
-import java.io.IOException
 import java.time.Instant
 
 /** Checks run every two minutes: reading every minute keeps the screen current. */
 private const val REFRESH_MS = 60_000L
-
-private sealed interface Seen {
-    data object Loading : Seen
-    data object Unreachable : Seen
-    data class Known(val status: Status) : Seen
-}
 
 /**
  * What the backend sees, in a card headed by the one thing to know: all fine,
@@ -66,24 +50,9 @@ private sealed interface Seen {
  */
 @Composable
 fun CommuteStatus(backend: Backend, refresh: Int, modifier: Modifier = Modifier, now: () -> Instant = Instant::now) {
-    // The settings already say that this build has no server.
+    // The commute tab already says that this build has no server.
     if (!backend.configured) return
-    var seen by remember { mutableStateOf<Seen>(Seen.Loading) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(backend, refresh) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                seen = try {
-                    Seen.Known(backend.status())
-                } catch (_: IOException) {
-                    Seen.Unreachable
-                } catch (_: JSONException) {
-                    Seen.Unreachable
-                }
-                delay(REFRESH_MS)
-            }
-        }
-    }
+    val seen by polled(backend, refresh, everyMs = REFRESH_MS) { backend.status() }
 
     Card(
         modifier.fillMaxWidth(),
@@ -97,12 +66,12 @@ fun CommuteStatus(backend: Backend, refresh: Int, modifier: Modifier = Modifier,
             )
             Spacer(Modifier.height(8.dp))
             when (val current = seen) {
-                Seen.Loading -> Text(stringResource(R.string.loading))
-                Seen.Unreachable -> {
+                Reading.Loading -> Text(stringResource(R.string.loading))
+                Reading.Failed -> {
                     HeadlineRow(Icons.Filled.Warning, MaterialTheme.colorScheme.error, stringResource(R.string.status_headline_unreachable))
                     Text(stringResource(R.string.status_unreachable), color = MaterialTheme.colorScheme.error)
                 }
-                is Seen.Known -> Known(current.status, now())
+                is Reading.Known -> Known(current.value, now())
             }
         }
     }

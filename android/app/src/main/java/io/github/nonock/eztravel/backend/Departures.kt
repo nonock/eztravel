@@ -159,7 +159,7 @@ enum class Refusal {
     /** Its time to leave is past. */
     TOO_LATE,
 
-    /** Not an office day, or time away. */
+    /** Not an office day, or a day off. */
     NOT_OFFICE_DAY,
 
     /** Leaving outside the watch window, when no reminder is sent. */
