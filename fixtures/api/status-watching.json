@@ -7,5 +7,6 @@
     { "line": "L", "mode": "train", "color": "#7B61C9", "severity": "blocking" },
     { "line": "X", "mode": "metro", "color": "#E07A1F", "severity": null }
   ],
-  "planned": ["Ligne L : travaux entre Nanterre et Cergy"]
+  "planned": ["Ligne L : travaux entre Nanterre et Cergy"],
+  "school_holiday": null
 }

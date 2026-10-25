@@ -53,7 +53,7 @@ You need a free [PRIM](https://prim.iledefrance-mobilites.fr) account and API ke
 
 ### 1. Describe your commute
 
-Copy [backend/config.example.toml](backend/config.example.toml) outside the repository and describe your own commute: the office-day calendar (two alternating weeks), the watch windows, the lines and the legs of each way. Lines and stops are Navitia ids (`line:IDFM:C01740` is written `C01740`; stops are `stop_area:IDFM:…`), which PRIM's Navitia API gives. Each line may have a color (`"#RRGGBB"`, Navitia's `color` field) for the home screen. A window may start following trains earlier (`trains_from`): PRIM often drops a cancelled train half an hour or more before its time, and such trains are then notified when the window opens.
+Copy [backend/config.example.toml](backend/config.example.toml) outside the repository and describe your own commute: the office-day calendar (two alternating weeks), the watch windows, the lines and the legs of each way. Lines and stops are Navitia ids (`line:IDFM:C01740` is written `C01740`; stops are `stop_area:IDFM:…`), which PRIM's Navitia API gives. Each line may have a color (`"#RRGGBB"`, Navitia's `color` field) for the home screen. A window may start following trains earlier (`trains_from`): PRIM often drops a cancelled train half an hour or more before its time, and such trains are then notified when the window opens. The school holidays of a zone (`[school_holidays]`, as [data.education.gouv.fr](https://data.education.gouv.fr/explore/dataset/fr-en-calendrier-scolaire/) names its zones and places) are optional: the backend reads them once a day, and the app shows them.
 
 ### 2. Firebase
 
@@ -133,7 +133,7 @@ Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md
 3. Trust and calendar:
    - when a window opens, the phone checks the backend itself and says so if it does not answer or has stopped checking, since the backend cannot report its own failure;
    - a month calendar in the app, with office days, remote-work days and days off each in their own color, where a tap sets a single day: office, remote work or day off, or days off through a date;
-   - school holidays on that calendar, from the French open data: some lines run fewer trains then, and the app says so on those days (what PRIM shows of it is to be checked);
+   - school holidays on that calendar, from the French open data: some lines run fewer trains then, and the app says so on those days (PRIM's timetables for the Toussaint 2026 show 15 % fewer J trains and 11 % fewer metro 12 trains in the example windows);
    - each day's trains recorded (delay, cancelled) for the statistics, kept beyond the history;
    - continuous integration on GitHub: backend and app tests, lint.
 4. Preconfigured backup routes: when a line of the way is disrupted, the next departures of its backup on the commute tab.

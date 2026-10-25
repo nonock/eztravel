@@ -9,6 +9,7 @@ use serde::Deserialize;
 use crate::calendar::{Calendar, Schedule, WatchWindows};
 use crate::push::LineLabel;
 use crate::relevance::Leg;
+use crate::school::Zone;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -17,6 +18,9 @@ pub struct Config {
     pub time_zone: String,
     pub calendar: Calendar,
     pub windows: WatchWindows,
+    /// Whose school holidays the app shows; none without.
+    #[serde(default)]
+    pub school_holidays: Option<Zone>,
     #[serde(default)]
     pub lines: Vec<LineLabel>,
     pub outbound: Vec<Leg>,
@@ -99,6 +103,13 @@ mod tests {
             }
         );
         assert_eq!(
+            config.school_holidays,
+            Some(crate::school::Zone {
+                zone: "Zone C".into(),
+                location: "Paris".into()
+            })
+        );
+        assert_eq!(
             config.windows.outbound,
             Window {
                 start: time(6, 45, 0, 0),
@@ -173,6 +184,18 @@ mod tests {
         let field =
             Config::parse(&EXAMPLE.replace("whit_monday_off", "whit_monday_of")).unwrap_err();
         assert!(field.contains("whit_monday_of"), "{field}");
+        // School holidays are optional, and read as written.
+        let section = "[school_holidays]\nzone = \"Zone C\"\nlocation = \"Paris\"\n";
+        assert!(EXAMPLE.contains(section));
+        assert_eq!(
+            Config::parse(&EXAMPLE.replace(section, ""))
+                .unwrap()
+                .school_holidays,
+            None
+        );
+        let town = Config::parse(&EXAMPLE.replace("location = \"Paris\"", "town = \"Paris\""))
+            .unwrap_err();
+        assert!(town.contains("town"), "{town}");
         // Days are set from the app only: two sources would contradict each other.
         let days = EXAMPLE.replace(
             "whit_monday_off = true",
