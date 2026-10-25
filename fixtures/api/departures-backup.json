@@ -1,0 +1,134 @@
+{
+  "direction": "outbound",
+  "legs": [
+    {
+      "line": "L",
+      "mode": "train",
+      "color": "#7B61C9",
+      "from": "Les Aubépines",
+      "to": "Gare Centrale",
+      "reach": 12,
+      "departures": [
+        {
+          "journey": "j1",
+          "aimed": "2026-11-03T06:52:00Z",
+          "expected": "2026-11-03T06:52:00Z",
+          "arrival": "2026-11-03T07:04:00Z",
+          "mission": "PALO",
+          "destination": "Gare Centrale",
+          "platform": "2",
+          "status": "on_time",
+          "picked": false,
+          "usual": false
+        },
+        {
+          "journey": "j2",
+          "aimed": "2026-11-03T07:07:00Z",
+          "expected": "2026-11-03T07:11:00Z",
+          "arrival": "2026-11-03T07:23:00Z",
+          "mission": "PILO",
+          "destination": "Gare Centrale",
+          "platform": "2",
+          "status": "delayed",
+          "picked": false,
+          "usual": false
+        },
+        {
+          "journey": "j3",
+          "aimed": "2026-11-03T07:22:00Z",
+          "expected": "2026-11-03T07:22:00Z",
+          "arrival": "2026-11-03T07:34:00Z",
+          "mission": "PALO",
+          "destination": "Gare Centrale",
+          "platform": "2",
+          "status": "cancelled",
+          "picked": false,
+          "usual": false
+        }
+      ]
+    },
+    {
+      "line": "X",
+      "mode": "metro",
+      "color": "#E07A1F",
+      "from": "Gare Centrale",
+      "to": "Mairie",
+      "reach": null,
+      "departures": [
+        {
+          "journey": "m1",
+          "aimed": null,
+          "expected": "2026-11-03T06:53:30Z",
+          "arrival": null,
+          "mission": null,
+          "destination": "Porte Nord",
+          "platform": null,
+          "status": "on_time",
+          "picked": false,
+          "usual": false
+        },
+        {
+          "journey": "m2",
+          "aimed": null,
+          "expected": "2026-11-03T06:58:10Z",
+          "arrival": null,
+          "mission": null,
+          "destination": "Porte Nord",
+          "platform": null,
+          "status": "on_time",
+          "picked": false,
+          "usual": false
+        }
+      ]
+    }
+  ],
+  "backups": [
+    {
+      "instead_of": [
+        {
+          "line": "X",
+          "mode": "metro",
+          "color": "#E07A1F",
+          "severity": "blocking"
+        }
+      ],
+      "legs": [
+        {
+          "line": "Y",
+          "mode": "metro",
+          "color": "#3E9C6B",
+          "from": "Gare Centrale",
+          "to": "Mairie",
+          "reach": null,
+          "departures": [
+            {
+              "journey": "y1",
+              "aimed": null,
+              "expected": "2026-11-03T06:51:00Z",
+              "arrival": null,
+              "mission": null,
+              "destination": "Porte Nord",
+              "platform": null,
+              "status": "on_time",
+              "picked": false,
+              "usual": false
+            },
+            {
+              "journey": "y2",
+              "aimed": null,
+              "expected": "2026-11-03T06:57:00Z",
+              "arrival": null,
+              "mission": null,
+              "destination": "Porte Nord",
+              "platform": null,
+              "status": "on_time",
+              "picked": false,
+              "usual": false
+            }
+          ],
+          "severity": null
+        }
+      ]
+    }
+  ]
+}

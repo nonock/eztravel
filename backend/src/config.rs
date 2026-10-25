@@ -6,7 +6,8 @@
 use jiff::tz::TimeZone;
 use serde::Deserialize;
 
-use crate::calendar::{Calendar, Schedule, WatchWindows};
+use crate::backups::Backup;
+use crate::calendar::{Calendar, Direction, Schedule, WatchWindows};
 use crate::push::LineLabel;
 use crate::relevance::Leg;
 use crate::school::Zone;
@@ -25,6 +26,9 @@ pub struct Config {
     pub lines: Vec<LineLabel>,
     pub outbound: Vec<Leg>,
     pub inbound: Vec<Leg>,
+    /// Shown while lines of the way they stand in for are disrupted.
+    #[serde(default)]
+    pub backups: Vec<Backup>,
 }
 
 fn paris() -> String {
@@ -42,6 +46,25 @@ impl Config {
         ] {
             if window.trains_from.is_some_and(|from| from > window.start) {
                 return Err(format!("windows.{name}: trains_from comes after start"));
+            }
+        }
+        for backup in &config.backups {
+            let (name, legs) = match backup.direction {
+                Direction::Outbound => ("outbound", &config.outbound),
+                Direction::Inbound => ("inbound", &config.inbound),
+            };
+            if backup.instead_of.is_empty() {
+                return Err(format!("backups: an {name} backup needs instead_of"));
+            }
+            if backup.rides.is_empty() {
+                return Err(format!("backups: an {name} backup needs rides"));
+            }
+            if let Some(line) = backup
+                .instead_of
+                .iter()
+                .find(|line| !legs.iter().any(|leg| leg.line == **line))
+            {
+                return Err(format!("backups: {line} is not ridden {name}"));
             }
         }
         Ok(config)
@@ -73,6 +96,18 @@ impl Config {
         for leg in self.outbound.iter().chain(&self.inbound) {
             if !codes.contains(&leg.line) {
                 codes.push(leg.line.clone());
+            }
+        }
+        codes
+    }
+
+    /// The lines ridden, then those of the backups, each once: whose routes
+    /// and disruptions are read.
+    pub fn all_line_codes(&self) -> Vec<String> {
+        let mut codes = self.line_codes();
+        for ride in self.backups.iter().flat_map(|backup| &backup.rides) {
+            if !codes.contains(&ride.line) {
+                codes.push(ride.line.clone());
             }
         }
         codes
@@ -147,6 +182,20 @@ mod tests {
         assert_eq!(config.outbound[1].reach, None);
         assert_eq!(config.time_zone(), TimeZone::get("Europe/Paris").unwrap());
         assert_eq!(config.line_codes(), ["C01740", "C02000"]);
+        assert_eq!(
+            config.backups,
+            [Backup {
+                direction: Direction::Outbound,
+                instead_of: vec!["C02000".into()],
+                rides: vec![Leg {
+                    line: "C03000".into(),
+                    board: "stop_area:IDFM:71390".into(),
+                    alight: "stop_area:IDFM:71400".into(),
+                    reach: None,
+                }],
+            }]
+        );
+        assert_eq!(config.all_line_codes(), ["C01740", "C02000", "C03000"]);
         assert_eq!(config.line_color("C01740"), Some("#7B61C9"));
         assert_eq!(config.line_color("C09999"), None);
     }
@@ -172,6 +221,37 @@ mod tests {
         let config = Config::parse(&short.join("\n")).unwrap();
         assert_eq!(config.time_zone, "Europe/Paris");
         assert!(config.calendar.whit_monday_off);
+        let start = EXAMPLE.find("[[backups]]").unwrap();
+        let without = Config::parse(&EXAMPLE[..start]).unwrap();
+        assert_eq!(without.backups, []);
+        assert_eq!(without.all_line_codes(), without.line_codes());
+    }
+
+    #[test]
+    fn a_backup_must_stand_in_for_lines_of_its_way() {
+        let parse = |from: &str, to: &str| {
+            assert!(EXAMPLE.contains(from), "{from}");
+            Config::parse(&EXAMPLE.replace(from, to)).unwrap_err()
+        };
+        // Never shown: the morning way has no such line.
+        let other = parse("instead_of = [\"C02000\"]", "instead_of = [\"C09999\"]");
+        assert!(
+            other.contains("C09999") && other.contains("outbound"),
+            "{other}"
+        );
+        let none = parse("instead_of = [\"C02000\"]", "instead_of = []");
+        assert!(none.contains("instead_of"), "{none}");
+        let rides = &EXAMPLE[EXAMPLE.find("rides = [").unwrap()..];
+        let empty = parse(&rides[..rides.find("\n]").unwrap() + 2], "rides = []");
+        assert!(empty.contains("rides"), "{empty}");
+        let field = parse("instead_of", "avoids");
+        assert!(field.contains("avoids"), "{field}");
+        let way = parse("direction = \"outbound\"", "direction = \"morning\"");
+        assert!(way.contains("morning"), "{way}");
+        // The evening way rides X too.
+        let evening = EXAMPLE.replace("direction = \"outbound\"", "direction = \"inbound\"");
+        let evening = Config::parse(&evening).unwrap();
+        assert_eq!(evening.backups[0].direction, Direction::Inbound);
     }
 
     #[test]

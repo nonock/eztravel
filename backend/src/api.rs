@@ -311,15 +311,22 @@ async fn ended_trains(State(journal): State<Arc<Journal>>) -> Json<EndedTrains> 
     })
 }
 
-/// Read from PRIM when asked, at most once a minute per stop.
+/// Read from PRIM when asked, at most once a minute per stop; the disruptions
+/// too, shared with the Alertes page, when the way has backups.
 async fn next_departures(
     State(departures): State<Arc<NextDepartures>>,
     State(store): State<Arc<Store>>,
+    State(line_alerts): State<Arc<LineAlerts>>,
 ) -> Json<departures::View> {
     let profile = store.profile();
     Json(
         departures
-            .view(Timestamp::now(), profile.pick.as_ref(), &profile.usual)
+            .view(
+                Timestamp::now(),
+                profile.pick.as_ref(),
+                &profile.usual,
+                &line_alerts,
+            )
             .await,
     )
 }
