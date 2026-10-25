@@ -281,7 +281,8 @@ impl Service {
             return Poll::NoDevice;
         }
         self.refresh_routes(local.date()).await;
-        let lines = self.config.line_codes();
+        // The backups' lines too, for the app: only the commute's legs are notified.
+        let lines = self.config.all_line_codes();
         let codes: Vec<&str> = lines.iter().map(String::as_str).collect();
         let disruptions = match self.prim.disruptions(&codes).await {
             Ok(disruptions) => {
@@ -589,7 +590,7 @@ impl Service {
             return;
         }
         self.routes_day = Some(today);
-        for line in self.config.line_codes() {
+        for line in self.config.all_line_codes() {
             match self.prim.routes(&line, today.at(8, 0, 0, 0)).await {
                 Ok(routes) => {
                     self.routes.insert(line, routes);
@@ -602,7 +603,14 @@ impl Service {
         save(&self.data_dir.join(ROUTES_FILE), &self.routes);
         self.departures.set_routes(self.routes.clone());
         self.line_alerts.set_routes(self.routes.clone());
-        for leg in self.config.outbound.iter().chain(&self.config.inbound) {
+        let backups = self.config.backups.iter().flat_map(|backup| &backup.rides);
+        for leg in self
+            .config
+            .outbound
+            .iter()
+            .chain(&self.config.inbound)
+            .chain(backups)
+        {
             let has =
                 |route: &Route, area: &str| route.stops.iter().any(|stop| stop.stop_area == area);
             let served = self.routes.get(&leg.line).is_some_and(|routes| {
@@ -687,7 +695,7 @@ mod tests {
         /// Lines without routes, which keeps relevance out of the way.
         async fn new() -> Self {
             let server = MockServer::start().await;
-            for line in ["C01740", "C02000"] {
+            for line in ["C01740", "C02000", "C03000"] {
                 Mock::given(path(format!(
                     "/v2/navitia/lines/line%3AIDFM%3A{line}/routes"
                 )))
@@ -1334,13 +1342,50 @@ mod tests {
 
     #[tokio::test]
     async fn routes_are_read_once_a_day_and_saved() {
-        let setup = Setup::with(routes_server(200, 1).await).await;
+        let server = routes_server(200, 1).await;
+        // The backup's line too, for the stops of its rides.
+        Mock::given(path("/v2/navitia/lines/line%3AIDFM%3AC03000/routes"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "routes": [] })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let setup = Setup::with(server).await;
         setup.prim_answers(200, false, 2).await;
         let mut service = setup.service();
         assert_eq!(service.poll(at(MORNING)).await, Poll::Sent(0));
         assert_eq!(service.poll(at(TWO_MINUTES_LATER)).await, Poll::Sent(0));
         let saved = std::fs::read_to_string(setup.dir.path().join("routes.json")).unwrap();
         assert!(saved.contains("stop_area:IDFM:71250"), "{saved}");
+    }
+
+    #[tokio::test]
+    async fn a_backup_line_is_read_for_its_backup_but_never_notified() {
+        let setup = Setup::new().await;
+        let feed = serde_json::json!({
+            "disruptions": [{
+                "id": "y1",
+                "applicationPeriods": [{ "begin": "20261103T064433", "end": "20261103T093000" }],
+                "lastUpdate": "20261103T064500",
+                "cause": "PERTURBATION",
+                "severity": "BLOQUANTE",
+                "title": "Métro Y : trafic interrompu",
+                "message": "<p>Le trafic est interrompu.</p>"
+            }],
+            "lines": [{ "id": "line:IDFM:C03000", "impactedObjects": [{ "type": "line", "id": "line:IDFM:C03000", "name": "Y", "disruptionIds": ["y1"] }] }]
+        });
+        Mock::given(method("GET"))
+            .and(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(feed))
+            .expect(1)
+            .mount(&setup.server)
+            .await;
+        let mut service = setup.service();
+        assert_eq!(service.poll(at(MORNING)).await, Poll::Sent(0));
+        // Kept for the backups, without reading the feed again.
+        let kept = service.line_alerts().disruptions(at(MORNING)).await;
+        assert_eq!(kept.unwrap()[0].lines, ["C03000"]);
     }
 
     /// Line L between two train stations, which PRIM lists stop by stop, both
@@ -1657,14 +1702,16 @@ mod tests {
     #[tokio::test]
     async fn the_departures_follow_the_routes_saved_then_read() {
         let setup = Setup::with(routes_server(200, 1).await).await;
-        setup.prim_answers(200, false, 1).await;
+        // Read for the morning's backup by the first view, then by the poll.
+        setup.prim_answers(200, false, 2).await;
         let saved = r#"{"C01740":[{"stops":[{"stop_point":"sp:1","stop_area":"stop_area:IDFM:71100","name":"Saved"},{"stop_point":"sp:2","stop_area":"stop_area:IDFM:71370","name":"Saved too"}]}]}"#;
         std::fs::write(setup.dir.path().join("routes.json"), saved).unwrap();
         let mut service = setup.service();
         let departures = service.departures();
+        let feed = service.line_alerts();
         let from = async |now| {
             departures
-                .view(at(now), None, &Default::default())
+                .view(at(now), None, &Default::default(), &feed)
                 .await
                 .legs[0]
                 .from

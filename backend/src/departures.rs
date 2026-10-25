@@ -14,13 +14,16 @@ use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 
+use crate::backups::{self, Backup};
 use crate::calendar::{Calendar, Direction, WatchWindows};
 use crate::config::Config;
 use crate::leaving::{Refusal, check_pick, reminded_leg};
+use crate::line_alerts::LineAlerts;
 use crate::prim::{Prim, PrimError};
 use crate::profile::{Pick, UsualTrains};
 use crate::push::{self, LineLabel};
 use crate::relevance::{Leg, Route, RouteStop};
+use crate::watch::LineStatus;
 
 /// Departures shown per leg, after those too soon to leave for on a ride with its time to the platform.
 pub const SHOWN: usize = 5;
@@ -354,6 +357,24 @@ fn shown_direction(time: Time, windows: &WatchWindows) -> Direction {
 pub struct View {
     pub direction: &'static str,
     pub legs: Vec<LegView>,
+    /// Those of the way's backups that avoid a line disrupted now.
+    pub backups: Vec<BackupView>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct BackupView {
+    /// The lines it stands in for, as disrupted on the way now.
+    pub instead_of: Vec<LineStatus>,
+    pub legs: Vec<BackupLeg>,
+}
+
+/// A ride of a backup: never picked, and maybe disrupted too.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct BackupLeg {
+    #[serde(flatten)]
+    pub leg: LegView,
+    /// `blocking` or `disrupted`; none when it runs.
+    pub severity: Option<&'static str>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -375,6 +396,7 @@ pub struct NextDepartures {
     prim: Prim,
     outbound: Vec<Leg>,
     inbound: Vec<Leg>,
+    backups: Vec<Backup>,
     lines: Vec<LineLabel>,
     windows: WatchWindows,
     time_zone: TimeZone,
@@ -411,6 +433,7 @@ impl NextDepartures {
             prim,
             outbound: config.outbound.clone(),
             inbound: config.inbound.clone(),
+            backups: config.backups.clone(),
             lines: config.lines.clone(),
             windows: config.windows.clone(),
             time_zone: config.time_zone(),
@@ -446,10 +469,42 @@ impl NextDepartures {
     }
 
     /// `pick`, the train picked in the app, is marked when it is of this day and
-    /// way; or else, on the ride reminded, the first train from the way's usual time.
-    pub async fn view(&self, now: Timestamp, pick: Option<&Pick>, usual: &UsualTrains) -> View {
+    /// way; or else, on the ride reminded, the first train from the way's usual
+    /// time. When the way has backups, the lines' disruptions, shared with the
+    /// Alertes page, say which are needed.
+    pub async fn view(
+        &self,
+        now: Timestamp,
+        pick: Option<&Pick>,
+        usual: &UsualTrains,
+        feed: &LineAlerts,
+    ) -> View {
         let (direction, legs) = self.shown(now);
-        let today = now.to_zoned(self.time_zone.clone()).date();
+        let local = now.to_zoned(self.time_zone.clone());
+        let has_backups = self
+            .backups
+            .iter()
+            .any(|backup| backup.direction == direction);
+        let disruptions = if has_backups {
+            feed.disruptions(now).await
+        } else {
+            None
+        };
+        let needed = disruptions.map_or(vec![], |disruptions| {
+            let routes = self
+                .routes
+                .lock()
+                .expect("no thread panics while holding the routes");
+            backups::needed(
+                &self.backups,
+                direction,
+                legs,
+                &disruptions,
+                local.datetime(),
+                &routes,
+            )
+        });
+        let today = local.date();
         let picked = pick
             .filter(|pick| pick.day == today && pick.direction == direction)
             .map(|pick| pick.journey.as_str());
@@ -469,14 +524,8 @@ impl NextDepartures {
         let may_read = cache.may_read(now);
         let mut views = vec![];
         for leg in legs {
-            let stops = self.stops(leg);
-            let mut departures = match &stops {
-                Some((board, alight)) => {
-                    self.departures(&mut cache, may_read, leg, board, alight, now)
-                        .await
-                }
-                None => None,
-            };
+            let mut view = self.leg_view(&mut cache, may_read, leg, now).await;
+            let departures = &mut view.departures;
             for departure in departures.iter_mut().flatten() {
                 departure.picked = Some(departure.journey.as_str()) == picked;
             }
@@ -490,19 +539,32 @@ impl NextDepartures {
                     usual.usual = true;
                 }
             }
-            let (line, mode) = push::label(&leg.line, &self.lines);
-            views.push(LegView {
-                line,
-                mode,
-                color: self
-                    .lines
+            views.push(view);
+        }
+        let mut backups = vec![];
+        for backup in needed {
+            let mut rides = vec![];
+            for (ride, severity) in backup.backup.rides.iter().zip(backup.rides) {
+                rides.push(BackupLeg {
+                    leg: self.leg_view(&mut cache, may_read, ride, now).await,
+                    severity: severity.map(push::severity_name),
+                });
+            }
+            backups.push(BackupView {
+                instead_of: backup
+                    .avoided
                     .iter()
-                    .find(|label| label.code == leg.line)
-                    .and_then(|label| label.color.clone()),
-                from: stops.as_ref().map(|(board, _)| board.name.clone()),
-                to: stops.map(|(_, alight)| alight.name),
-                reach: leg.reach,
-                departures,
+                    .map(|(line, severity)| {
+                        let (name, mode) = push::label(line, &self.lines);
+                        LineStatus {
+                            line: name,
+                            mode,
+                            color: self.color(line),
+                            severity: Some(push::severity_name(*severity)),
+                        }
+                    })
+                    .collect(),
+                legs: rides,
             });
         }
         View {
@@ -511,7 +573,43 @@ impl NextDepartures {
                 Direction::Inbound => "inbound",
             },
             legs: views,
+            backups,
         }
+    }
+
+    /// A ride with its next departures, none marked.
+    async fn leg_view(
+        &self,
+        cache: &mut Cache,
+        may_read: bool,
+        leg: &Leg,
+        now: Timestamp,
+    ) -> LegView {
+        let stops = self.stops(leg);
+        let departures = match &stops {
+            Some((board, alight)) => {
+                self.departures(cache, may_read, leg, board, alight, now)
+                    .await
+            }
+            None => None,
+        };
+        let (line, mode) = push::label(&leg.line, &self.lines);
+        LegView {
+            line,
+            mode,
+            color: self.color(&leg.line),
+            from: stops.as_ref().map(|(board, _)| board.name.clone()),
+            to: stops.map(|(_, alight)| alight.name),
+            reach: leg.reach,
+            departures,
+        }
+    }
+
+    fn color(&self, line: &str) -> Option<String> {
+        self.lines
+            .iter()
+            .find(|label| label.code == line)
+            .and_then(|label| label.color.clone())
     }
 
     /// Whether a usual train leaving at `time` on the way `direction` can be
@@ -695,10 +793,14 @@ pub(crate) mod example {
     }
 
     pub(crate) fn metro(journey: &str, expected: &str) -> Value {
+        metro_on("C02000", journey, expected)
+    }
+
+    pub(crate) fn metro_on(line: &str, journey: &str, expected: &str) -> Value {
         json!({
             "RecordedAtTime": at("06:49:30").to_string(),
             "MonitoredVehicleJourney": {
-                "LineRef": { "value": "STIF:Line::C02000:" },
+                "LineRef": { "value": format!("STIF:Line::{line}:") },
                 "FramedVehicleJourneyRef": { "DataFrameRef": { "value": "any" }, "DatedVehicleJourneyRef": journey },
                 "DestinationName": [{ "value": "Porte Nord" }],
                 "JourneyNote": [],
@@ -846,7 +948,7 @@ pub(crate) mod example {
     }
 
     /// The example commute's routes: L between its two stations, both ways,
-    /// and X with one platform per way.
+    /// X with one platform per way, and Y, the backup of X, one way.
     pub(crate) fn routes() -> BTreeMap<String, Vec<Route>> {
         let aubepines = stop(
             "stop_point:IDFM:monomodalStopPlace:100",
@@ -900,6 +1002,19 @@ pub(crate) mod example {
                     },
                 ],
             ),
+            (
+                "C03000".to_string(),
+                vec![Route {
+                    stops: vec![
+                        stop(
+                            "stop_point:IDFM:390",
+                            "stop_area:IDFM:71390",
+                            "Gare Centrale",
+                        ),
+                        stop("stop_point:IDFM:410", "stop_area:IDFM:71400", "Mairie"),
+                    ],
+                }],
+            ),
         ])
     }
 }
@@ -908,6 +1023,7 @@ pub(crate) mod example {
 mod tests {
     use super::example::*;
     use super::*;
+    use crate::disruptions::{Cause, Disruption, Period, Severity};
     use crate::profile::UsualTrains;
     use jiff::civil::time;
     use serde_json::{Value, json};
@@ -950,7 +1066,9 @@ mod tests {
             outbound: Some(time(7, 50, 0, 0)),
             inbound: None,
         };
-        let view = departures.view(at("06:50:00"), Some(&j2()), &usual).await;
+        let view = departures
+            .view(at("06:50:00"), Some(&j2()), &usual, &quiet())
+            .await;
         assert_eq!(serde_json::to_value(&view).unwrap(), fixture("departures"));
     }
 
@@ -1031,7 +1149,7 @@ mod tests {
         answers(&server, "STIF:StopArea:SP:200:", siri(vec![]), 1).await;
         let departures = next_departures(&server, EXAMPLE);
         let view = departures
-            .view(at("06:50:00"), None, &UsualTrains::default())
+            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
             .await;
         // Six leave before the platform can be reached: still shown, for whoever is on the way.
         let shown: Vec<_> = view.legs[0]
@@ -1119,14 +1237,18 @@ mod tests {
                 .collect()
         };
         // The first train from 8:05 in Paris: the 8:07, leaving at 8:11.
-        let view = departures.view(at("06:50:00"), None, &usual(8, 5)).await;
+        let view = departures
+            .view(at("06:50:00"), None, &usual(8, 5), &quiet())
+            .await;
         assert_eq!(marked(&view), ["j2"]);
         // From 8:12: the 8:22 is cancelled, and none other is listed.
-        let view = departures.view(at("06:50:00"), None, &usual(8, 12)).await;
+        let view = departures
+            .view(at("06:50:00"), None, &usual(8, 12), &quiet())
+            .await;
         assert_eq!(marked(&view), Vec::<String>::new());
         // The train picked today is the one reminded.
         let view = departures
-            .view(at("06:50:00"), Some(&j2()), &usual(7, 50))
+            .view(at("06:50:00"), Some(&j2()), &usual(7, 50), &quiet())
             .await;
         assert_eq!(marked(&view), Vec::<String>::new());
         // The other way's usual train is not this one's.
@@ -1134,8 +1256,123 @@ mod tests {
             outbound: None,
             inbound: Some(time(7, 50, 0, 0)),
         };
-        let view = departures.view(at("06:50:00"), None, &evening).await;
+        let view = departures
+            .view(at("06:50:00"), None, &evening, &quiet())
+            .await;
         assert_eq!(marked(&view), Vec::<String>::new());
+    }
+
+    /// The feed as the poll loop read it at 7:50 in Paris, PRIM unreachable since.
+    fn feed(disruptions: &[Disruption]) -> LineAlerts {
+        let alerts = unread();
+        alerts.store(at("06:50:00"), disruptions);
+        alerts
+    }
+
+    /// Nothing on the lines.
+    fn quiet() -> LineAlerts {
+        feed(&[])
+    }
+
+    /// Never read, and PRIM unreachable.
+    fn unread() -> LineAlerts {
+        LineAlerts::new(
+            &Config::parse(EXAMPLE).unwrap(),
+            Prim::new("http://127.0.0.1:9", "key"),
+        )
+    }
+
+    /// An incident on `line` from 7:00 to 10:00 in Paris this Tuesday.
+    fn incident(line: &str, severity: Severity) -> Disruption {
+        let day = jiff::civil::date(2026, 11, 3);
+        Disruption {
+            id: format!("{line}-incident"),
+            lines: vec![line.into()],
+            stops: vec![],
+            periods: vec![Period {
+                begin: day.at(7, 0, 0, 0),
+                end: day.at(10, 0, 0, 0),
+            }],
+            updated: day.at(7, 0, 0, 0),
+            cause: Cause::Incident,
+            severity,
+            title: "Incident".into(),
+            short_message: None,
+            message: String::new(),
+            sections: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn the_backup_departures_match_the_fixture() {
+        let server = MockServer::start().await;
+        answers(&server, "STIF:StopArea:SP:100:", morning_board(), 1).await;
+        answers(&server, "STIF:StopArea:SP:200:", morning_alight(), 1).await;
+        answers(&server, "STIF:StopPoint:Q:300:", morning_metro(), 1).await;
+        let line_y = siri(vec![
+            metro_on("C03000", "y1", "06:51:00"),
+            metro_on("C03000", "y2", "06:57:00"),
+        ]);
+        answers(&server, "STIF:StopPoint:Q:390:", line_y, 1).await;
+        let departures = next_departures(&server, EXAMPLE);
+        let feed = feed(&[incident("C02000", Severity::Blocking)]);
+        let view = departures
+            .view(at("06:50:00"), None, &UsualTrains::default(), &feed)
+            .await;
+        assert_eq!(
+            serde_json::to_value(&view).unwrap(),
+            fixture("departures-backup")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_backup_is_read_only_while_a_line_it_avoids_is_disrupted() {
+        let server = MockServer::start().await;
+        answers(&server, "STIF:StopArea:SP:100:", morning_board(), 1).await;
+        answers(&server, "STIF:StopArea:SP:200:", morning_alight(), 1).await;
+        answers(&server, "STIF:StopPoint:Q:300:", morning_metro(), 1).await;
+        answers(&server, "STIF:StopPoint:Q:390:", siri(vec![]), 1).await;
+        let departures = next_departures(&server, EXAMPLE);
+        let usual = UsualTrains::default();
+        // Without the feed, or with nothing on line X: no backup, and Y is not read.
+        for feed in [unread(), feed(&[incident("C01740", Severity::Blocking)])] {
+            let view = departures.view(at("06:50:00"), None, &usual, &feed).await;
+            assert_eq!(view.backups, []);
+        }
+        // The backup's own line disrupted too: said on its ride.
+        let feed = feed(&[
+            incident("C02000", Severity::Unknown),
+            incident("C03000", Severity::Disrupted),
+        ]);
+        let view = departures.view(at("06:50:30"), None, &usual, &feed).await;
+        assert_eq!(view.backups.len(), 1);
+        assert_eq!(view.backups[0].instead_of[0].severity, Some("disrupted"));
+        assert_eq!(view.backups[0].legs[0].severity, Some("disrupted"));
+        assert_eq!(view.backups[0].legs[0].leg.departures, Some(vec![]));
+    }
+
+    #[tokio::test]
+    async fn only_a_way_with_backups_reads_the_disruptions() {
+        let server = MockServer::start().await;
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(siri(vec![])))
+            .mount(&server)
+            .await;
+        // The example has a backup in the morning only.
+        Mock::given(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let departures = next_departures(&server, EXAMPLE);
+        let feed = LineAlerts::new(
+            &Config::parse(EXAMPLE).unwrap(),
+            Prim::new(&server.uri(), "key"),
+        );
+        let usual = UsualTrains::default();
+        departures.view(at("16:20:00"), None, &usual, &feed).await;
+        let view = departures.view(at("06:50:00"), None, &usual, &feed).await;
+        assert_eq!(view.backups, []);
     }
 
     #[tokio::test]
@@ -1243,7 +1480,7 @@ outbound = \"07:30\"
         routes.remove("C02000");
         departures.set_routes(routes);
         let view = departures
-            .view(at("16:20:00"), None, &UsualTrains::default())
+            .view(at("16:20:00"), None, &UsualTrains::default(), &quiet())
             .await;
         assert_eq!(
             serde_json::to_value(&view).unwrap(),
@@ -1259,7 +1496,7 @@ outbound = \"07:30\"
             .mount(&server)
             .await;
         let view = next_departures(&server, EXAMPLE)
-            .view(at("06:50:00"), None, &UsualTrains::default())
+            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
             .await;
         assert_eq!(
             view.legs
@@ -1279,7 +1516,7 @@ outbound = \"07:30\"
         // No answer for the alight stop: a 404.
         let departures = next_departures(&server, EXAMPLE);
         let view = departures
-            .view(at("06:50:00"), None, &UsualTrains::default())
+            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
             .await;
         assert_eq!(view.legs[0].departures, None);
         assert!(view.legs[1].departures.is_some());
@@ -1289,7 +1526,7 @@ outbound = \"07:30\"
         departures.set_routes(routes);
         assert_eq!(
             departures
-                .view(at("06:50:30"), None, &UsualTrains::default())
+                .view(at("06:50:30"), None, &UsualTrains::default(), &quiet())
                 .await
                 .legs[0]
                 .departures,
@@ -1305,16 +1542,16 @@ outbound = \"07:30\"
         answers(&server, "STIF:StopPoint:Q:300:", morning_metro(), 2).await;
         let departures = next_departures(&server, EXAMPLE);
         let first = departures
-            .view(at("06:50:00"), None, &UsualTrains::default())
+            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
             .await;
         assert_eq!(
             departures
-                .view(at("06:50:59"), None, &UsualTrains::default())
+                .view(at("06:50:59"), None, &UsualTrains::default(), &quiet())
                 .await,
             first
         );
         departures
-            .view(at("06:51:00"), None, &UsualTrains::default())
+            .view(at("06:51:00"), None, &UsualTrains::default(), &quiet())
             .await;
         // The mocks check their counts when the server drops.
     }
@@ -1327,7 +1564,7 @@ outbound = \"07:30\"
         answers(&server, "STIF:StopPoint:Q:300:", morning_metro(), 1).await;
         let departures = next_departures(&server, EXAMPLE);
         departures
-            .view(at("06:50:00"), None, &UsualTrains::default())
+            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
             .await;
         let read = departures
             .read("STIF:StopArea:SP:100:", at("06:50:30"))
@@ -1363,7 +1600,7 @@ outbound = \"07:30\"
         // Judged once per request: the first answer does not stop the next stop's read.
         assert!(
             departures
-                .view(at("06:50:00"), None, &UsualTrains::default())
+                .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
                 .await
                 .legs[0]
                 .departures
@@ -1372,14 +1609,14 @@ outbound = \"07:30\"
         // Still served from the last answer while it is fresh, then nothing.
         assert!(
             departures
-                .view(at("06:50:30"), None, &UsualTrains::default())
+                .view(at("06:50:30"), None, &UsualTrains::default(), &quiet())
                 .await
                 .legs[0]
                 .departures
                 .is_some()
         );
         let low = departures
-            .view(at("06:52:00"), None, &UsualTrains::default())
+            .view(at("06:52:00"), None, &UsualTrains::default(), &quiet())
             .await;
         assert_eq!(low.legs[0].departures, None);
         assert_eq!(low.legs[1].departures, None);
@@ -1387,7 +1624,7 @@ outbound = \"07:30\"
         let next_day: Timestamp = "2026-11-04T06:50:00Z".parse().unwrap();
         assert!(
             departures
-                .view(next_day, None, &UsualTrains::default())
+                .view(next_day, None, &UsualTrains::default(), &quiet())
                 .await
                 .legs[0]
                 .departures

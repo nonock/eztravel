@@ -1,5 +1,6 @@
 pub mod alerts;
 pub mod api;
+pub mod backups;
 pub mod calendar;
 pub mod config;
 pub mod departures;

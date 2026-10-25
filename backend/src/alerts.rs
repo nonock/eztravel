@@ -215,6 +215,28 @@ fn is_planned(disruption: &Disruption, now: DateTime) -> bool {
         })
 }
 
+/// How badly `leg` is disrupted at `now`, in network local time, for its
+/// backups: by an incident under way, as the line's state in a window, or by
+/// planned works that cut it. None when it runs, or is only slowed by works.
+pub fn severity_on(
+    disruptions: &[Disruption],
+    now: DateTime,
+    leg: &Leg,
+    routes: &[Route],
+) -> Option<Severity> {
+    disruptions
+        .iter()
+        .filter(|disruption| {
+            disruption.is_active(now) && disruption.severity != Severity::Information
+        })
+        .filter(|disruption| {
+            !is_planned(disruption, now) || disruption.severity == Severity::Blocking
+        })
+        .filter(|disruption| affects(disruption, leg, routes))
+        .map(|disruption| level(disruption.severity))
+        .max_by_key(|severity| *severity == Severity::Blocking)
+}
+
 /// Severity on a two-step scale: a record of unknown severity counts as disrupted.
 fn level(severity: Severity) -> Severity {
     match severity {
@@ -619,5 +641,45 @@ mod tests {
             ..planned("i", Cause::Works, at(3, 5, 0), at(3, 23, 0))
         };
         assert_eq!(poll(&mut state, at(3, 7, 30), MORNING, &[notice]), []);
+    }
+
+    #[test]
+    fn a_leg_is_disrupted_by_incidents_and_by_planned_works_that_cut_it() {
+        let train = leg(TRAIN);
+        let on_train =
+            |disruptions: &[Disruption]| severity_on(disruptions, at(3, 7, 30), &train.leg, &[]);
+        assert_eq!(on_train(&[]), None);
+        // Incidents under way, as in a window: the worst counts.
+        assert_eq!(
+            on_train(&[incident("a", Severity::Disrupted)]),
+            Some(Severity::Disrupted)
+        );
+        assert_eq!(
+            on_train(&[
+                incident("a", Severity::Unknown),
+                incident("b", Severity::Blocking)
+            ]),
+            Some(Severity::Blocking)
+        );
+        assert_eq!(
+            on_train(&[incident("a", Severity::Unknown)]),
+            Some(Severity::Disrupted)
+        );
+        // Information, over, or on another line: nothing.
+        assert_eq!(on_train(&[incident("a", Severity::Information)]), None);
+        let over = disruption("a", TRAIN, Severity::Blocking, at(3, 6, 0), at(3, 7, 0));
+        assert_eq!(on_train(&[over]), None);
+        let elsewhere = disruption("a", OTHER, Severity::Blocking, at(3, 7, 0), at(3, 10, 0));
+        assert_eq!(on_train(&[elsewhere]), None);
+        // Planned works count only when they cut the line, whatever their cause.
+        let works = planned("w", Cause::Works, at(3, 0, 0), at(3, 23, 0));
+        assert_eq!(on_train(std::slice::from_ref(&works)), None);
+        let cut = Disruption {
+            severity: Severity::Blocking,
+            ..works
+        };
+        assert_eq!(on_train(&[cut]), Some(Severity::Blocking));
+        let days_long = planned("d", Cause::Incident, at(1, 0, 0), at(5, 0, 0));
+        assert_eq!(on_train(&[days_long]), None);
     }
 }

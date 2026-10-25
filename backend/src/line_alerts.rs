@@ -61,7 +61,10 @@ pub struct Alert {
 /// The feed as last read, for the poll loop and the app to share.
 pub struct LineAlerts {
     prim: Prim,
+    /// The lines of the commute, as listed on the Alertes page.
     lines: Vec<LineLabel>,
+    /// Those of the backups too, whose disruptions the backups need.
+    codes: Vec<String>,
     legs: Vec<Leg>,
     time_zone: TimeZone,
     routes: Mutex<BTreeMap<String, Vec<Route>>>,
@@ -75,7 +78,13 @@ impl LineAlerts {
     pub fn new(config: &Config, prim: Prim) -> Self {
         Self {
             prim,
-            lines: config.lines.clone(),
+            lines: config
+                .lines
+                .iter()
+                .filter(|label| config.line_codes().contains(&label.code))
+                .cloned()
+                .collect(),
+            codes: config.all_line_codes(),
             legs: config
                 .outbound
                 .iter()
@@ -107,6 +116,17 @@ impl LineAlerts {
     }
 
     pub async fn view(&self, now: Timestamp) -> View {
+        View {
+            lines: self
+                .disruptions(now)
+                .await
+                .map(|disruptions| self.shape(now, &disruptions)),
+        }
+    }
+
+    /// The disruptions of the commute's and the backups' lines, as last read:
+    /// none when the feed cannot be read.
+    pub async fn disruptions(&self, now: Timestamp) -> Option<Vec<Disruption>> {
         let _reading = self.reading.lock().await;
         let kept = self
             .last
@@ -114,10 +134,10 @@ impl LineAlerts {
             .expect("no thread panics while holding the alerts")
             .clone()
             .filter(|(read_at, _)| now.duration_since(*read_at) < MAX_AGE);
-        let disruptions = match kept {
+        match kept {
             Some((_, disruptions)) => disruptions,
             None => {
-                let codes: Vec<&str> = self.lines.iter().map(|label| label.code.as_str()).collect();
+                let codes: Vec<&str> = self.codes.iter().map(String::as_str).collect();
                 let read = self
                     .prim
                     .disruptions(&codes)
@@ -131,9 +151,6 @@ impl LineAlerts {
                     Some((now, read.clone()));
                 read
             }
-        };
-        View {
-            lines: disruptions.map(|disruptions| self.shape(now, &disruptions)),
         }
     }
 
@@ -370,6 +387,43 @@ mod tests {
         assert_eq!(alerts.view(at("06:50:00")).await, View { lines: None });
         assert_eq!(alerts.view(at("06:54:59")).await, View { lines: None });
         alerts.view(at("06:55:00")).await;
+    }
+
+    #[tokio::test]
+    async fn backup_lines_are_read_for_the_backups_but_not_listed() {
+        let server = MockServer::start().await;
+        let feed = serde_json::json!({
+            "lastUpdatedDate": "2026-11-03T06:02:15.628Z",
+            "disruptions": [{
+                "id": "slow-y",
+                "applicationPeriods": [{ "begin": "20261103T070000", "end": "20261103T100000" }],
+                "lastUpdate": "20261103T070000",
+                "cause": "PERTURBATION",
+                "severity": "PERTURBEE",
+                "title": "Métro Y : trafic ralenti",
+                "message": "<p>Le trafic est ralenti.</p>"
+            }],
+            "lines": [{
+                "id": "line:IDFM:C03000", "name": "Y", "shortName": "Y", "mode": "Metro",
+                "impactedObjects": [
+                    { "type": "line", "id": "line:IDFM:C03000", "name": "Y", "disruptionIds": ["slow-y"] }
+                ]
+            }]
+        });
+        Mock::given(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(feed))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let alerts = line_alerts(&server.uri());
+        let read = alerts.disruptions(at("06:50:00")).await.unwrap();
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].lines, ["C03000"]);
+        // The same read: the Alertes page lists the lines of the commute only.
+        let lines = alerts.view(at("06:51:00")).await.lines.unwrap();
+        let names: Vec<&str> = lines.iter().map(|line| line.line.as_str()).collect();
+        assert_eq!(names, ["L", "X"]);
+        assert!(lines.iter().all(|line| line.alerts.is_empty()));
     }
 
     #[test]

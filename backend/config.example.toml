@@ -38,6 +38,12 @@ name = "X"
 mode = "metro"
 color = "#E07A1F"
 
+[[lines]]
+code = "C03000"
+name = "Y"
+mode = "metro"
+color = "#3E9C6B"
+
 # The rides of each way, in order. Stops are Navitia stop areas. `reach`
 # (optional) is how many minutes it takes from leaving home, or work, to the
 # platform of the ride: the app counts down to when to leave for each train.
@@ -65,3 +71,14 @@ line = "C01740"
 board = "stop_area:IDFM:71370"
 alight = "stop_area:IDFM:71100"
 reach = 25
+
+# Optional: rides to take instead of some lines of a way. While one of
+# `instead_of` is disrupted on that way, by an incident under way or by planned
+# works that cut it, the app shows the next departures of the rides with those
+# of the way, and says when a ride is disrupted too.
+[[backups]]
+direction = "outbound"
+instead_of = ["C02000"]
+rides = [
+  { line = "C03000", board = "stop_area:IDFM:71390", alight = "stop_area:IDFM:71400" },
+]
