@@ -18,6 +18,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.core.view.WindowCompat
+import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
 import io.github.nonock.eztravel.backend.AppBackend
@@ -90,8 +91,24 @@ class MainActivityTest {
         compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > 0 }
         tab(R.string.nav_trip).assertIsSelected()
         compose.onNodeWithText(text(R.string.app_name)).assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.departures_title)).assertIsDisplayed()
+        // How the watch goes, in an icon beside the gear: nothing is watched now.
+        compose.onNodeWithContentDescription(text(R.string.status_not_watching)).assertIsDisplayed()
+    }
+
+    @Test
+    fun theStatusIconOpensAllTheBackendSees() {
+        compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > 0 }
+        compose.onNodeWithContentDescription(text(R.string.status_not_watching)).performClick()
+        compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
+        // Back closes it, on the commute still: the sheet is a window of its own.
+        Espresso.pressBack()
+        compose.onNodeWithText(text(R.string.status_no_next)).assertDoesNotExist()
+        tab(R.string.nav_trip).assertIsSelected()
+        // From the alerts too.
+        tab(R.string.nav_alerts).performClick()
+        compose.onNodeWithContentDescription(text(R.string.status_not_watching)).performClick()
+        compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
     }
 
     @Test
@@ -101,10 +118,10 @@ class MainActivityTest {
         compose.onNodeWithText(text(R.string.alerts_none_at_all)).assertIsDisplayed()
         // The phone's own back gesture comes to the commute, as its tab does.
         back()
-        compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.departures_title)).assertIsDisplayed()
         tab(R.string.nav_alerts).performClick()
         tab(R.string.nav_trip).performClick()
-        compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.departures_title)).assertIsDisplayed()
         // The history and the calendar are behind the gear.
         tab(R.string.nav_history).assertDoesNotExist()
         tab(R.string.nav_calendar).assertDoesNotExist()
@@ -135,10 +152,10 @@ class MainActivityTest {
         compose.onNodeWithText(text(R.string.history_empty)).assertIsDisplayed()
         back()
         back()
-        compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.departures_title)).assertIsDisplayed()
         compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
         compose.onNodeWithContentDescription(text(R.string.back)).performClick()
-        compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.departures_title)).assertIsDisplayed()
     }
 
     /** Pulls the page down, from its top, and waits for each count of [reads] to grow. */

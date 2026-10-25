@@ -1,6 +1,6 @@
 package io.github.nonock.eztravel.home
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,10 +17,10 @@ import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -31,7 +31,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.nonock.eztravel.R
-import io.github.nonock.eztravel.backend.Backend
 import io.github.nonock.eztravel.backend.Status
 import io.github.nonock.eztravel.backend.Status.Cause
 import io.github.nonock.eztravel.backend.Status.Direction
@@ -42,67 +41,102 @@ import io.github.nonock.eztravel.ui.theme.Good
 import java.time.Instant
 
 /** Checks run every two minutes: reading every minute keeps the screen current. */
-private const val REFRESH_MS = 60_000L
+const val STATUS_REFRESH_MS = 60_000L
 
-/**
- * What the backend sees, in a card headed by the one thing to know: all fine,
- * a line in trouble, or that nothing can be vouched for. Read when the screen
- * shows, every minute while it does, and when `refresh` changes.
- */
+/** The one thing to know of what the backend sees, as an icon in its color and in words. */
+private class Headed(val icon: ImageVector, val tint: Color, val words: String, val wrong: Boolean)
+
+/** All fine, a line in trouble, or that nothing can be vouched for; none while reading. */
 @Composable
-fun CommuteStatus(backend: Backend, refresh: Int, modifier: Modifier = Modifier, now: () -> Instant = Instant::now) {
-    // The commute tab already says that this build has no server.
-    if (!backend.configured) return
-    val seen by polled(backend, refresh, everyMs = REFRESH_MS) { backend.status() }
-
-    Card(
-        modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            when (val current = seen) {
-                Reading.Loading -> Text(stringResource(R.string.loading))
-                Reading.Failed -> {
-                    HeadlineRow(Icons.Filled.Warning, MaterialTheme.colorScheme.error, stringResource(R.string.status_headline_unreachable))
-                    Text(stringResource(R.string.status_unreachable), color = MaterialTheme.colorScheme.error)
-                }
-                is Reading.Known -> Known(current.value, now())
-            }
-        }
-    }
-}
-
-/** An icon and the headline: what to know at a glance, [large] when something is wrong. */
-@Composable
-private fun HeadlineRow(icon: ImageVector, tint: Color, text: String, large: Boolean = true) {
-    Row(Modifier.padding(bottom = if (large) 8.dp else 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(if (large) 28.dp else 22.dp))
-        Spacer(Modifier.width(12.dp))
-        Text(text, style = if (large) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun Known(status: Status, now: Instant) {
-    val resources = LocalResources.current
-    val headline = status.headline(now)
-    when (headline) {
-        is Headline.Out -> HeadlineRow(Icons.Filled.Warning, MaterialTheme.colorScheme.error, stringResource(R.string.status_headline_outage))
+private fun look(reading: Reading<Status>, now: Instant): Headed? = when (reading) {
+    Reading.Loading -> null
+    Reading.Failed -> Headed(Icons.Filled.Warning, MaterialTheme.colorScheme.error, stringResource(R.string.status_headline_unreachable), wrong = true)
+    is Reading.Known -> when (val headline = reading.value.headline(now)) {
+        is Headline.Out -> Headed(Icons.Filled.Warning, MaterialTheme.colorScheme.error, stringResource(R.string.status_headline_outage), wrong = true)
         is Headline.Trouble -> {
             val blocking = headline.line.severity == Severity.BLOCKING
-            HeadlineRow(
+            Headed(
                 Icons.Filled.Warning,
                 if (blocking) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                 stringResource(
                     if (blocking) R.string.status_headline_blocking else R.string.status_headline_disrupted,
-                    headline.line.line.label(resources),
+                    headline.line.line.label(LocalResources.current),
                 ),
+                wrong = true,
             )
         }
-        Headline.Fine -> HeadlineRow(Icons.Filled.CheckCircle, Good, stringResource(R.string.status_fine), large = false)
-        Headline.Checking -> HeadlineRow(Icons.Filled.Info, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_checking), large = false)
-        Headline.Idle -> HeadlineRow(Icons.Outlined.DateRange, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_not_watching), large = false)
+        Headline.Fine -> Headed(Icons.Filled.CheckCircle, Good, stringResource(R.string.status_fine), wrong = false)
+        Headline.Checking -> Headed(Icons.Filled.Info, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_checking), wrong = false)
+        Headline.Idle -> Headed(Icons.Outlined.DateRange, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_not_watching), wrong = false)
     }
+}
+
+/** Beside the gear: how the watch goes, named by its headline; [onOpen] shows the details. */
+@Composable
+fun StatusIcon(reading: Reading<Status>, now: Instant, onOpen: () -> Unit) {
+    val look = look(reading, now)
+    IconButton(onClick = onOpen) {
+        Icon(
+            look?.icon ?: Icons.Filled.Info,
+            contentDescription = look?.words ?: stringResource(R.string.loading),
+            tint = look?.tint ?: MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** On the commute, only when something is wrong, which an icon alone would let slip by; [onOpen] shows the details. */
+@Composable
+fun StatusBanner(reading: Reading<Status>, now: Instant, modifier: Modifier = Modifier, onOpen: () -> Unit) {
+    val look = look(reading, now)?.takeIf { it.wrong } ?: return
+    Card(
+        modifier.fillMaxWidth().clickable(onClick = onOpen),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(look.icon, contentDescription = null, tint = look.tint, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.width(12.dp))
+            Text(look.words, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/** On the commute during school holidays: fewer trains run. */
+@Composable
+fun SchoolHoliday(reading: Reading<Status>, modifier: Modifier = Modifier) {
+    val name = (reading as? Reading.Known)?.value?.schoolHoliday ?: return
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(stringResource(R.string.status_school_holiday, name), style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/**
+ * All the backend sees, headed by the one thing to know: the way watched and
+ * how each line runs, the last check, the next window, what is planned today.
+ */
+@Composable
+fun StatusDetails(reading: Reading<Status>, now: Instant, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        val look = look(reading, now)
+        if (look == null) {
+            Text(stringResource(R.string.loading))
+            return@Column
+        }
+        Row(Modifier.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(look.icon, contentDescription = null, tint = look.tint, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.width(12.dp))
+            Text(look.words, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
+        when (reading) {
+            is Reading.Known -> Known(reading.value)
+            else -> Text(stringResource(R.string.status_unreachable), color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+@Composable
+private fun Known(status: Status) {
     status.outage?.let { outage ->
         val reason = when (outage.cause) {
             Cause.PRIM -> R.string.status_outage_prim
@@ -112,14 +146,8 @@ private fun Known(status: Status, now: Instant) {
         Text(stringResource(reason, outage.since.shown()), color = MaterialTheme.colorScheme.error)
         Spacer(Modifier.height(8.dp))
     }
-    when {
-        status.watching == null -> Text(status.next?.let { stringResource(R.string.status_next, it.shown()) } ?: stringResource(R.string.status_no_next))
-        // Every line runs, as the headline says: their badges, and when they were checked.
-        headline == Headline.Fine -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (state in status.lines) LineBadge(state.line, state.color)
-            Spacer(Modifier.weight(1f))
-            status.checkedAt?.let { Checked(it) }
-        }
+    when (status.watching) {
+        null -> Text(status.next?.let { stringResource(R.string.status_next, it.shown()) } ?: stringResource(R.string.status_no_next))
         else -> {
             Text(
                 stringResource(
@@ -141,8 +169,9 @@ private fun Known(status: Status, now: Instant) {
             }
         }
     }
-    // The last check vouches for a window, or dates an outage; otherwise it says nothing.
-    if (headline != Headline.Fine && (status.watching != null || status.outage != null)) status.checkedAt?.let { Checked(it) }
+    status.checkedAt?.let {
+        Text(stringResource(R.string.status_checked, it.shown()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
     if (status.planned.isNotEmpty()) {
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -157,12 +186,7 @@ private fun Known(status: Status, now: Instant) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.status_school_holiday, name), style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.status_school_holiday, name))
         }
     }
-}
-
-@Composable
-private fun Checked(at: Instant) {
-    Text(stringResource(R.string.status_checked, at.shown()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
