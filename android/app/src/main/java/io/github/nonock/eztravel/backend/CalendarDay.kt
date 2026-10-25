@@ -3,8 +3,11 @@ package io.github.nonock.eztravel.backend
 import org.json.JSONObject
 import java.time.LocalDate
 
-/** A day of the calendar: what it is, and why. Only office days are watched. */
-data class CalendarDay(val date: LocalDate, val kind: Kind, val why: Why) {
+/**
+ * A day of the calendar: what it is, and why, and the school holidays it is
+ * in, if any. Only office days are watched.
+ */
+data class CalendarDay(val date: LocalDate, val kind: Kind, val why: Why, val schoolHoliday: String? = null) {
     enum class Kind {
         OFFICE,
 
@@ -37,6 +40,7 @@ data class CalendarDay(val date: LocalDate, val kind: Kind, val why: Why) {
                 LocalDate.parse(day.getString("date")),
                 Kind.entries.firstOrNull { it.name.lowercase() == day.optString("kind") } ?: Kind.OFF,
                 Why.entries.firstOrNull { it.name.lowercase() == day.optString("why") } ?: Why.CYCLE,
+                day.stringOrNull("school_holiday"),
             )
         }
     }

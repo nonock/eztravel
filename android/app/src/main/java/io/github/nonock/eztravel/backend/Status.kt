@@ -21,6 +21,8 @@ data class Status(
     val lines: List<LineState>,
     /** The planned disruptions announced today. */
     val planned: List<String>,
+    /** The name of the school holidays today is in, if any: fewer trains run. */
+    val schoolHoliday: String? = null,
 ) {
     enum class Direction { OUTBOUND, INBOUND }
 
@@ -99,6 +101,7 @@ data class Status(
                     )
                 },
                 planned = status.getJSONArray("planned").let { titles -> List(titles.length()) { titles.getString(it) } },
+                schoolHoliday = status.stringOrNull("school_holiday"),
             )
         }
     }

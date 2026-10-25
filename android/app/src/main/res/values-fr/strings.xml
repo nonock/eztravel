@@ -51,6 +51,7 @@
     <string name="status_no_next">Aucun jour de bureau à venir : rien ne sera surveillé.</string>
     <string name="status_checked">Dernier relevé : %1$s.</string>
     <string name="status_planned">Prévu aujourd’hui :</string>
+    <string name="status_school_holiday">%1$s : moins de trains et de métros que d’habitude.</string>
     <string name="status_outage_prim">Surveillance interrompue depuis %1$s : les données d’Île-de-France Mobilités sont illisibles. Vérifiez le trafic ailleurs.</string>
     <string name="status_outage_firebase">Surveillance interrompue depuis %1$s : les notifications ne partent plus. Vérifiez le trafic ailleurs.</string>
     <string name="status_outage_server">Surveillance interrompue depuis %1$s : le serveur ne fait plus ses relevés. Vérifiez le trafic ailleurs.</string>
@@ -148,6 +149,7 @@
     <string name="calendar_weekend">Week-end</string>
     <string name="calendar_set">changé dans l’appli</string>
     <string name="calendar_set_legend">Changé dans l’appli</string>
+    <string name="calendar_school_legend">Vacances scolaires : moins de trains</string>
     <string name="calendar_today">aujourd’hui</string>
     <string name="calendar_change">changer ce jour</string>
     <string name="calendar_as_planned">Comme prévu</string>
