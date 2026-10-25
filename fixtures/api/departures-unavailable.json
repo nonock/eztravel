@@ -7,6 +7,7 @@
       "color": "#E07A1F",
       "from": null,
       "to": null,
+      "from_position": null,
       "reach": null,
       "departures": null
     },
@@ -16,6 +17,7 @@
       "color": null,
       "from": "Gare Centrale",
       "to": "Les Aubépines",
+      "from_position": { "lat": 48.876, "lon": 2.325 },
       "reach": 25,
       "departures": []
     }

@@ -212,6 +212,7 @@ mod tests {
             stop_point: format!("sp:{id}"),
             stop_area: format!("sa:{id}"),
             name: id.into(),
+            coord: None,
         };
         let routes = BTreeMap::from([(
             METRO.to_string(),
