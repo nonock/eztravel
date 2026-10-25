@@ -31,7 +31,7 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>, val 
      */
     fun nearestFirst(here: Position?): List<Leg> {
         if (here == null || legs.any { it.fromPosition == null }) return legs
-        val nearest = legs.indices.minBy { here.distanceTo(legs[it].fromPosition!!) }
+        val nearest = legs.indices.minByOrNull { here.distanceTo(legs[it].fromPosition!!) } ?: return legs
         return legs.drop(nearest) + legs.take(nearest)
     }
 
