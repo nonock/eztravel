@@ -198,6 +198,40 @@ class DeparturesTest {
         assertNull(Refusal.parse("Unprocessable Entity"))
     }
 
+    /** A train on a ride with twelve minutes to the platform, at [time] UTC. */
+    private fun train(time: String, journey: String, state: State = State.ON_TIME, picked: Boolean = false, usual: Boolean = false) =
+        Departure(at(time), at(time), null, null, "Gare Centrale", null, state, journey, picked, usual)
+
+    @Test
+    fun aLongListIsShortenedToTheTrainsTooSoonAndThreeToCatch() {
+        val departures = listOf(
+            // Too soon to leave for at 6:50, but not for whoever is on the way.
+            train("06:52:00", "a"),
+            train("06:58:00", "b"),
+            // Leave now, then later: three can be caught by the 7:25.
+            train("07:02:00", "c"),
+            train("07:10:00", "d", State.CANCELLED),
+            train("07:15:00", "e"),
+            train("07:25:00", "f"),
+            train("07:40:00", "g"),
+            train("07:55:00", "h", usual = true),
+            train("08:10:00", "i"),
+        )
+        val leg = Leg(Line("L", Mode.TRAIN), null, "Les Aubépines", "Gare Centrale", departures, Duration.ofMinutes(12))
+        val now = at("06:50:00")
+        assertEquals(listOf("a", "b", "c", "d", "e", "f", "h"), leg.shortList(now).map { it.journey })
+        // The train picked stays in sight, wherever it is.
+        val picked = leg.copy(departures = departures.map { if (it.journey == "i") it.copy(picked = true, usual = false) else it.copy(usual = false) })
+        assertEquals(listOf("a", "b", "c", "d", "e", "f", "i"), picked.shortList(now).map { it.journey })
+        // Fewer than three to catch: all of them.
+        assertEquals(departures, leg.shortList(at("07:20:00")))
+        // Without a time to the platform, the next four: no usual train there.
+        val metro = leg.copy(reach = null, departures = departures.map { it.copy(usual = false) })
+        assertEquals(listOf("a", "b", "c", "d"), metro.shortList(now).map { it.journey })
+        // Nothing read.
+        assertEquals(emptyList<Departure>(), leg.copy(departures = null).shortList(now))
+    }
+
     @Test
     fun readsTheBackupsNeeded() {
         val departures = Departures.parse(fixture("departures-backup"))

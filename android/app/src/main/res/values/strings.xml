@@ -33,7 +33,6 @@
     <string name="notification_leave_scheduled">Still scheduled, not followed live yet.</string>
     <string name="notification_train_late_title">%1$s: your %2$s train runs late</string>
     <string name="notification_train_late">%1$s to %2$s: now leaving at %3$s, %4$d min late.</string>
-    <string name="status_title">Your commute</string>
     <string name="status_unreachable">The server cannot be reached: whether your lines are watched is unknown.</string>
     <string name="status_watching_outbound">Watching the way to work.</string>
     <string name="status_watching_inbound">Watching the way home.</string>
@@ -69,6 +68,11 @@
     <string name="departures_leg_to">to</string>
     <string name="departures_unavailable">Departures cannot be read right now.</string>
     <string name="departures_none">No departure in the coming hours.</string>
+    <plurals name="departures_more">
+        <item quantity="one">Show %1$d more</item>
+        <item quantity="other">Show %1$d more</item>
+    </plurals>
+    <string name="departures_less">Show fewer</string>
     <string name="departures_minutes">%1$d min</string>
     <string name="departures_arriving">Arriving</string>
     <string name="departures_late">+%1$d min</string>

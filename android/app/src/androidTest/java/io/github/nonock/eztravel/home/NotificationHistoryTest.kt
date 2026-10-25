@@ -1,6 +1,6 @@
 package io.github.nonock.eztravel.home
 
-import io.github.nonock.eztravel.ScreenTest
+import io.github.nonock.eztravel.ScreenTesting
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -23,7 +23,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
 @RunWith(AndroidJUnit4::class)
-class NotificationHistoryTest : ScreenTest() {
+class NotificationHistoryTest : ScreenTesting() {
     private fun show(backend: FakeBackend) = compose.setContent { NotificationHistory(backend) }
 
     /** Noon on the day `daysAgo` days before today, in the phone's time zone. */

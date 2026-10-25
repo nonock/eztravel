@@ -75,6 +75,29 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>, val 
         /** Not cancelled, and its time to leave not past at [now]. */
         fun catchable(departure: Departure, now: Instant): Boolean =
             departure.state != State.CANCELLED && leaveAt(departure)?.let { !now.isAfter(it) } == true
+
+        /**
+         * The departures shown before "more": with a time to the platform, in
+         * time order up to the [CATCHABLE]th that can be caught at [now], so
+         * that those too soon come first for whoever is already on the way;
+         * without, the first [FIRST]. The picked and usual trains always.
+         */
+        fun shortList(now: Instant): List<Departure> {
+            val all = departures.orEmpty()
+            val shown = if (reach == null) {
+                FIRST
+            } else {
+                var caught = 0
+                all.indexOfFirst { catchable(it, now) && ++caught == CATCHABLE } + 1
+            }
+            if (shown == 0) return all
+            return all.filterIndexed { index, departure -> index < shown || departure.picked || departure.usual }
+        }
+
+        private companion object {
+            const val CATCHABLE = 3
+            const val FIRST = 4
+        }
     }
 
     data class Departure(

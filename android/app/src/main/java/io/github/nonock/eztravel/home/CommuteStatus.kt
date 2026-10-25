@@ -1,5 +1,6 @@
 package io.github.nonock.eztravel.home
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -58,13 +59,7 @@ fun CommuteStatus(backend: Backend, refresh: Int, modifier: Modifier = Modifier,
         modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(
-                stringResource(R.string.status_title),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(8.dp))
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             when (val current = seen) {
                 Reading.Loading -> Text(stringResource(R.string.loading))
                 Reading.Failed -> {
@@ -77,20 +72,21 @@ fun CommuteStatus(backend: Backend, refresh: Int, modifier: Modifier = Modifier,
     }
 }
 
-/** An icon and the headline, large: what to know at a glance. */
+/** An icon and the headline: what to know at a glance, [large] when something is wrong. */
 @Composable
-private fun HeadlineRow(icon: ImageVector, tint: Color, text: String) {
-    Row(Modifier.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(28.dp))
+private fun HeadlineRow(icon: ImageVector, tint: Color, text: String, large: Boolean = true) {
+    Row(Modifier.padding(bottom = if (large) 8.dp else 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(if (large) 28.dp else 22.dp))
         Spacer(Modifier.width(12.dp))
-        Text(text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(text, style = if (large) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
 private fun Known(status: Status, now: Instant) {
     val resources = LocalResources.current
-    when (val headline = status.headline(now)) {
+    val headline = status.headline(now)
+    when (headline) {
         is Headline.Out -> HeadlineRow(Icons.Filled.Warning, MaterialTheme.colorScheme.error, stringResource(R.string.status_headline_outage))
         is Headline.Trouble -> {
             val blocking = headline.line.severity == Severity.BLOCKING
@@ -103,9 +99,9 @@ private fun Known(status: Status, now: Instant) {
                 ),
             )
         }
-        Headline.Fine -> HeadlineRow(Icons.Filled.CheckCircle, Good, stringResource(R.string.status_fine))
-        Headline.Checking -> HeadlineRow(Icons.Filled.Info, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_checking))
-        Headline.Idle -> HeadlineRow(Icons.Outlined.DateRange, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_not_watching))
+        Headline.Fine -> HeadlineRow(Icons.Filled.CheckCircle, Good, stringResource(R.string.status_fine), large = false)
+        Headline.Checking -> HeadlineRow(Icons.Filled.Info, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_checking), large = false)
+        Headline.Idle -> HeadlineRow(Icons.Outlined.DateRange, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_not_watching), large = false)
     }
     status.outage?.let { outage ->
         val reason = when (outage.cause) {
@@ -116,8 +112,14 @@ private fun Known(status: Status, now: Instant) {
         Text(stringResource(reason, outage.since.shown()), color = MaterialTheme.colorScheme.error)
         Spacer(Modifier.height(8.dp))
     }
-    when (status.watching) {
-        null -> Text(status.next?.let { stringResource(R.string.status_next, it.shown()) } ?: stringResource(R.string.status_no_next))
+    when {
+        status.watching == null -> Text(status.next?.let { stringResource(R.string.status_next, it.shown()) } ?: stringResource(R.string.status_no_next))
+        // Every line runs, as the headline says: their badges, and when they were checked.
+        headline == Headline.Fine -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (state in status.lines) LineBadge(state.line, state.color)
+            Spacer(Modifier.weight(1f))
+            status.checkedAt?.let { Checked(it) }
+        }
         else -> {
             Text(
                 stringResource(
@@ -139,9 +141,8 @@ private fun Known(status: Status, now: Instant) {
             }
         }
     }
-    status.checkedAt?.let {
-        Text(stringResource(R.string.status_checked, it.shown()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+    // The last check vouches for a window, or dates an outage; otherwise it says nothing.
+    if (headline != Headline.Fine && (status.watching != null || status.outage != null)) status.checkedAt?.let { Checked(it) }
     if (status.planned.isNotEmpty()) {
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -156,7 +157,12 @@ private fun Known(status: Status, now: Instant) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.status_school_holiday, name))
+            Text(stringResource(R.string.status_school_holiday, name), style = MaterialTheme.typography.bodyMedium)
         }
     }
+}
+
+@Composable
+private fun Checked(at: Instant) {
+    Text(stringResource(R.string.status_checked, at.shown()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }

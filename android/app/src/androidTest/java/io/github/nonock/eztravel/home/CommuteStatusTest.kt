@@ -1,6 +1,6 @@
 package io.github.nonock.eztravel.home
 
-import io.github.nonock.eztravel.ScreenTest
+import io.github.nonock.eztravel.ScreenTesting
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
@@ -25,7 +25,7 @@ import java.time.Duration
 import java.time.Instant
 
 @RunWith(AndroidJUnit4::class)
-class CommuteStatusTest : ScreenTest() {
+class CommuteStatusTest : ScreenTesting() {
     private var refresh by mutableIntStateOf(0)
 
     private fun show(backend: FakeBackend) = compose.setContent { CommuteStatus(backend, refresh) }
@@ -44,7 +44,7 @@ class CommuteStatusTest : ScreenTest() {
     fun theSchoolHolidaysAreSaidOnTheirDays() {
         val backend = FakeBackend(status = watching(Direction.OUTBOUND, LineState(train, null)))
         show(backend)
-        waitFor(text(R.string.status_watching_outbound))
+        waitFor(text(R.string.status_fine))
         compose.onNodeWithText(text(R.string.status_school_holiday, "Vacances de la Toussaint")).assertDoesNotExist()
         backend.status = backend.status.copy(schoolHoliday = "Vacances de la Toussaint")
         refresh++
@@ -70,6 +70,18 @@ class CommuteStatusTest : ScreenTest() {
         waitFor(text(R.string.status_planned))
         waitFor("Ligne L : travaux entre Nanterre et Cergy")
         compose.onNodeWithText(text(R.string.status_not_watching)).assertDoesNotExist()
+    }
+
+    @Test
+    fun whenAllRunsTheCardIsShort() {
+        show(FakeBackend(status = watching(Direction.OUTBOUND, LineState(train, null), LineState(metro, null))))
+        waitFor(text(R.string.status_fine))
+        // The lines by their badges, and when they were checked: the headline says how they run.
+        waitFor(hasContentDescription(text(R.string.line_train, "L")))
+        waitFor(hasContentDescription(text(R.string.line_metro, "X")))
+        waitFor(text(R.string.status_checked, now.shown()))
+        compose.onNodeWithText(text(R.string.status_state_normal)).assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.status_watching_outbound)).assertDoesNotExist()
     }
 
     @Test
@@ -115,7 +127,9 @@ class CommuteStatusTest : ScreenTest() {
         waitFor(text(R.string.status_not_watching))
         compose.onNodeWithText(text(R.string.status_fine)).assertDoesNotExist()
         waitFor(text(R.string.status_next, tomorrow.shown()))
-        waitFor(text(R.string.status_checked, yesterday.shown()))
+        // Outside the windows, the last check vouches for nothing.
+        val lastCheck = text(R.string.status_checked, "@").substringBefore("@")
+        compose.onNodeWithText(lastCheck, substring = true).assertDoesNotExist()
     }
 
     @Test
@@ -157,9 +171,9 @@ class CommuteStatusTest : ScreenTest() {
     }
 
     @Test
-    fun aBuildWithoutServerLeavesItToTheTimeAwaySection() {
+    fun aBuildWithoutServerLeavesItToTheCommuteTab() {
         show(FakeBackend(configured = false))
         compose.waitForIdle()
-        compose.onNodeWithText(text(R.string.status_title)).assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.status_no_next)).assertDoesNotExist()
     }
 }

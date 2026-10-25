@@ -1,6 +1,6 @@
 package io.github.nonock.eztravel.home
 
-import io.github.nonock.eztravel.ScreenTest
+import io.github.nonock.eztravel.ScreenTesting
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -35,7 +35,7 @@ import java.time.Duration
 import java.time.Instant
 
 @RunWith(AndroidJUnit4::class)
-class NextDeparturesTest : ScreenTest() {
+class NextDeparturesTest : ScreenTesting() {
     private fun at(time: String) = Instant.parse("2026-11-03T${time}Z")
 
     private val now = at("06:50:00")
@@ -95,14 +95,18 @@ class NextDeparturesTest : ScreenTest() {
         show(FakeBackend(departures = morning))
         waitFor(text(R.string.departures_title))
         waitFor(hasContentDescription(text(R.string.line_train, "L")) and leg("Les Aubépines", "Gare Centrale"))
-        // On time: its time, where it goes, its mission, platform and arrival.
+        // On time: its time, where it goes, its arrival, and its platform, leaving soon.
         waitFor(
-            hasText(at("06:52:00").clock()) and hasText("Gare Centrale") and hasText("PALO") and
+            hasText(at("06:52:00").clock()) and hasText("Gare Centrale") and
                 hasText(text(R.string.departures_platform, "2")) and hasText(text(R.string.departures_arrival, at("07:04:00").clock())),
         )
+        // The operator's codes say nothing to most; a platform half an hour ahead is not where to go yet.
+        compose.onNodeWithText("PALO").assertDoesNotExist()
+        compose.onNode(hasText(at("07:22:00").clock()) and hasText(text(R.string.departures_platform, "2"))).assertDoesNotExist()
         // Late: the timetable's time and the delay, as on station boards.
         waitFor(hasText(at("07:07:00").clock()) and hasText(text(R.string.departures_late, 4)))
         waitFor(hasText(at("07:22:00").clock()) and hasText(text(R.string.departures_cancelled)))
+        // The metro's next trains on one line: "Arriving · 3 min, Porte Nord".
         waitFor(hasText(at("07:37:00").clock()) and hasText(text(R.string.departures_delayed)) and hasText("Les Tilleuls"))
         // The metro gives minutes left.
         waitFor(hasContentDescription(text(R.string.line_metro, "X")) and leg("Gare Centrale", "Mairie"))
@@ -171,7 +175,7 @@ class NextDeparturesTest : ScreenTest() {
         scrolledTo(hasContentDescription(text(R.string.line_train, "Z")) and leg("Le Port", "Mairie") and hasText(text(R.string.status_state_disrupted)))
         compose.onNode(hasContentDescription(text(R.string.line_metro, "Y")) and hasText(text(R.string.status_state_disrupted)))
             .assertDoesNotExist()
-        scrolledTo(hasText(at("07:05:00").clock()) and hasText("ZOLA"))
+        scrolledTo(hasText(at("07:05:00").clock()) and hasText(text(R.string.departures_arrival, at("07:12:00").clock())))
         // Never picked: the reminder is for the way's own train.
         compose.onNode(bell("07:05:00")).assertDoesNotExist()
         scrolledTo(bell("07:07:00"))
@@ -205,6 +209,40 @@ class NextDeparturesTest : ScreenTest() {
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodes(hasText(text(R.string.departures_picked))).fetchSemanticsNodes().isEmpty()
         }
+    }
+
+    @Test
+    fun aLongListShowsTheTrainsToCatchFirstAndTheRestWhenAsked() {
+        // Every six minutes from 6:56: with twelve minutes to the platform, at 6:50
+        // the 6:56 is too soon, and the 7:02, 7:08 and 7:14 can be caught.
+        val many = (0 until 9).map { index ->
+            val time = at("06:56:00").plus(Duration.ofMinutes(6L * index))
+            Departure(time, time, null, null, "Gare Centrale", null, State.ON_TIME, "t$index")
+        }
+        show(FakeBackend(departures = morning.copy(legs = listOf(morning.legs[0].copy(departures = many)))))
+        scrolledTo(hasText(at("06:56:00").clock()) and hasText(text(R.string.departures_leaves_in, 6)))
+        scrolledTo(hasText(at("07:14:00").clock()))
+        compose.onNode(hasText(at("07:20:00").clock())).assertDoesNotExist()
+        compose.onNodeWithText(context.resources.getQuantityString(R.plurals.departures_more, 5, 5)).performScrollTo().performClick()
+        scrolledTo(hasText(at("07:44:00").clock()) and hasText(text(R.string.departures_leave_in, 42)))
+        compose.onNodeWithText(text(R.string.departures_less)).performScrollTo().performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasText(at("07:44:00").clock())).fetchSemanticsNodes().isEmpty()
+        }
+    }
+
+    @Test
+    fun aMetroShowsItsNextTrainsOnALinePerDestination() {
+        val trains = listOf(
+            Departure(null, at("06:51:10"), null, null, "Porte Nord", null, State.ON_TIME, "m1"),
+            Departure(null, at("06:56:00"), null, null, "Porte Nord", null, State.ON_TIME, "m2"),
+            Departure(null, at("06:59:30"), null, null, "La Fourche", null, State.ON_TIME, "m3"),
+            Departure(null, at("07:03:00"), null, null, "Porte Nord", null, State.ON_TIME, "m4"),
+        )
+        show(FakeBackend(departures = Departures(Direction.OUTBOUND, listOf(Leg(metro, null, "Gare Centrale", "Mairie", trains)))))
+        // "1 · 6 · 13 min, Porte Nord", and the short run on its own: "9 min, La Fourche".
+        waitFor(hasText("1") and hasText("6") and hasText(text(R.string.departures_minutes, 13)) and hasText("Porte Nord"))
+        waitFor(hasText(text(R.string.departures_minutes, 9)) and hasText("La Fourche"))
     }
 
     @Test
@@ -301,7 +339,7 @@ class NextDeparturesTest : ScreenTest() {
         waitFor(hero(R.string.departures_hero_picked) and hasText(at("06:52:00").clock()) and hasText(text(R.string.departures_leaves_in, 2)))
         clock = at("06:52:10")
         waitFor(hero(R.string.departures_hero_picked) and hasText(text(R.string.departures_leaving)))
-        waitFor(hasText(at("06:52:00").clock()) and hasText("PALO") and hasText(text(R.string.departures_leaving)))
+        waitFor(hasText(at("06:52:00").clock()) and hasText(text(R.string.departures_arrival, at("07:04:00").clock())) and hasText(text(R.string.departures_leaving)))
     }
 
     @Test
@@ -310,7 +348,7 @@ class NextDeparturesTest : ScreenTest() {
         show(FakeBackend(departures = morning.copy(legs = listOf(morning.legs[0].copy(departures = trains), morning.legs[1]))))
         // The 8:07, rather than the 8:02, the next one to catch.
         waitFor(hero(R.string.departures_hero_usual) and hasText(at("07:07:00").clock()))
-        waitFor(hasText(at("07:07:00").clock()) and hasText("PILO") and hasText(text(R.string.departures_usual)))
+        waitFor(hasText(at("07:07:00").clock()) and hasText(text(R.string.departures_arrival, at("07:23:00").clock())) and hasText(text(R.string.departures_usual)))
         compose.onNode(hero(R.string.departures_hero_next)).assertDoesNotExist()
     }
 

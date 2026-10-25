@@ -9,7 +9,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
 
 /** A screen under test: its compose rule, the app's words, and waiting for what the screen reads. */
-abstract class ScreenTest {
+abstract class ScreenTesting {
     @get:Rule
     val compose = createComposeRule()
 

@@ -1,6 +1,6 @@
 package io.github.nonock.eztravel.home
 
-import io.github.nonock.eztravel.ScreenTest
+import io.github.nonock.eztravel.ScreenTesting
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
@@ -27,7 +27,7 @@ import java.time.Instant
 import java.time.ZoneId
 
 @RunWith(AndroidJUnit4::class)
-class AlertsPageTest : ScreenTest() {
+class AlertsPageTest : ScreenTesting() {
     private val now = Instant.now()
     private val today = now.atZone(ZoneId.systemDefault()).toLocalDate()
 
