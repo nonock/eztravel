@@ -103,7 +103,7 @@ pub fn window_closed(
     severity: Severity,
     labels: &[LineLabel],
 ) -> BTreeMap<String, String> {
-    let (name, mode) = push::label(line, labels);
+    let (name, mode, _) = push::label(line, labels);
     BTreeMap::from([
         ("type".to_string(), "window_closed".to_string()),
         ("line".to_string(), name),

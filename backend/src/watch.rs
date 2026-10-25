@@ -139,7 +139,7 @@ pub struct Snapshot {
 /// The answer to `GET /status`, in the shape fixed by `fixtures/api/`.
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct View {
-    pub watching: Option<&'static str>,
+    pub watching: Option<Direction>,
     pub checked_at: Option<Timestamp>,
     pub next: Option<Timestamp>,
     pub outage: Option<Outage>,
@@ -169,10 +169,7 @@ impl Snapshot {
                 cause: Cause::Server,
             });
         View {
-            watching: self.watching.map(|direction| match direction {
-                Direction::Outbound => "outbound",
-                Direction::Inbound => "inbound",
-            }),
+            watching: self.watching,
             checked_at: self.health.checked_at,
             next,
             outage: stopped.or_else(|| self.health.outage(now)),
@@ -188,6 +185,7 @@ impl Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::fixture;
     use jiff::civil::date;
 
     const TUESDAY: Date = date(2026, 11, 3);
@@ -289,11 +287,6 @@ mod tests {
         assert_eq!(health.checked_at(), Some(at("06:00")));
         health.checked(at("15:00"));
         assert!(!health.recovering());
-    }
-
-    fn fixture(name: &str) -> serde_json::Value {
-        let path = format!("{}/../fixtures/api/{name}.json", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
     fn line(

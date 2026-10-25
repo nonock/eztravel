@@ -366,10 +366,7 @@ impl Service {
         direction: Direction,
         now: Timestamp,
     ) -> Result<Vec<Seen>, PrimError> {
-        let legs = match direction {
-            Direction::Outbound => &self.config.outbound,
-            Direction::Inbound => &self.config.inbound,
-        };
+        let legs = self.config.legs(direction);
         let mut seen = vec![];
         for leg in legs {
             let Some((board, alight)) = self
@@ -447,10 +444,7 @@ impl Service {
 
     /// When the window of `direction` opens and ends on the day of `local`.
     fn window_bounds(&self, local: DateTime, direction: Direction) -> (Timestamp, Timestamp) {
-        let window = match direction {
-            Direction::Outbound => self.config.windows.outbound,
-            Direction::Inbound => self.config.windows.inbound,
-        };
+        let window = self.config.windows.of(direction);
         let at = |time| {
             local
                 .date()
@@ -523,19 +517,15 @@ impl Service {
 
     /// What the app's home screen shows: the lines of the way being watched, and how polls go.
     fn publish(&self, now: Timestamp, today: Date, direction: Option<Direction>) {
-        let legs: &[Leg] = match direction {
-            Some(Direction::Outbound) => &self.config.outbound,
-            Some(Direction::Inbound) => &self.config.inbound,
-            None => &[],
-        };
+        let legs = direction.map_or(&[][..], |direction| self.config.legs(direction));
         let lines = legs
             .iter()
             .map(|leg| {
-                let (line, mode) = push::label(&leg.line, &self.config.lines);
+                let (line, mode, color) = push::label(&leg.line, &self.config.lines);
                 LineStatus {
                     line,
                     mode,
-                    color: self.config.line_color(&leg.line).map(String::from),
+                    color,
                     severity: self.state.severity(&leg.line).map(push::severity_name),
                 }
             })
@@ -1195,7 +1185,7 @@ mod tests {
         {
             let seen = status.lock().unwrap();
             let view = seen.view(at(MORNING), None, None);
-            assert_eq!(view.watching, Some("outbound"));
+            assert_eq!(view.watching, Some(Direction::Outbound));
             assert_eq!(view.checked_at, Some(at(MORNING)));
             assert_eq!(
                 view.lines,
@@ -1227,7 +1217,7 @@ mod tests {
             .lock()
             .unwrap()
             .view(tuesday("15:00"), None, None);
-        assert_eq!(view.watching, Some("inbound"));
+        assert_eq!(view.watching, Some(Direction::Inbound));
         let names: Vec<&str> = view.lines.iter().map(|line| line.line.as_str()).collect();
         assert_eq!(names, ["X", "L"]);
     }

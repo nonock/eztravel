@@ -197,11 +197,11 @@ impl LineAlerts {
                     })
                     .collect();
                 alerts.sort_by_key(|(rank, alert)| (!alert.active, *rank, alert.begin));
-                let (name, mode) = push::label(&label.code, &self.lines);
+                let (name, mode, color) = push::label(&label.code, &self.lines);
                 LineView {
                     line: name,
                     mode,
-                    color: label.color.clone(),
+                    color,
                     alerts: alerts.into_iter().map(|(_, alert)| alert).collect(),
                 }
             })
@@ -246,6 +246,7 @@ mod tests {
     use super::*;
     use crate::departures::example::{at, routes};
     use crate::disruptions::{Place, Section};
+    use crate::testing::fixture;
     use jiff::civil::{date, datetime};
     use wiremock::matchers::path;
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -358,11 +359,6 @@ mod tests {
         let alerts = LineAlerts::new(&Config::parse(EXAMPLE).unwrap(), Prim::new(server, "key"));
         alerts.set_routes(routes());
         alerts
-    }
-
-    fn fixture(name: &str) -> serde_json::Value {
-        let path = format!("{}/../fixtures/api/{name}.json", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
     #[tokio::test]
