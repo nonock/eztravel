@@ -75,18 +75,19 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 
 class MainActivity : ComponentActivity() {
-    private val askToNotify = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    private val ask = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // The logo on navy while the app starts, then the app's own theme.
         installSplashScreen()
         super.onCreate(savedInstanceState)
         Notifier.createChannel(this)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            askToNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
+        // Notifications, and where the phone is roughly, to show the nearest ride first; once each.
+        val wanted = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (wanted.isNotEmpty()) ask.launch(wanted.toTypedArray())
         // The backend learns where to send notifications; again at each launch, in case it failed.
         PushToken.fetch { token ->
             lifecycleScope.launch(Dispatchers.IO) { AppBackend.register(token) }

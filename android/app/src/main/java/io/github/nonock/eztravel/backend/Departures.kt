@@ -4,6 +4,8 @@ import io.github.nonock.eztravel.notifications.PushMessage
 import org.json.JSONObject
 import java.time.Duration
 import java.time.Instant
+import kotlin.math.cos
+import kotlin.math.sqrt
 
 /**
  * The next departures on each leg of the way shown: the way to work until
@@ -21,6 +23,17 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>, val 
      * disrupted now; a ride can be disrupted too. Never picked.
      */
     data class Backup(val insteadOf: List<Status.LineState>, val legs: List<Leg>)
+
+    /**
+     * The rides from the one boarding nearest [here] on, then those behind:
+     * at the station of the second ride, it comes first. In the way's order
+     * without a position, or while a ride's stop is not placed.
+     */
+    fun nearestFirst(here: Position?): List<Leg> {
+        if (here == null || legs.any { it.fromPosition == null }) return legs
+        val nearest = legs.indices.minBy { here.distanceTo(legs[it].fromPosition!!) }
+        return legs.drop(nearest) + legs.take(nearest)
+    }
 
     /** The train shown first, on [leg], the ride reminded, and when to leave for it. */
     data class Featured(val leg: Leg, val departure: Departure, val leave: Instant)
@@ -68,6 +81,8 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>, val 
         val departures: List<Departure>?,
         val reach: Duration? = null,
         val severity: PushMessage.Severity? = null,
+        /** Where [from] is, once the backend knows. */
+        val fromPosition: Position? = null,
     ) {
         /** When to leave for [departure], from its expected time; null without a time to the platform. */
         fun leaveAt(departure: Departure): Instant? = reach?.let { departure.expected.minus(it) }
@@ -153,6 +168,7 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>, val 
             if (json.isNull("departures")) null else json.getJSONArray("departures").objects().map(::departure),
             if (json.isNull("reach")) null else Duration.ofMinutes(json.getLong("reach")),
             Status.severity(json),
+            json.optJSONObject("from_position")?.let { Position(it.getDouble("lat"), it.getDouble("lon")) },
         )
 
         private fun departure(json: JSONObject) = Departure(
@@ -201,5 +217,15 @@ enum class Refusal {
             val name = runCatching { JSONObject(json) }.getOrNull()?.stringOrNull("refused")
             return entries.firstOrNull { it.name.lowercase() == name }
         }
+    }
+}
+
+/** A place in decimal degrees: a stop, or the phone, which keeps its own. */
+data class Position(val lat: Double, val lon: Double) {
+    /** Near enough to compare stops a few kilometres apart: degrees of longitude shrink away from the equator. */
+    fun distanceTo(other: Position): Double {
+        val east = (other.lon - lon) * cos(Math.toRadians((lat + other.lat) / 2))
+        val north = other.lat - lat
+        return sqrt(east * east + north * north)
     }
 }
