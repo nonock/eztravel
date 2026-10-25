@@ -89,20 +89,24 @@ data class Status(
                         },
                     )
                 },
-                lines = status.getJSONArray("lines").objects().map { line ->
-                    LineState(
-                        PushMessage.Line(line.getString("line"), PushMessage.mode(line.getString("mode"))),
-                        when {
-                            line.isNull("severity") -> null
-                            line.getString("severity") == "blocking" -> PushMessage.Severity.BLOCKING
-                            else -> PushMessage.Severity.DISRUPTED
-                        },
-                        line.stringOrNull("color")?.let(::hexColor),
-                    )
-                },
+                lines = status.getJSONArray("lines").objects().map(::lineState),
                 planned = status.getJSONArray("planned").let { titles -> List(titles.length()) { titles.getString(it) } },
                 schoolHoliday = status.stringOrNull("school_holiday"),
             )
+        }
+
+        /** A line as `/status` gives it, and the backups of `/departures`. */
+        internal fun lineState(line: JSONObject) = LineState(
+            PushMessage.Line(line.getString("line"), PushMessage.mode(line.getString("mode"))),
+            severity(line),
+            line.stringOrNull("color")?.let(::hexColor),
+        )
+
+        /** A `severity` the backend gives, none when absent or null: an unknown one is a disruption. */
+        internal fun severity(json: JSONObject): PushMessage.Severity? = when {
+            json.isNull("severity") -> null
+            json.getString("severity") == "blocking" -> PushMessage.Severity.BLOCKING
+            else -> PushMessage.Severity.DISRUPTED
         }
     }
 }

@@ -6,6 +6,7 @@ import io.github.nonock.eztravel.backend.Departures.State
 import io.github.nonock.eztravel.backend.Status.Direction
 import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
+import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -195,5 +196,43 @@ class DeparturesTest {
         assertNull(Refusal.parse(JSONObject().put("refused", "too_far").toString()))
         assertNull(Refusal.parse(JSONObject().put("error", "x").toString()))
         assertNull(Refusal.parse("Unprocessable Entity"))
+    }
+
+    @Test
+    fun readsTheBackupsNeeded() {
+        val departures = Departures.parse(fixture("departures-backup"))
+        assertEquals(listOf(Line("L", Mode.TRAIN), Line("X", Mode.METRO)), departures.legs.map { it.line })
+        val backup = departures.backups.single()
+        assertEquals(listOf(Status.LineState(Line("X", Mode.METRO), Severity.BLOCKING, 0xFFE07A1F.toInt())), backup.insteadOf)
+        assertEquals(
+            listOf(
+                Leg(
+                    Line("Y", Mode.METRO),
+                    0xFF3E9C6B.toInt(),
+                    "Gare Centrale",
+                    "Mairie",
+                    listOf(
+                        Departure(null, at("06:51:00"), null, null, "Porte Nord", null, State.ON_TIME, "y1"),
+                        Departure(null, at("06:57:00"), null, null, "Porte Nord", null, State.ON_TIME, "y2"),
+                    ),
+                ),
+            ),
+            backup.legs,
+        )
+        // A ride disrupted too.
+        val json = JSONObject(fixture("departures-backup"))
+        val ride = json.getJSONArray("backups").getJSONObject(0).getJSONArray("legs").getJSONObject(0)
+        ride.put("severity", "disrupted")
+        assertEquals(Severity.DISRUPTED, Departures.parse(json.toString()).backups[0].legs[0].severity)
+        ride.put("severity", "blocking")
+        assertEquals(Severity.BLOCKING, Departures.parse(json.toString()).backups[0].legs[0].severity)
+    }
+
+    @Test
+    fun mostOfTheTimeNoBackupIsNeeded() {
+        assertEquals(emptyList<Departures.Backup>(), Departures.parse(fixture("departures")).backups)
+        // From a backend without them.
+        val json = JSONObject(fixture("departures")).apply { remove("backups") }
+        assertEquals(emptyList<Departures.Backup>(), Departures.parse(json.toString()).backups)
     }
 }

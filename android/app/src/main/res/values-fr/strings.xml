@@ -65,6 +65,7 @@
     <string name="not_configured">Cette version de l’appli n’a ni adresse de serveur ni clé (voir local.properties).</string>
     <string name="unreachable">Le serveur est injoignable. Réessayez plus tard.</string>
     <string name="departures_title">Prochains départs</string>
+    <string name="backup_title">Itinéraire de secours</string>
     <string name="departures_leg_to">vers</string>
     <string name="departures_unavailable">Les départs ne peuvent pas être lus pour l’instant.</string>
     <string name="departures_none">Aucun départ dans les prochaines heures.</string>

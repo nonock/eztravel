@@ -13,13 +13,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.notifications.PushMessage
+import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import io.github.nonock.eztravel.notifications.label
+
+/** How a line runs, in words and in a color that makes trouble stand out. */
+@Composable
+fun lineState(severity: Severity?): Pair<String, Color> = when (severity) {
+    null -> stringResource(R.string.status_state_normal) to MaterialTheme.colorScheme.onSurface
+    Severity.BLOCKING -> stringResource(R.string.status_state_blocking) to MaterialTheme.colorScheme.error
+    Severity.DISRUPTED -> stringResource(R.string.status_state_disrupted) to MaterialTheme.colorScheme.primary
+}
 
 /** Black or white, whichever contrasts more with [background]. */
 fun contentOn(background: Color): Color = if (background.luminance() > 0.179f) Color.Black else Color.White

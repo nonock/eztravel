@@ -157,11 +157,7 @@ private fun Known(status: Status, now: Instant) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             for (state in status.lines) {
-                val (words, color) = when (state.severity) {
-                    null -> R.string.status_state_normal to MaterialTheme.colorScheme.onSurface
-                    Severity.BLOCKING -> R.string.status_state_blocking to MaterialTheme.colorScheme.error
-                    Severity.DISRUPTED -> R.string.status_state_disrupted to MaterialTheme.colorScheme.primary
-                }
+                val (words, color) = lineState(state.severity)
                 // One row, read as one: "Line J, interrupted".
                 Row(
                     Modifier.padding(vertical = 4.dp).semantics(mergeDescendants = true) {},
@@ -169,7 +165,7 @@ private fun Known(status: Status, now: Instant) {
                 ) {
                     LineBadge(state.line, state.color)
                     Spacer(Modifier.width(12.dp))
-                    Text(stringResource(words), color = color)
+                    Text(words, color = color)
                 }
             }
         }
