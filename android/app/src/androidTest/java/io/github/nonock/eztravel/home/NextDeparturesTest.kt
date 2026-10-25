@@ -95,14 +95,14 @@ class NextDeparturesTest : ScreenTesting() {
         show(FakeBackend(departures = morning))
         waitFor(text(R.string.departures_title))
         waitFor(hasContentDescription(text(R.string.line_train, "L")) and leg("Les Aubépines", "Gare Centrale"))
-        // On time: its time, where it goes, its arrival, and its platform, leaving soon.
+        // On time: its time and its arrival, read "arrives 07:04", where it goes, and its platform below the time.
         waitFor(
             hasText(at("06:52:00").clock()) and hasText("Gare Centrale") and
-                hasText(text(R.string.departures_platform, "2")) and hasText(text(R.string.departures_arrival, at("07:04:00").clock())),
+                hasText(text(R.string.departures_platform, "2")) and hasContentDescription(text(R.string.departures_arrival, at("07:04:00").clock())),
         )
-        // The operator's codes say nothing to most; a platform half an hour ahead is not where to go yet.
+        // The operator's codes say nothing to most; a platform shows as soon as it is known.
         compose.onNodeWithText("PALO").assertDoesNotExist()
-        compose.onNode(hasText(at("07:22:00").clock()) and hasText(text(R.string.departures_platform, "2"))).assertDoesNotExist()
+        waitFor(hasText(at("07:22:00").clock()) and hasText(text(R.string.departures_platform, "2")))
         // Late: the timetable's time and the delay, as on station boards.
         waitFor(hasText(at("07:07:00").clock()) and hasText(text(R.string.departures_late, 4)))
         waitFor(hasText(at("07:22:00").clock()) and hasText(text(R.string.departures_cancelled)))
@@ -175,7 +175,7 @@ class NextDeparturesTest : ScreenTesting() {
         scrolledTo(hasContentDescription(text(R.string.line_train, "Z")) and leg("Le Port", "Mairie") and hasText(text(R.string.status_state_disrupted)))
         compose.onNode(hasContentDescription(text(R.string.line_metro, "Y")) and hasText(text(R.string.status_state_disrupted)))
             .assertDoesNotExist()
-        scrolledTo(hasText(at("07:05:00").clock()) and hasText(text(R.string.departures_arrival, at("07:12:00").clock())))
+        scrolledTo(hasText(at("07:05:00").clock()) and hasContentDescription(text(R.string.departures_arrival, at("07:12:00").clock())))
         // Never picked: the reminder is for the way's own train.
         compose.onNode(bell("07:05:00")).assertDoesNotExist()
         scrolledTo(bell("07:07:00"))
@@ -339,7 +339,7 @@ class NextDeparturesTest : ScreenTesting() {
         waitFor(hero(R.string.departures_hero_picked) and hasText(at("06:52:00").clock()) and hasText(text(R.string.departures_leaves_in, 2)))
         clock = at("06:52:10")
         waitFor(hero(R.string.departures_hero_picked) and hasText(text(R.string.departures_leaving)))
-        waitFor(hasText(at("06:52:00").clock()) and hasText(text(R.string.departures_arrival, at("07:04:00").clock())) and hasText(text(R.string.departures_leaving)))
+        waitFor(hasText(at("06:52:00").clock()) and hasContentDescription(text(R.string.departures_arrival, at("07:04:00").clock())) and hasText(text(R.string.departures_leaving)))
     }
 
     @Test
@@ -348,7 +348,7 @@ class NextDeparturesTest : ScreenTesting() {
         show(FakeBackend(departures = morning.copy(legs = listOf(morning.legs[0].copy(departures = trains), morning.legs[1]))))
         // The 8:07, rather than the 8:02, the next one to catch.
         waitFor(hero(R.string.departures_hero_usual) and hasText(at("07:07:00").clock()))
-        waitFor(hasText(at("07:07:00").clock()) and hasText(text(R.string.departures_arrival, at("07:23:00").clock())) and hasText(text(R.string.departures_usual)))
+        waitFor(hasText(at("07:07:00").clock()) and hasContentDescription(text(R.string.departures_arrival, at("07:23:00").clock())) and hasText(text(R.string.departures_usual)))
         compose.onNode(hero(R.string.departures_hero_next)).assertDoesNotExist()
     }
 
