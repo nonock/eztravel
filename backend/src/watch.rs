@@ -144,11 +144,19 @@ pub struct View {
     pub outage: Option<Outage>,
     pub lines: Vec<LineStatus>,
     pub planned: Vec<String>,
+    /// The name of the school holidays today is in, if any.
+    pub school_holiday: Option<String>,
 }
 
 impl Snapshot {
-    /// `next` is computed when asked, so that it follows a change of time away at once.
-    pub fn view(&self, now: Timestamp, next: Option<Timestamp>) -> View {
+    /// `next` is computed when asked, so that it follows a change of the days at
+    /// once; `school_holiday` is as last read.
+    pub fn view(
+        &self,
+        now: Timestamp,
+        next: Option<Timestamp>,
+        school_holiday: Option<String>,
+    ) -> View {
         // A poll loop that stopped cannot say so itself: the time of its last poll does.
         let stopped = self
             .polled_at
@@ -167,6 +175,7 @@ impl Snapshot {
             outage: stopped.or_else(|| self.health.outage(now)),
             lines: self.lines.clone(),
             planned: self.planned.clone(),
+            school_holiday,
         }
     }
 }
@@ -312,7 +321,7 @@ mod tests {
             planned: vec!["Ligne L : travaux entre Nanterre et Cergy".into()],
         };
         assert_eq!(
-            serde_json::to_value(snapshot.view(at("06:43"), Some(at("15:00")))).unwrap(),
+            serde_json::to_value(snapshot.view(at("06:43"), Some(at("15:00")), None)).unwrap(),
             fixture("status-watching")
         );
     }
@@ -334,9 +343,11 @@ mod tests {
             planned: vec![],
         };
         assert_eq!(
-            serde_json::to_value(
-                snapshot.view(at("15:31"), Some("2026-11-05T05:45:00Z".parse().unwrap()))
-            )
+            serde_json::to_value(snapshot.view(
+                at("15:31"),
+                Some("2026-11-05T05:45:00Z".parse().unwrap()),
+                None
+            ))
             .unwrap(),
             fixture("status-outage")
         );
@@ -354,7 +365,7 @@ mod tests {
             planned: vec![],
         };
         assert_eq!(
-            serde_json::to_value(snapshot.view(at("10:01"), Some(at("15:00")))).unwrap(),
+            serde_json::to_value(snapshot.view(at("10:01"), Some(at("15:00")), None)).unwrap(),
             fixture("status-idle")
         );
     }
@@ -365,12 +376,15 @@ mod tests {
             polled_at: Some(at("10:00")),
             ..Snapshot::default()
         };
-        assert_eq!(snapshot.view(at("10:09"), None).outage, None);
+        assert_eq!(snapshot.view(at("10:09"), None, None).outage, None);
         assert_eq!(
-            snapshot.view(at("10:10"), None).outage,
+            snapshot.view(at("10:10"), None, None).outage,
             outage("10:00", Cause::Server)
         );
         // Before the first poll, there is nothing to say yet.
-        assert_eq!(Snapshot::default().view(at("10:10"), None).outage, None);
+        assert_eq!(
+            Snapshot::default().view(at("10:10"), None, None).outage,
+            None
+        );
     }
 }

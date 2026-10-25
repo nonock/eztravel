@@ -1,6 +1,7 @@
 //! The API the app calls: register the phone, read and set the days of the
-//! calendar and the usual train of each way, see what the backend sees, the
-//! next departures, and pick one of them for the reminder to leave.
+//! calendar, with the school holidays, and the usual train of each way, see
+//! what the backend sees, the next departures, and pick one of them for the
+//! reminder to leave.
 //!
 //! Every request carries the app key (`Authorization: Bearer …`), compiled
 //! into the user's own build of the app and kept out of the repository.
@@ -27,6 +28,7 @@ use crate::journal::Journal;
 use crate::leaving::Refusal;
 use crate::line_alerts::{self, LineAlerts};
 use crate::profile::{Store, UsualTrains};
+use crate::school::SchoolHolidays;
 use crate::watch::{Snapshot, View};
 use jiff::ToSpan;
 
@@ -87,7 +89,15 @@ struct Month {
 /// `GET /calendar`, in the shape fixed by `fixtures/api/calendar.json`.
 #[derive(Serialize)]
 struct MonthView {
-    days: Vec<DayPlan>,
+    days: Vec<DayView>,
+}
+
+#[derive(Serialize)]
+struct DayView {
+    #[serde(flatten)]
+    plan: DayPlan,
+    /// The name of the school holidays the day is in, if any.
+    school_holiday: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -113,6 +123,13 @@ struct Shared {
     departures: Arc<NextDepartures>,
     line_alerts: Arc<LineAlerts>,
     journal: Arc<Journal>,
+    school: Arc<SchoolHolidays>,
+}
+
+impl FromRef<Shared> for Arc<SchoolHolidays> {
+    fn from_ref(shared: &Shared) -> Self {
+        shared.school.clone()
+    }
 }
 
 impl FromRef<Shared> for Arc<Journal> {
@@ -166,6 +183,7 @@ pub struct Sources {
     pub departures: Arc<NextDepartures>,
     pub line_alerts: Arc<LineAlerts>,
     pub journal: Arc<Journal>,
+    pub school: Arc<SchoolHolidays>,
 }
 
 pub fn router(sources: Sources, key: String) -> Router {
@@ -177,6 +195,7 @@ pub fn router(sources: Sources, key: String) -> Router {
         departures,
         line_alerts,
         journal,
+        school,
     } = sources;
     Router::new()
         .route("/devices", post(register))
@@ -198,6 +217,7 @@ pub fn router(sources: Sources, key: String) -> Router {
             departures,
             line_alerts,
             journal,
+            school,
         })
 }
 
@@ -235,15 +255,17 @@ async fn status_now(
     State(status): State<Arc<Mutex<Snapshot>>>,
     State(store): State<Arc<Store>>,
     State(schedule): State<Arc<Schedule>>,
+    State(school): State<Arc<SchoolHolidays>>,
 ) -> Json<View> {
     let now = Timestamp::now();
     // From the days as set now, not as of the last poll: the app reads this right after a change.
     let next = schedule.next_window(now, &store.profile());
+    let school_holiday = school.on(schedule.today(now));
     Json(
         status
             .lock()
             .expect("no thread panics while holding the status")
-            .view(now, next),
+            .view(now, next, school_holiday),
     )
 }
 
@@ -377,6 +399,7 @@ async fn set_usual_train(
 async fn month(
     State(store): State<Arc<Store>>,
     State(schedule): State<Arc<Schedule>>,
+    State(school): State<Arc<SchoolHolidays>>,
     Query(month): Query<Month>,
 ) -> Response {
     // Exactly a year and a month: "2026-11".
@@ -388,8 +411,15 @@ async fn month(
         return StatusCode::BAD_REQUEST.into_response();
     };
     let calendar = store.profile().calendar(&schedule.calendar);
+    let holidays = school.known();
     let days = (0..i64::from(first.days_in_month()))
-        .map(|offset| calendar.day(first + offset.days()))
+        .map(|offset| {
+            let date = first + offset.days();
+            DayView {
+                plan: calendar.day(date),
+                school_holiday: crate::school::on(&holidays, date).map(String::from),
+            }
+        })
         .collect();
     Json(MonthView { days }).into_response()
 }
@@ -428,6 +458,7 @@ mod tests {
     use crate::history::History;
     use crate::prim::Prim;
     use crate::profile::Pick;
+    use crate::school::{Holiday, SchoolHolidays};
     use crate::trains::Ended;
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode};
@@ -445,6 +476,7 @@ mod tests {
         departures: Arc<NextDepartures>,
         line_alerts: Arc<LineAlerts>,
         journal: Arc<Journal>,
+        school: Arc<SchoolHolidays>,
         _dir: tempfile::TempDir,
     }
 
@@ -468,6 +500,12 @@ mod tests {
                     Prim::new("http://127.0.0.1:9", "key"),
                 )),
                 journal: Arc::new(Journal::open(&dir.path().join("journal.jsonl"))),
+                // Nothing read: the tests set what is known.
+                school: Arc::new(SchoolHolidays::new(
+                    None,
+                    "http://127.0.0.1:9",
+                    jiff::tz::TimeZone::get("Europe/Paris").unwrap(),
+                )),
                 _dir: dir,
             }
         }
@@ -500,6 +538,7 @@ mod tests {
                 departures: self.departures.clone(),
                 line_alerts: self.line_alerts.clone(),
                 journal: self.journal.clone(),
+                school: self.school.clone(),
             };
             let response = router(sources, KEY.into()).oneshot(request).await.unwrap();
             let status = response.status();
@@ -725,7 +764,7 @@ mod tests {
         assert_eq!(
             body,
             format!(
-                r#"{{"watching":null,"checked_at":null,"next":"{next}","outage":null,"lines":[],"planned":[]}}"#
+                r#"{{"watching":null,"checked_at":null,"next":"{next}","outage":null,"lines":[],"planned":[],"school_holiday":null}}"#
             )
         );
         // A poll loop silent for an hour has stopped.
@@ -735,6 +774,20 @@ mod tests {
         let status: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(status["outage"]["cause"], "server");
         assert_eq!(status["outage"]["since"], an_hour_ago.to_string());
+    }
+
+    #[tokio::test]
+    async fn the_status_says_when_today_is_in_the_school_holidays() {
+        let api = Api::new();
+        let today = Timestamp::now().in_tz("Europe/Paris").unwrap().date();
+        api.school.set(vec![Holiday {
+            name: "Vacances de la Toussaint".into(),
+            first: today,
+            last: today,
+        }]);
+        let (_, body) = api.authorized(Method::GET, "/status", None).await;
+        let status: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(status["school_holiday"], "Vacances de la Toussaint");
     }
 
     /// When the next window opens, as `GET /status` says, in Paris.
@@ -774,6 +827,11 @@ mod tests {
                 (date(2026, 11, 20), Day::Away),
             ]);
         });
+        api.school.set(vec![Holiday {
+            name: "Vacances de la Toussaint".into(),
+            first: date(2026, 10, 17),
+            last: date(2026, 11, 1),
+        }]);
         let (status, body) = api
             .authorized(Method::GET, "/calendar?month=2026-11", None)
             .await;
@@ -842,7 +900,7 @@ mod tests {
         let month: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(
             month["days"][4],
-            serde_json::json!({"date": "2026-11-05", "kind": "remote", "why": "set"})
+            serde_json::json!({"date": "2026-11-05", "kind": "remote", "why": "set", "school_holiday": null})
         );
         assert_eq!(set(None), StatusCode::NO_CONTENT);
         assert_eq!(api.store.profile().days, BTreeMap::new());

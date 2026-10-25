@@ -7,5 +7,6 @@
     { "line": "X", "mode": "metro", "color": null, "severity": null },
     { "line": "L", "mode": "train", "color": "#7B61C9", "severity": "disrupted" }
   ],
-  "planned": []
+  "planned": [],
+  "school_holiday": null
 }

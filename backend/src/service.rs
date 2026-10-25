@@ -29,6 +29,7 @@ use crate::prim::PrimError;
 use crate::profile::{Profile, Store};
 use crate::push::{self, PushError, Sender};
 use crate::relevance::{Leg, Route};
+use crate::school::{SCHOOL_URL, SchoolHolidays};
 use crate::trains::{Seen, Trains, follow};
 use crate::watch::{Cause, Health, LineStatus, Snapshot};
 
@@ -86,6 +87,8 @@ pub enum Poll {
 pub struct Startup {
     pub service: Service,
     pub api: axum::Router,
+    /// For the caller to read again from time to time; the API answers with what was last read.
+    pub school: Arc<SchoolHolidays>,
 }
 
 impl Service {
@@ -124,7 +127,7 @@ impl Service {
     /// `FIREBASE_SERVICE_ACCOUNT` (the key file's text), `APP_KEY` (the key the
     /// app sends to the API) and, optionally, `DEVICE_TOKENS` (devices to start
     /// with, separated by commas, spaces or new lines), `EZTRAVEL_DATA`
-    /// (default `/data`), `PRIM_URL` and `FCM_URL`.
+    /// (default `/data`), `PRIM_URL`, `FCM_URL` and `SCHOOL_URL`.
     pub fn from_env(var: impl Fn(&str) -> Option<String>) -> Result<Startup, String> {
         let required = |name: &str| var(name).ok_or_else(|| format!("{name} is not set"));
         let config = Config::parse(&required("EZTRAVEL_CONFIG")?)
@@ -149,6 +152,11 @@ impl Service {
         let data_dir = PathBuf::from(var("EZTRAVEL_DATA").unwrap_or("/data".into()));
         let store = Arc::new(Store::open(&data_dir.join(PROFILE_FILE), &seed));
         let schedule = config.schedule();
+        let school = Arc::new(SchoolHolidays::new(
+            config.school_holidays.clone(),
+            &var("SCHOOL_URL").unwrap_or(SCHOOL_URL.into()),
+            config.time_zone(),
+        ));
         let service = Self::new(config, prim, sender, store.clone(), &data_dir);
         Ok(Startup {
             api: api::router(
@@ -160,10 +168,12 @@ impl Service {
                     departures: service.departures(),
                     line_alerts: service.line_alerts(),
                     journal: service.journal(),
+                    school: school.clone(),
                 },
                 app_key,
             ),
             service,
+            school,
         })
     }
 
@@ -909,6 +919,8 @@ mod tests {
             ("FIREBASE_SERVICE_ACCOUNT".into(), account.to_string()),
             ("APP_KEY".into(), APP_KEY.into()),
             ("DEVICE_TOKENS".into(), "first,second\nthird  ".into()),
+            // Never the real site from the tests.
+            ("SCHOOL_URL".into(), "http://127.0.0.1:9".into()),
         ]);
         for (name, value) in overrides {
             match value {
@@ -1131,7 +1143,11 @@ mod tests {
         service.poll(tuesday("06:00")).await;
         service.poll(tuesday("06:10")).await;
         let status = service.status();
-        let outage = status.lock().unwrap().view(tuesday("06:10"), None).outage;
+        let outage = status
+            .lock()
+            .unwrap()
+            .view(tuesday("06:10"), None, None)
+            .outage;
         assert_eq!(
             outage,
             Some(Outage {
@@ -1170,7 +1186,7 @@ mod tests {
         };
         {
             let seen = status.lock().unwrap();
-            let view = seen.view(at(MORNING), None);
+            let view = seen.view(at(MORNING), None, None);
             assert_eq!(view.watching, Some("outbound"));
             assert_eq!(view.checked_at, Some(at(MORNING)));
             assert_eq!(
@@ -1183,7 +1199,7 @@ mod tests {
         }
         service.poll(at(LATE_MORNING)).await;
         let seen = status.lock().unwrap();
-        let view = seen.view(at(LATE_MORNING), None);
+        let view = seen.view(at(LATE_MORNING), None, None);
         assert_eq!(
             (view.watching, view.lines, view.checked_at),
             (None, vec![], Some(at(MORNING)))
@@ -1202,7 +1218,7 @@ mod tests {
             .status()
             .lock()
             .unwrap()
-            .view(tuesday("15:00"), None);
+            .view(tuesday("15:00"), None, None);
         assert_eq!(view.watching, Some("inbound"));
         let names: Vec<&str> = view.lines.iter().map(|line| line.line.as_str()).collect();
         assert_eq!(names, ["X", "L"]);
@@ -1627,7 +1643,7 @@ mod tests {
             .status()
             .lock()
             .unwrap()
-            .view(tuesday("06:10"), None)
+            .view(tuesday("06:10"), None, None)
             .outage;
         assert_eq!(
             outage,

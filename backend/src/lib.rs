@@ -13,6 +13,7 @@ pub mod prim;
 pub mod profile;
 pub mod push;
 pub mod relevance;
+pub mod school;
 pub mod service;
 pub mod trains;
 pub mod watch;

@@ -4,6 +4,7 @@
 
 use std::time::Duration;
 
+use eztravel_backend::school::next_read;
 use eztravel_backend::service::{Poll, Service, Startup};
 use jiff::Timestamp;
 
@@ -12,11 +13,14 @@ const PERIOD_SECONDS: i64 = 120;
 
 #[tokio::main]
 async fn main() {
-    let Startup { mut service, api } = Service::from_env(|name| std::env::var(name).ok())
-        .unwrap_or_else(|error| {
-            eprintln!("cannot start: {error}");
-            std::process::exit(1);
-        });
+    let Startup {
+        mut service,
+        api,
+        school,
+    } = Service::from_env(|name| std::env::var(name).ok()).unwrap_or_else(|error| {
+        eprintln!("cannot start: {error}");
+        std::process::exit(1);
+    });
     // All interfaces: fly.io's proxy cannot reach a loopback listener.
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await
@@ -28,6 +32,13 @@ async fn main() {
         "eztravel backend started, {}",
         service.describe(Timestamp::now())
     );
+    // Apart from the API, which answers with what was last read.
+    tokio::spawn(async move {
+        loop {
+            let read = school.refresh(Timestamp::now()).await;
+            tokio::time::sleep(next_read(read).unsigned_abs()).await;
+        }
+    });
     // If either half stops, the process ends and fly.io restarts both.
     tokio::select! {
         result = axum::serve(listener, api) => eprintln!("the API stopped: {result:?}"),

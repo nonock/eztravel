@@ -12,6 +12,12 @@ second_week = ["monday", "wednesday", "friday"]
 whit_monday_off = true
 # Days off and days changed one by one are set in the app's calendar.
 
+# Optional: the school holidays of a zone and place, as data.education.gouv.fr
+# names them. Some lines run fewer trains then, and the app says so.
+[school_holidays]
+zone = "Zone C"
+location = "Paris"
+
 [windows]
 # Optional `trains_from`: trains are followed from then, without notifying,
 # so that trains cancelled early are known when the window opens.
