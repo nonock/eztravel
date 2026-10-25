@@ -29,6 +29,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -54,7 +55,12 @@ import androidx.lifecycle.lifecycleScope
 import io.github.nonock.eztravel.backend.AppBackend
 import io.github.nonock.eztravel.calendar.CalendarPage
 import io.github.nonock.eztravel.home.AlertsPage
-import io.github.nonock.eztravel.home.CommuteStatus
+import io.github.nonock.eztravel.home.STATUS_REFRESH_MS
+import io.github.nonock.eztravel.home.SchoolHoliday
+import io.github.nonock.eztravel.home.StatusBanner
+import io.github.nonock.eztravel.home.StatusDetails
+import io.github.nonock.eztravel.home.StatusIcon
+import io.github.nonock.eztravel.home.polled
 import io.github.nonock.eztravel.home.NextDepartures
 import io.github.nonock.eztravel.home.NotificationHistory
 import io.github.nonock.eztravel.notifications.Notifier
@@ -66,6 +72,7 @@ import io.github.nonock.eztravel.watchdog.Watchdog
 import io.github.nonock.eztravel.ui.theme.EztravelTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.time.Instant
 
 class MainActivity : ComponentActivity() {
     private val askToNotify = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -134,6 +141,11 @@ fun App() {
     BackHandler(enabled = settings || tab != Tab.TRIP) {
         if (settings) leave() else tab = Tab.TRIP
     }
+    val backend = AppBackend.current
+    // What the backend sees, for the icon beside the gear on both tabs; none without a server.
+    val status = if (backend.configured) polled(backend, refresh, everyMs = STATUS_REFRESH_MS) { backend.status() }.value else null
+    var statusOpen by rememberSaveable { mutableStateOf(false) }
+    val now = Instant.now()
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -155,6 +167,7 @@ fun App() {
                 },
                 actions = {
                     if (!settings) {
+                        status?.let { StatusIcon(it, now) { statusOpen = true } }
                         IconButton(onClick = { settings = true }) {
                             Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title))
                         }
@@ -178,7 +191,6 @@ fun App() {
             }
         },
     ) { padding ->
-        val backend = AppBackend.current
         val page = @Composable {
             Column(
                 Modifier
@@ -196,8 +208,12 @@ fun App() {
                         SettingsMenu(onOpen = { opened = it })
                     }
                     tab == Tab.TRIP -> {
-                        CommuteStatus(backend, refresh = refresh)
-                        NextDepartures(backend, Modifier.padding(top = 16.dp), refresh = refresh, onRead = read)
+                        // What goes wrong, and the school holidays: the rest is behind the icon.
+                        status?.let {
+                            StatusBanner(it, now, Modifier.padding(top = 8.dp)) { statusOpen = true }
+                            SchoolHoliday(it, Modifier.padding(top = 8.dp))
+                        }
+                        NextDepartures(backend, Modifier.padding(top = 8.dp), refresh = refresh, onRead = read)
                     }
                     else -> AlertsPage(backend, refresh = refresh, onRead = read)
                 }
@@ -216,6 +232,11 @@ fun App() {
                 },
                 modifier = Modifier.padding(padding),
             ) { page() }
+        }
+    }
+    if (statusOpen && status != null) {
+        ModalBottomSheet(onDismissRequest = { statusOpen = false }) {
+            StatusDetails(status, now, Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp))
         }
     }
 }
