@@ -170,9 +170,11 @@ impl SchoolHolidays {
             .clone()
     }
 
-    /// The name of the school holidays `date` is in, as last read.
-    pub fn on(&self, date: Date) -> Option<String> {
-        on(&self.known(), date).map(String::from)
+    /// The school holidays `date` is in, with their first and last days, as last read.
+    pub fn during(&self, date: Date) -> Option<Holiday> {
+        self.known()
+            .into_iter()
+            .find(|holiday| holiday.first <= date && date <= holiday.last)
     }
 }
 
@@ -282,7 +284,9 @@ mod tests {
         );
         assert_eq!(school.known().len(), 3);
         assert_eq!(
-            school.on(date(2026, 10, 26)),
+            school
+                .during(date(2026, 10, 26))
+                .map(|holiday| holiday.name),
             Some("Vacances de la Toussaint".into())
         );
     }
@@ -334,7 +338,7 @@ mod tests {
                 .refresh("2026-10-25T15:00:00Z".parse().unwrap())
                 .await
         );
-        assert_eq!(school.on(date(2026, 10, 26)), None);
+        assert_eq!(school.during(date(2026, 10, 26)), None);
     }
 
     #[test]
@@ -352,6 +356,9 @@ mod tests {
             date(2026, 11, 1),
         );
         school.set(vec![toussaint.clone()]);
-        assert_eq!(school.known(), [toussaint]);
+        assert_eq!(school.known(), std::slice::from_ref(&toussaint));
+        // The holidays a day is in, whole: from the first day through the last.
+        assert_eq!(school.during(date(2026, 10, 25)), Some(toussaint));
+        assert_eq!(school.during(date(2026, 11, 2)), None);
     }
 }

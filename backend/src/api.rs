@@ -260,7 +260,7 @@ async fn status_now(
     let now = Timestamp::now();
     // From the days as set now, not as of the last poll: the app reads this right after a change.
     let next = schedule.next_window(now, &store.profile());
-    let school_holiday = school.on(schedule.today(now));
+    let school_holiday = school.during(schedule.today(now));
     Json(
         status
             .lock()
@@ -771,7 +771,7 @@ mod tests {
         assert_eq!(
             body,
             format!(
-                r#"{{"watching":null,"checked_at":null,"next":"{next}","outage":null,"lines":[],"planned":[],"school_holiday":null}}"#
+                r#"{{"watching":null,"checked_at":null,"next":"{next}","outage":null,"lines":[],"planned":[],"school_holiday":null,"school_holiday_first":null,"school_holiday_last":null}}"#
             )
         );
         // A poll loop silent for an hour has stopped.
@@ -795,6 +795,8 @@ mod tests {
         let (_, body) = api.authorized(Method::GET, "/status", None).await;
         let status: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(status["school_holiday"], "Vacances de la Toussaint");
+        assert_eq!(status["school_holiday_first"], today.to_string());
+        assert_eq!(status["school_holiday_last"], today.to_string());
     }
 
     /// When the next window opens, as `GET /status` says, in Paris.

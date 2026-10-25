@@ -10,6 +10,7 @@ use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::calendar::Direction;
+use crate::school::Holiday;
 
 /// Five polls in a row: long enough to ride out a hiccup, short enough to matter on the way.
 pub const OUTAGE_AFTER: SignedDuration = SignedDuration::from_mins(10);
@@ -144,8 +145,10 @@ pub struct View {
     pub outage: Option<Outage>,
     pub lines: Vec<LineStatus>,
     pub planned: Vec<String>,
-    /// The name of the school holidays today is in, if any.
+    /// The name of the school holidays today is in, if any, and their first and last days.
     pub school_holiday: Option<String>,
+    pub school_holiday_first: Option<Date>,
+    pub school_holiday_last: Option<Date>,
 }
 
 impl Snapshot {
@@ -155,7 +158,7 @@ impl Snapshot {
         &self,
         now: Timestamp,
         next: Option<Timestamp>,
-        school_holiday: Option<String>,
+        school_holiday: Option<Holiday>,
     ) -> View {
         // A poll loop that stopped cannot say so itself: the time of its last poll does.
         let stopped = self
@@ -175,7 +178,9 @@ impl Snapshot {
             outage: stopped.or_else(|| self.health.outage(now)),
             lines: self.lines.clone(),
             planned: self.planned.clone(),
-            school_holiday,
+            school_holiday_first: school_holiday.as_ref().map(|holiday| holiday.first),
+            school_holiday_last: school_holiday.as_ref().map(|holiday| holiday.last),
+            school_holiday: school_holiday.map(|holiday| holiday.name),
         }
     }
 }
@@ -320,8 +325,15 @@ mod tests {
             ],
             planned: vec!["Ligne L : travaux entre Nanterre et Cergy".into()],
         };
+        // In made-up holidays, from Saturday to the next Sunday.
+        let holiday = Holiday {
+            name: "Vacances d'automne".into(),
+            first: date(2026, 10, 31),
+            last: date(2026, 11, 8),
+        };
         assert_eq!(
-            serde_json::to_value(snapshot.view(at("06:43"), Some(at("15:00")), None)).unwrap(),
+            serde_json::to_value(snapshot.view(at("06:43"), Some(at("15:00")), Some(holiday)))
+                .unwrap(),
             fixture("status-watching")
         );
     }

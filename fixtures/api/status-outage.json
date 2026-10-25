@@ -8,5 +8,7 @@
     { "line": "L", "mode": "train", "color": "#7B61C9", "severity": "disrupted" }
   ],
   "planned": [],
-  "school_holiday": null
+  "school_holiday": null,
+  "school_holiday_first": null,
+  "school_holiday_last": null
 }
