@@ -96,7 +96,7 @@ pub fn data(
         data.insert(key.to_string(), value.to_string());
     };
     let line = |code: &str, put: &mut dyn FnMut(&str, &str)| {
-        let (name, mode) = label(code, labels);
+        let (name, mode, _) = label(code, labels);
         put("line", &name);
         put("mode", mode);
     };
@@ -177,7 +177,7 @@ pub fn data(
 }
 
 fn describe_train(train: &Train, labels: &[LineLabel], put: &mut dyn FnMut(&str, &str)) {
-    let (name, mode) = label(&train.line, labels);
+    let (name, mode, _) = label(&train.line, labels);
     put("line", &name);
     put("mode", mode);
     if let Some(mission) = &train.mission {
@@ -192,8 +192,9 @@ fn describe_train(train: &Train, labels: &[LineLabel], put: &mut dyn FnMut(&str,
     put("until", &until.to_string());
 }
 
-/// How the line `code` is named on screen, and its mode: `train`, `metro`, or `line` when unlabelled.
-pub fn label(code: &str, labels: &[LineLabel]) -> (String, &'static str) {
+/// How the line `code` is named on screen, its mode (`train`, `metro`, or
+/// `line` when unlabelled) and its color on the home screen, if configured.
+pub fn label(code: &str, labels: &[LineLabel]) -> (String, &'static str, Option<String>) {
     match labels.iter().find(|label| label.code == code) {
         Some(label) => (
             label.name.clone(),
@@ -202,8 +203,9 @@ pub fn label(code: &str, labels: &[LineLabel]) -> (String, &'static str) {
             } else {
                 "metro"
             },
+            label.color.clone(),
         ),
-        None => (code.to_string(), "line"),
+        None => (code.to_string(), "line", None),
     }
 }
 

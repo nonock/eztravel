@@ -123,6 +123,15 @@ pub struct WatchWindows {
     pub inbound: Window,
 }
 
+impl WatchWindows {
+    pub fn of(&self, direction: Direction) -> Window {
+        match direction {
+            Direction::Outbound => self.outbound,
+            Direction::Inbound => self.inbound,
+        }
+    }
+}
+
 /// Written in lower case, as the API does; read capitalised too, as saved before.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
@@ -130,6 +139,16 @@ pub enum Direction {
     Outbound,
     #[serde(rename = "inbound", alias = "Inbound")]
     Inbound,
+}
+
+impl Direction {
+    /// As the API and the configuration write it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Direction::Outbound => "outbound",
+            Direction::Inbound => "inbound",
+        }
+    }
 }
 
 impl Calendar {

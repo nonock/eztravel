@@ -355,7 +355,7 @@ fn shown_direction(time: Time, windows: &WatchWindows) -> Direction {
 /// The answer to `GET /departures`, in the shape fixed by `fixtures/api/`.
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct View {
-    pub direction: &'static str,
+    pub direction: Direction,
     pub legs: Vec<LegView>,
     /// Those of the way's backups that avoid a line disrupted now.
     pub backups: Vec<BackupView>,
@@ -471,9 +471,14 @@ impl NextDepartures {
 
     /// The way shown at `now`, and its legs.
     fn shown(&self, now: Timestamp) -> (Direction, &[Leg]) {
-        match shown_direction(now.to_zoned(self.time_zone.clone()).time(), &self.windows) {
-            Direction::Outbound => (Direction::Outbound, &self.outbound),
-            Direction::Inbound => (Direction::Inbound, &self.inbound),
+        let direction = shown_direction(now.to_zoned(self.time_zone.clone()).time(), &self.windows);
+        (direction, self.legs(direction))
+    }
+
+    fn legs(&self, direction: Direction) -> &[Leg] {
+        match direction {
+            Direction::Outbound => &self.outbound,
+            Direction::Inbound => &self.inbound,
         }
     }
 
@@ -574,11 +579,11 @@ impl NextDepartures {
                     .avoided
                     .iter()
                     .map(|(line, severity)| {
-                        let (name, mode) = push::label(line, &self.lines);
+                        let (name, mode, color) = push::label(line, &self.lines);
                         LineStatus {
                             line: name,
                             mode,
-                            color: self.color(line),
+                            color,
                             severity: Some(push::severity_name(*severity)),
                         }
                     })
@@ -587,10 +592,7 @@ impl NextDepartures {
             });
         }
         View {
-            direction: match direction {
-                Direction::Outbound => "outbound",
-                Direction::Inbound => "inbound",
-            },
+            direction,
             legs: views,
             backups,
         }
@@ -612,11 +614,11 @@ impl NextDepartures {
             }
             None => None,
         };
-        let (line, mode) = push::label(&leg.line, &self.lines);
+        let (line, mode, color) = push::label(&leg.line, &self.lines);
         LegView {
             line,
             mode,
-            color: self.color(&leg.line),
+            color,
             from: stops.as_ref().map(|(board, _)| board.name.clone()),
             from_position: stops
                 .as_ref()
@@ -628,22 +630,12 @@ impl NextDepartures {
         }
     }
 
-    fn color(&self, line: &str) -> Option<String> {
-        self.lines
-            .iter()
-            .find(|label| label.code == line)
-            .and_then(|label| label.color.clone())
-    }
-
     /// Whether a usual train leaving at `time` on the way `direction` can be
     /// reminded of: the way has a ride with its time to the platform, and leaving
     /// for the train falls in the way's window, when the poll loop gives reminders.
     pub fn check_usual(&self, direction: Direction, time: Time) -> Result<(), Refusal> {
-        let (legs, window) = match direction {
-            Direction::Outbound => (&self.outbound, self.windows.outbound),
-            Direction::Inbound => (&self.inbound, self.windows.inbound),
-        };
-        let (_, reach) = reminded_leg(legs).ok_or(Refusal::Unknown)?;
+        let window = self.windows.of(direction);
+        let (_, reach) = reminded_leg(self.legs(direction)).ok_or(Refusal::Unknown)?;
         let leave = time
             .checked_sub(SignedDuration::from_mins(i64::from(reach)))
             .map_err(|_| Refusal::OutsideWindow)?;
@@ -1080,6 +1072,7 @@ mod tests {
     use super::*;
     use crate::disruptions::{Cause, Disruption, Period, Severity};
     use crate::profile::UsualTrains;
+    use crate::testing::fixture;
     use jiff::civil::time;
     use serde_json::{Value, json};
     use wiremock::matchers::{method, path, query_param};
@@ -1103,11 +1096,6 @@ mod tests {
             Prim::new(&server.uri(), "test-key"),
             routes(),
         )
-    }
-
-    fn fixture(name: &str) -> Value {
-        let path = format!("{}/../fixtures/api/{name}.json", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
     #[tokio::test]

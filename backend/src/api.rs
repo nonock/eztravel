@@ -466,6 +466,7 @@ mod tests {
     use crate::prim::Prim;
     use crate::profile::Pick;
     use crate::school::{Holiday, SchoolHolidays};
+    use crate::testing::fixture;
     use crate::trains::Ended;
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode};
@@ -1004,11 +1005,6 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&body).unwrap(),
             fixture
         );
-    }
-
-    fn fixture(name: &str) -> serde_json::Value {
-        let path = format!("{}/../fixtures/api/{name}.json", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
     #[tokio::test]

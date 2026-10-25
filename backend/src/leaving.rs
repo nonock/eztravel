@@ -67,7 +67,7 @@ pub fn reminded_leg(legs: &[Leg]) -> Option<(&Leg, u32)> {
 pub enum Refusal {
     /// Its time to leave is past.
     TooLate,
-    /// Not an office day, or time away: nothing is watched.
+    /// Not an office day, or a day off: nothing is watched.
     NotOfficeDay,
     /// Leaving outside the way's watch window, when no reminder is sent.
     OutsideWindow,
@@ -94,10 +94,7 @@ pub fn check_pick(
     if !calendar.is_office_day(local.date()) {
         return Err(Refusal::NotOfficeDay);
     }
-    let window = match direction {
-        Direction::Outbound => windows.outbound,
-        Direction::Inbound => windows.inbound,
-    };
+    let window = windows.of(direction);
     if local.time() < window.start || local.time() >= window.end {
         return Err(Refusal::OutsideWindow);
     }

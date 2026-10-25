@@ -40,19 +40,15 @@ impl Config {
         let config: Self = toml::from_str(text).map_err(|error| error.to_string())?;
         TimeZone::get(&config.time_zone)
             .map_err(|error| format!("time_zone \"{}\": {error}", config.time_zone))?;
-        for (name, window) in [
-            ("outbound", config.windows.outbound),
-            ("inbound", config.windows.inbound),
-        ] {
+        for direction in [Direction::Outbound, Direction::Inbound] {
+            let window = config.windows.of(direction);
             if window.trains_from.is_some_and(|from| from > window.start) {
+                let name = direction.name();
                 return Err(format!("windows.{name}: trains_from comes after start"));
             }
         }
         for backup in &config.backups {
-            let (name, legs) = match backup.direction {
-                Direction::Outbound => ("outbound", &config.outbound),
-                Direction::Inbound => ("inbound", &config.inbound),
-            };
+            let (name, legs) = (backup.direction.name(), config.legs(backup.direction));
             if backup.instead_of.is_empty() {
                 return Err(format!("backups: an {name} backup needs instead_of"));
             }
@@ -82,12 +78,12 @@ impl Config {
         }
     }
 
-    /// The color of the line `code` on the home screen, if configured.
-    pub fn line_color(&self, code: &str) -> Option<&str> {
-        self.lines
-            .iter()
-            .find(|label| label.code == code)
-            .and_then(|label| label.color.as_deref())
+    /// The rides of the way `direction`, in order.
+    pub fn legs(&self, direction: Direction) -> &[Leg] {
+        match direction {
+            Direction::Outbound => &self.outbound,
+            Direction::Inbound => &self.inbound,
+        }
     }
 
     /// Codes of the lines ridden, each once, in commute order.
@@ -196,14 +192,15 @@ mod tests {
             }]
         );
         assert_eq!(config.all_line_codes(), ["C01740", "C02000", "C03000"]);
-        assert_eq!(config.line_color("C01740"), Some("#7B61C9"));
-        assert_eq!(config.line_color("C09999"), None);
+        let color = |code| crate::push::label(code, &config.lines).2;
+        assert_eq!(color("C01740").as_deref(), Some("#7B61C9"));
+        assert_eq!(color("C09999"), None);
     }
 
     #[test]
     fn a_line_color_is_optional_but_must_be_one() {
         let without = Config::parse(&EXAMPLE.replace("color = \"#7B61C9\"", "")).unwrap();
-        assert_eq!(without.line_color("C01740"), None);
+        assert_eq!(crate::push::label("C01740", &without.lines).2, None);
         for wrong in ["#7B61C", "7B61C9", "#7B61CZ", "purple"] {
             let error = Config::parse(&EXAMPLE.replace("#7B61C9", wrong)).unwrap_err();
             assert!(error.contains("color"), "{wrong}: {error}");
