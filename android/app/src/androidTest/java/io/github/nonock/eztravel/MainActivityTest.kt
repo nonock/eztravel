@@ -90,7 +90,6 @@ class MainActivityTest {
         compose.waitUntil(timeoutMillis = 5_000) { backend.statusReads.get() > 0 }
         tab(R.string.nav_trip).assertIsSelected()
         compose.onNodeWithText(text(R.string.app_name)).assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.departures_title)).assertIsDisplayed()
     }
@@ -102,10 +101,10 @@ class MainActivityTest {
         compose.onNodeWithText(text(R.string.alerts_none_at_all)).assertIsDisplayed()
         // The phone's own back gesture comes to the commute, as its tab does.
         back()
-        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
         tab(R.string.nav_alerts).performClick()
         tab(R.string.nav_trip).performClick()
-        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
         // The history and the calendar are behind the gear.
         tab(R.string.nav_history).assertDoesNotExist()
         tab(R.string.nav_calendar).assertDoesNotExist()
@@ -136,10 +135,10 @@ class MainActivityTest {
         compose.onNodeWithText(text(R.string.history_empty)).assertIsDisplayed()
         back()
         back()
-        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
         compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
         compose.onNodeWithContentDescription(text(R.string.back)).performClick()
-        compose.onNodeWithText(text(R.string.status_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.status_no_next)).assertIsDisplayed()
     }
 
     /** Pulls the page down, from its top, and waits for each count of [reads] to grow. */

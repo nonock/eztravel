@@ -33,7 +33,6 @@
     <string name="notification_leave_scheduled">Toujours au programme, pas encore suivi en direct.</string>
     <string name="notification_train_late_title">%1$s : votre train de %2$s a du retard</string>
     <string name="notification_train_late">%1$s vers %2$s : départ annoncé à %3$s, %4$d min de retard.</string>
-    <string name="status_title">Votre trajet</string>
     <string name="status_unreachable">Le serveur est injoignable : impossible de savoir si vos lignes sont surveillées.</string>
     <string name="status_watching_outbound">Surveillance du trajet aller.</string>
     <string name="status_watching_inbound">Surveillance du trajet retour.</string>
@@ -69,6 +68,12 @@
     <string name="departures_leg_to">vers</string>
     <string name="departures_unavailable">Les départs ne peuvent pas être lus pour l’instant.</string>
     <string name="departures_none">Aucun départ dans les prochaines heures.</string>
+    <plurals name="departures_more">
+        <item quantity="one">Voir %1$d de plus</item>
+        <item quantity="many">Voir %1$d de plus</item>
+        <item quantity="other">Voir %1$d de plus</item>
+    </plurals>
+    <string name="departures_less">Voir moins</string>
     <string name="departures_minutes">%1$d min</string>
     <string name="departures_arriving">À l’approche</string>
     <string name="departures_late">+%1$d min</string>

@@ -1,6 +1,6 @@
 package io.github.nonock.eztravel.calendar
 
-import io.github.nonock.eztravel.ScreenTest
+import io.github.nonock.eztravel.ScreenTesting
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
@@ -37,7 +37,7 @@ import java.time.format.FormatStyle
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
-class CalendarPageTest : ScreenTest() {
+class CalendarPageTest : ScreenTesting() {
     /** Wednesday 4 November 2026: the Sunday, Monday and Tuesday before are gone by. */
     private val today = LocalDate.of(2026, 11, 4)
     private val november = YearMonth.of(2026, 11)

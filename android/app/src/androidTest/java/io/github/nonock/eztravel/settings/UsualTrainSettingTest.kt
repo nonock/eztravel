@@ -1,6 +1,6 @@
 package io.github.nonock.eztravel.settings
 
-import io.github.nonock.eztravel.ScreenTest
+import io.github.nonock.eztravel.ScreenTesting
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
@@ -30,7 +30,7 @@ import java.time.format.FormatStyle
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
-class UsualTrainSettingTest : ScreenTest() {
+class UsualTrainSettingTest : ScreenTesting() {
     private fun clock(hour: Int, minute: Int) = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).format(LocalTime.of(hour, minute))
 
     private val saves = AtomicInteger()

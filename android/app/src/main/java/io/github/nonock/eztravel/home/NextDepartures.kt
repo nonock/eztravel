@@ -27,15 +27,18 @@ import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -43,9 +46,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.backend.Backend
 import io.github.nonock.eztravel.backend.Departures
@@ -54,7 +54,6 @@ import io.github.nonock.eztravel.backend.Departures.State
 import io.github.nonock.eztravel.backend.Refusal
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.json.JSONException
 import java.io.IOException
 import java.time.Duration
 import java.time.Instant
@@ -64,6 +63,9 @@ private const val REFRESH_MS = 60_000L
 
 /** The countdowns move between reads. */
 private const val TICK_MS = 15_000L
+
+/** A platform is shown for the trains leaving this soon: where to go now. */
+private val PLATFORM_SOON: Duration = Duration.ofMinutes(15)
 
 /**
  * The next departures on each leg of the way shown, read when the screen
@@ -83,10 +85,8 @@ fun NextDepartures(
 ) {
     // The commute tab already says that this build has no server.
     if (!backend.configured) return
-    // Null until read, or when it cannot be.
-    var departures by remember { mutableStateOf<Departures?>(null) }
-    var unreadable by remember { mutableStateOf(false) }
     var clock by remember { mutableStateOf(now()) }
+    val read = polled(backend, refresh, everyMs = REFRESH_MS, onRead = { onRead(); clock = now() }) { backend.departures() }
     // Why the last pick was not saved.
     var refused by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
@@ -97,27 +97,11 @@ fun NextDepartures(
             try {
                 val refusal = backend.pick(journey)
                 refused = refusal?.message()
-                if (refusal == null) departures = departures?.picking(journey)
+                // Shown picked at once, until the next read says so too.
+                val known = read.value
+                if (refusal == null && known is Reading.Known) read.value = Reading.Known(known.value.picking(journey))
             } catch (_: IOException) {
                 refused = R.string.departures_pick_failed
-            }
-        }
-    }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(backend, refresh) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                try {
-                    departures = backend.departures()
-                    unreadable = false
-                } catch (_: IOException) {
-                    unreadable = true
-                } catch (_: JSONException) {
-                    unreadable = true
-                }
-                onRead()
-                clock = now()
-                delay(REFRESH_MS)
             }
         }
     }
@@ -129,23 +113,23 @@ fun NextDepartures(
     }
 
     Column(modifier) {
-        val current = departures
-        val featured = if (unreadable) null else current?.featured(clock)
+        val current = read.value
+        val featured = (current as? Reading.Known)?.value?.featured(clock)
         featured?.let { NextTrain(it, clock) }
         Text(
             stringResource(R.string.departures_title),
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(top = if (featured == null) 0.dp else 24.dp),
         )
-        when {
-            unreadable -> Text(stringResource(R.string.departures_unavailable), color = MaterialTheme.colorScheme.error)
-            current == null -> Text(stringResource(R.string.loading))
-            else -> {
-                val reminded = current.reminded
-                for (leg in current.legs) {
+        when (current) {
+            Reading.Failed -> Text(stringResource(R.string.departures_unavailable), color = MaterialTheme.colorScheme.error)
+            Reading.Loading -> Text(stringResource(R.string.loading))
+            is Reading.Known -> {
+                val reminded = current.value.reminded
+                for (leg in current.value.legs) {
                     if (leg === reminded) LegDepartures(leg, clock, refused, pick) else LegDepartures(leg, clock)
                 }
-                for (backup in current.backups) BackupRoute(backup, clock)
+                for (backup in current.value.backups) BackupRoute(backup, clock)
             }
         }
     }
@@ -201,12 +185,18 @@ private fun NextTrainContent(featured: Departures.Featured, departure: Departure
                     fontWeight = FontWeight.Bold,
                 )
             }
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(12.dp))
+            Text(
+                departure.destination,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
             departure.platform?.let { Tag(stringResource(R.string.departures_platform, it)) }
         }
-        Text(departure.destination, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 4.dp))
         val left = Duration.between(now, featured.leave)
-        Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.Bottom) {
+        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.Bottom) {
             when {
                 // Most likely on the way to it.
                 left.isNegative -> Text(leavesIn(departure, now), style = MaterialTheme.typography.titleLarge)
@@ -313,9 +303,21 @@ private fun LegDepartures(leg: Departures.Leg, now: Instant, refused: Int? = nul
                     modifier = Modifier.padding(top = 8.dp),
                 )
                 departures.isEmpty() -> Text(stringResource(R.string.departures_none), modifier = Modifier.padding(top = 8.dp))
-                else -> departures.forEachIndexed { index, departure ->
-                    if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    DepartureRow(leg, departure, now, onPick)
+                // The metro gives minutes only: its next trains fit on a line.
+                leg.reach == null && departures.all { it.aimed == null } -> MetroTimes(departures, now)
+                else -> {
+                    var more by rememberSaveable(leg.line.name, leg.from, leg.to) { mutableStateOf(false) }
+                    val short = leg.shortList(now)
+                    (if (more) departures else short).forEachIndexed { index, departure ->
+                        if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        DepartureRow(leg, departure, now, onPick)
+                    }
+                    val hidden = departures.size - short.size
+                    if (hidden > 0) {
+                        TextButton(onClick = { more = !more }) {
+                            Text(if (more) stringResource(R.string.departures_less) else pluralStringResource(R.plurals.departures_more, hidden, hidden))
+                        }
+                    }
                 }
             }
         }
@@ -323,69 +325,103 @@ private fun LegDepartures(leg: Departures.Leg, now: Instant, refused: Int? = nul
 }
 
 /**
- * One departure of [leg], read as one: "07:07, +4 min, Gare Centrale, PILO,
- * Platform 2, arrives 07:23, leave in 9 min". With [onPick], a train that can
- * still be caught has a bell that picks it for the reminder to leave, and drops
- * it once picked.
+ * A metro's next trains, one line per destination, read as one:
+ * "Arriving · 6 · 9 · 13 min, Mairie d'Issy".
+ */
+@Composable
+private fun MetroTimes(departures: List<Departure>, now: Instant) {
+    for ((destination, trains) in departures.groupBy { it.destination }) {
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp).semantics(mergeDescendants = true) {},
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            trains.forEachIndexed { index, train ->
+                if (index > 0) Text(" · ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val minutes = train.expected.minutesFrom(now)
+                Text(
+                    when {
+                        minutes == 0L -> stringResource(R.string.departures_arriving)
+                        index == trains.lastIndex -> stringResource(R.string.departures_minutes, minutes)
+                        else -> minutes.toString()
+                    },
+                    style = MaterialTheme.typography.titleMedium.tabular(),
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(destination, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/**
+ * One departure of [leg] on a line, and its details small below, read as one:
+ * "07:07, Gare Centrale, leave in 9 min, +4 min, arrives 07:23, Platform 2".
+ * With [onPick], a train that can still be caught has a bell that picks it for
+ * the reminder to leave, and drops it once picked.
  */
 @Composable
 private fun DepartureRow(leg: Departures.Leg, departure: Departure, now: Instant, onPick: ((Departure) -> Unit)?) {
     val pickable = onPick != null && departure.journey != null && (departure.picked || leg.catchable(departure, now))
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    val cancelled = departure.state == State.CANCELLED
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.weight(1f).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.Top) {
-            Column(Modifier.width(96.dp)) {
-                val cancelled = departure.state == State.CANCELLED
-                // The metro gives no timetable: the minutes left say more.
-                val arriving = departure.aimed == null && departure.expected.minutesFrom(now) == 0L
-                Text(
-                    when {
-                        arriving -> stringResource(R.string.departures_arriving)
-                        departure.aimed == null -> stringResource(R.string.departures_minutes, departure.expected.minutesFrom(now))
-                        else -> departure.aimed.clock()
-                    },
-                    style = (if (arriving) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium).tabular(),
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    textDecoration = if (cancelled) TextDecoration.LineThrough else null,
-                )
-                when {
-                    cancelled -> Text(stringResource(R.string.departures_cancelled), color = MaterialTheme.colorScheme.error)
-                    departure.delayMinutes > 0 -> Text(
-                        stringResource(R.string.departures_late, departure.delayMinutes),
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    departure.state == State.DELAYED -> Text(stringResource(R.string.departures_delayed), color = MaterialTheme.colorScheme.primary)
-                }
-            }
+            Text(
+                departure.knownBy.clock(),
+                style = MaterialTheme.typography.titleMedium.tabular(),
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                textDecoration = if (cancelled) TextDecoration.LineThrough else null,
+                modifier = Modifier.width(64.dp),
+            )
             Column(Modifier.weight(1f)) {
-                Text(departure.destination, style = MaterialTheme.typography.bodyLarge)
+                Text(departure.destination, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     val details = MaterialTheme.typography.bodySmall
                     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-                    departure.platform?.let { Tag(stringResource(R.string.departures_platform, it)) }
-                    departure.mission?.let { Text(it, style = details, color = muted) }
-                    departure.arrival?.let { Text(stringResource(R.string.departures_arrival, it.clock()), style = details, color = muted) }
-                }
-                val leave = leg.leaveAt(departure)
-                if (leave != null && departure.state != State.CANCELLED) {
-                    val left = Duration.between(now, leave)
                     when {
-                        // Too soon to leave for, but not for whoever is already on the way.
-                        left.isNegative -> Text(leavesIn(departure, now), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        left.toMinutes() == 0L -> Text(stringResource(R.string.departures_leave_now), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                        else -> Text(stringResource(R.string.departures_leave_in, left.toMinutes()), color = MaterialTheme.colorScheme.primary)
+                        cancelled -> Text(stringResource(R.string.departures_cancelled), style = details, color = MaterialTheme.colorScheme.error)
+                        departure.delayMinutes > 0 -> Text(
+                            stringResource(R.string.departures_late, departure.delayMinutes),
+                            style = details,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        departure.state == State.DELAYED -> Text(stringResource(R.string.departures_delayed), style = details, color = MaterialTheme.colorScheme.primary)
                     }
-                }
-                if (departure.picked) {
-                    Text(stringResource(R.string.departures_picked), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                }
-                if (departure.usual) {
-                    Text(stringResource(R.string.departures_usual), color = MaterialTheme.colorScheme.primary)
+                    departure.arrival?.let { Text(stringResource(R.string.departures_arrival, it.clock()), style = details, color = muted) }
+                    departure.platform?.takeIf { Duration.between(now, departure.expected) <= PLATFORM_SOON }?.let {
+                        Tag(stringResource(R.string.departures_platform, it))
+                    }
+                    if (departure.picked) {
+                        Text(stringResource(R.string.departures_picked), style = details, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    }
+                    if (departure.usual) Text(stringResource(R.string.departures_usual), style = details, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.weight(1f))
+                    Countdown(leg, departure, now)
                 }
             }
         }
-        if (pickable) Bell(departure, onPick)
+        when {
+            pickable -> Bell(departure, onPick)
+            // The bell's room, so that the times to leave line up.
+            onPick != null -> Spacer(Modifier.width(48.dp))
+        }
+    }
+}
+
+/** When to leave for [departure], or, too soon for that, when it leaves; nothing for a cancelled one. */
+@Composable
+private fun Countdown(leg: Departures.Leg, departure: Departure, now: Instant) {
+    val leave = leg.leaveAt(departure) ?: return
+    if (departure.state == State.CANCELLED) return
+    val left = Duration.between(now, leave)
+    val style = MaterialTheme.typography.bodyMedium
+    when {
+        // Too soon to leave for, but not for whoever is already on the way.
+        left.isNegative -> Text(leavesIn(departure, now), style = style, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        left.toMinutes() == 0L -> Text(stringResource(R.string.departures_leave_now), style = style, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        else -> Text(stringResource(R.string.departures_leave_in, left.toMinutes()), style = style, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
     }
 }
 

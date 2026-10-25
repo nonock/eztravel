@@ -20,9 +20,10 @@ class TimesTest {
     }
 
     @Test
-    fun anotherDayComesWithItsDate() {
-        val thursday = shown("2026-11-05T05:45:00Z")
-        assertTrue(thursday, thursday.startsWith("jeudi 5 novembre 2026") && thursday.endsWith("06:45"))
+    fun anotherDayComesWithItsShortDate() {
+        assertEquals("jeu. 5 nov. 06:45", shown("2026-11-05T05:45:00Z"))
+        val english = Instant.parse("2026-11-05T05:45:00Z").shown(tuesday, paris, Locale.UK)
+        assertTrue(english, english.startsWith("Thu 5 Nov") && english.endsWith("06:45"))
     }
 
     @Test
