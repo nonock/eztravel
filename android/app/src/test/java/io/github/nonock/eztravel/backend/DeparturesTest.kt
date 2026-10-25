@@ -288,6 +288,8 @@ class DeparturesTest {
         val third = departures.legs[0].copy(line = Line("Z", Mode.TRAIN), fromPosition = Position(48.95, 2.40))
         val three = departures.copy(legs = departures.legs + third)
         assertEquals(listOf("X", "Z", "L"), order(Position(48.8752, 2.3262), three))
+        // No ride at all: nothing to put first.
+        assertEquals(emptyList<String>(), order(Position(48.8752, 2.3262), departures.copy(legs = emptyList())))
     }
 
     @Test
