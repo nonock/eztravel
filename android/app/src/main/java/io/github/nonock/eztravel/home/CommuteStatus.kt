@@ -66,8 +66,8 @@ private fun look(reading: Reading<Status>, now: Instant): Headed? = when (readin
             )
         }
         Headline.Fine -> Headed(Icons.Filled.CheckCircle, Good, stringResource(R.string.status_fine), wrong = false)
-        Headline.Checking -> Headed(Icons.Filled.Info, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_checking), wrong = false)
-        Headline.Idle -> Headed(Icons.Outlined.DateRange, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_not_watching), wrong = false)
+        Headline.Checking -> Headed(Watching, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_checking), wrong = false)
+        Headline.Idle -> Headed(NotWatching, MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.status_not_watching), wrong = false)
     }
 }
 
@@ -100,15 +100,24 @@ fun StatusBanner(reading: Reading<Status>, now: Instant, modifier: Modifier = Mo
     }
 }
 
-/** On the commute during school holidays: fewer trains run. */
+/** On the commute during school holidays, when fewer trains run: which, and how long. */
 @Composable
 fun SchoolHoliday(reading: Reading<Status>, modifier: Modifier = Modifier) {
-    val name = (reading as? Reading.Known)?.value?.schoolHoliday ?: return
+    val words = (reading as? Reading.Known)?.value?.let { holidayWords(it) } ?: return
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(8.dp))
-        Text(stringResource(R.string.status_school_holiday, name), style = MaterialTheme.typography.bodySmall)
+        Text(words, style = MaterialTheme.typography.bodySmall)
     }
+}
+
+/** "Vacances de la Toussaint, du 17 oct. au 1 nov.", or their name alone from an older backend. */
+@Composable
+private fun holidayWords(status: Status): String? {
+    val name = status.schoolHoliday ?: return null
+    val first = status.schoolHolidayFirst ?: return name
+    val last = status.schoolHolidayLast ?: return name
+    return stringResource(R.string.status_school_holiday, name, first.shortDate(), last.shortDate())
 }
 
 /**
@@ -181,12 +190,12 @@ private fun Known(status: Status) {
         }
         for (title in status.planned) Text(title)
     }
-    status.schoolHoliday?.let { name ->
+    holidayWords(status)?.let { words ->
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.status_school_holiday, name))
+            Text(words)
         }
     }
 }

@@ -27,6 +27,12 @@ class TimesTest {
     }
 
     @Test
+    fun aDayIsShortWithoutItsYear() {
+        assertEquals("17 oct.", LocalDate.of(2026, 10, 17).shortDate(Locale.FRANCE))
+        assertEquals("17 Oct", LocalDate.of(2026, 10, 17).shortDate(Locale.UK))
+    }
+
+    @Test
     fun aClockTimeHasNoDateEvenTomorrow() {
         assertEquals("07:42", Instant.parse("2026-11-03T06:42:00Z").clock(paris, Locale.FRANCE))
         assertEquals("00:10", Instant.parse("2026-11-03T23:10:00Z").clock(paris, Locale.FRANCE))

@@ -25,6 +25,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
@@ -156,10 +157,28 @@ class CommuteStatusTest : ScreenTesting() {
         waitFor(text(R.string.loading))
     }
 
+    /** The Toussaint 2026, from Saturday 17 October through Sunday 1 November. */
+    private val toussaint = fine.copy(
+        schoolHoliday = "Vacances de la Toussaint",
+        schoolHolidayFirst = LocalDate.of(2026, 10, 17),
+        schoolHolidayLast = LocalDate.of(2026, 11, 1),
+    )
+
+    /** "Vacances de la Toussaint, du 17 oct. au 1 nov.": what they are and how long. */
+    private val toussaintWords = text(
+        R.string.status_school_holiday,
+        "Vacances de la Toussaint",
+        LocalDate.of(2026, 10, 17).shortDate(),
+        LocalDate.of(2026, 11, 1).shortDate(),
+    )
+
     @Test
     fun theSchoolHolidaysAreSaidOnTheirDays() {
-        details(fine.copy(schoolHoliday = "Vacances de la Toussaint"))
-        waitFor(text(R.string.status_school_holiday, "Vacances de la Toussaint"))
+        details(toussaint)
+        waitFor(toussaintWords)
+        // From a backend that gives their name only.
+        reading = Reading.Known(toussaint.copy(schoolHolidayFirst = null, schoolHolidayLast = null))
+        waitFor("Vacances de la Toussaint")
     }
 
     /** The icon beside the gear: named by the headline, it opens the details. */
@@ -224,14 +243,14 @@ class CommuteStatusTest : ScreenTesting() {
 
     @Test
     fun theSchoolHolidaysHaveALineOnTheCommute() {
-        compose.setContent { SchoolHoliday(Reading.Known(fine.copy(schoolHoliday = "Vacances de la Toussaint"))) }
-        waitFor(text(R.string.status_school_holiday, "Vacances de la Toussaint"))
+        compose.setContent { SchoolHoliday(Reading.Known(toussaint)) }
+        waitFor(toussaintWords)
     }
 
     @Test
     fun noSchoolHolidayLineOtherwise() {
         compose.setContent { SchoolHoliday(Reading.Known(fine)) }
         compose.waitForIdle()
-        compose.onNodeWithText(text(R.string.status_school_holiday, "@").substringBefore("@"), substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Vacances", substring = true).assertDoesNotExist()
     }
 }

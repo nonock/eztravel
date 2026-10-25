@@ -13,6 +13,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.File
 import java.time.Instant
+import java.time.LocalDate
 
 class StatusTest {
     /** The answers the backend gives, shared with its own tests. */
@@ -62,6 +63,9 @@ class StatusTest {
                     LineState(Line("X", Mode.METRO), null, 0xFFE07A1F.toInt()),
                 ),
                 planned = listOf("Ligne L : travaux entre Nanterre et Cergy"),
+                schoolHoliday = "Vacances d'automne",
+                schoolHolidayFirst = LocalDate.of(2026, 10, 31),
+                schoolHolidayLast = LocalDate.of(2026, 11, 8),
             ),
             Status.parse(fixture("status-watching")),
         )
@@ -98,8 +102,13 @@ class StatusTest {
     @Test
     fun readsTheSchoolHolidaysTodayIsIn() {
         assertNull(Status.parse(fixture("status-idle")).schoolHoliday)
+        assertNull(Status.parse(fixture("status-idle")).schoolHolidayLast)
         val json = JSONObject(fixture("status-idle")).put("school_holiday", "Vacances de la Toussaint")
         assertEquals("Vacances de la Toussaint", Status.parse(json.toString()).schoolHoliday)
+        // From a backend that gives the name only.
+        json.remove("school_holiday_first")
+        json.remove("school_holiday_last")
+        assertNull(Status.parse(json.toString()).schoolHolidayFirst)
         // From a backend without them.
         json.remove("school_holiday")
         assertNull(Status.parse(json.toString()).schoolHoliday)
