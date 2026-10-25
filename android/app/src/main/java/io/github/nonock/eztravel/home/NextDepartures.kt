@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -63,9 +64,6 @@ private const val REFRESH_MS = 60_000L
 
 /** The countdowns move between reads. */
 private const val TICK_MS = 15_000L
-
-/** A platform is shown for the trains leaving this soon: where to go now. */
-private val PLATFORM_SOON: Duration = Duration.ofMinutes(15)
 
 /**
  * The next departures on each leg of the way shown, read when the screen
@@ -355,8 +353,9 @@ private fun MetroTimes(departures: List<Departure>, now: Instant) {
 }
 
 /**
- * One departure of [leg] on a line, and its details small below, read as one:
- * "07:07, Gare Centrale, leave in 9 min, +4 min, arrives 07:23, Platform 2".
+ * One departure of [leg]: when it leaves and arrives, where it goes, then its
+ * platform, delay and when to leave small below, read as one: "07:07, arrives
+ * 07:23, Gare Centrale, Platform 2, +4 min, leave in 9 min".
  * With [onPick], a train that can still be caught has a bell that picks it for
  * the reminder to leave, and drops it once picked.
  */
@@ -365,41 +364,63 @@ private fun DepartureRow(leg: Departures.Leg, departure: Departure, now: Instant
     val pickable = onPick != null && departure.journey != null && (departure.picked || leg.catchable(departure, now))
     val cancelled = departure.state == State.CANCELLED
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Row(Modifier.weight(1f).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.Top) {
-            Text(
-                departure.knownBy.clock(),
-                style = MaterialTheme.typography.titleMedium.tabular(),
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                textDecoration = if (cancelled) TextDecoration.LineThrough else null,
-                modifier = Modifier.width(64.dp),
-            )
-            Column(Modifier.weight(1f)) {
-                Text(departure.destination, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val details = MaterialTheme.typography.bodySmall
-                    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-                    when {
-                        cancelled -> Text(stringResource(R.string.departures_cancelled), style = details, color = MaterialTheme.colorScheme.error)
-                        departure.delayMinutes > 0 -> Text(
-                            stringResource(R.string.departures_late, departure.delayMinutes),
-                            style = details,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
+        Column(Modifier.weight(1f).semantics(mergeDescendants = true) {}) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Figures of one width: the destinations line up from row to row.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        departure.knownBy.clock(),
+                        style = MaterialTheme.typography.titleMedium.tabular(),
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        textDecoration = if (cancelled) TextDecoration.LineThrough else null,
+                    )
+                    departure.arrival?.let { arrival ->
+                        val arrives = stringResource(R.string.departures_arrival, arrival.clock())
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 4.dp).size(14.dp),
                         )
-                        departure.state == State.DELAYED -> Text(stringResource(R.string.departures_delayed), style = details, color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            arrival.clock(),
+                            style = MaterialTheme.typography.titleSmall.tabular(),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            modifier = Modifier.semantics { contentDescription = arrives },
+                        )
                     }
-                    departure.arrival?.let { Text(stringResource(R.string.departures_arrival, it.clock()), style = details, color = muted) }
-                    departure.platform?.takeIf { Duration.between(now, departure.expected) <= PLATFORM_SOON }?.let {
-                        Tag(stringResource(R.string.departures_platform, it))
-                    }
-                    if (departure.picked) {
-                        Text(stringResource(R.string.departures_picked), style = details, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    }
-                    if (departure.usual) Text(stringResource(R.string.departures_usual), style = details, color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.weight(1f))
-                    Countdown(leg, departure, now)
                 }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    departure.destination,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                val details = MaterialTheme.typography.bodySmall
+                // Below the time it leaves at: where it leaves from.
+                departure.platform?.let { Tag(stringResource(R.string.departures_platform, it)) }
+                when {
+                    cancelled -> Text(stringResource(R.string.departures_cancelled), style = details, color = MaterialTheme.colorScheme.error)
+                    departure.delayMinutes > 0 -> Text(
+                        stringResource(R.string.departures_late, departure.delayMinutes),
+                        style = details,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    departure.state == State.DELAYED -> Text(stringResource(R.string.departures_delayed), style = details, color = MaterialTheme.colorScheme.primary)
+                }
+                if (departure.picked) {
+                    Text(stringResource(R.string.departures_picked), style = details, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+                if (departure.usual) Text(stringResource(R.string.departures_usual), style = details, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.weight(1f))
+                Countdown(leg, departure, now)
             }
         }
         when {
