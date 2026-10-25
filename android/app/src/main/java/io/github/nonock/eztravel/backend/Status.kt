@@ -4,6 +4,7 @@ import io.github.nonock.eztravel.notifications.PushMessage
 import org.json.JSONObject
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 
 /**
  * What the backend sees, for the home screen. Its format is fixed by
@@ -23,6 +24,9 @@ data class Status(
     val planned: List<String>,
     /** The name of the school holidays today is in, if any: fewer trains run. */
     val schoolHoliday: String? = null,
+    /** Their first and last days, from a backend that gives them. */
+    val schoolHolidayFirst: LocalDate? = null,
+    val schoolHolidayLast: LocalDate? = null,
 ) {
     enum class Direction { OUTBOUND, INBOUND }
 
@@ -92,6 +96,8 @@ data class Status(
                 lines = status.getJSONArray("lines").objects().map(::lineState),
                 planned = status.getJSONArray("planned").let { titles -> List(titles.length()) { titles.getString(it) } },
                 schoolHoliday = status.stringOrNull("school_holiday"),
+                schoolHolidayFirst = status.stringOrNull("school_holiday_first")?.let(LocalDate::parse),
+                schoolHolidayLast = status.stringOrNull("school_holiday_last")?.let(LocalDate::parse),
             )
         }
 

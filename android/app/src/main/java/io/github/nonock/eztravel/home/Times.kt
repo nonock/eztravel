@@ -20,12 +20,18 @@ fun Instant.shown(
     val local = atZone(zone)
     val time = local.clock(locale)
     if (local.toLocalDate() == today) return time
-    // The locale's medium date, without the year: the next few days are meant.
-    val date = DateTimeFormatterBuilder.getLocalizedDateTimePattern(FormatStyle.MEDIUM, null, IsoChronology.INSTANCE, locale)
+    return DateTimeFormatter.ofPattern("EEE ${dayAndMonth(locale)}", locale).format(local) + " " + time
+}
+
+/** The day and month: "17 oct.", as the locale writes them. */
+fun LocalDate.shortDate(locale: Locale = Locale.getDefault()): String =
+    DateTimeFormatter.ofPattern(dayAndMonth(locale), locale).format(this)
+
+/** The locale's medium date, without the year: the coming weeks are meant. */
+private fun dayAndMonth(locale: Locale): String =
+    DateTimeFormatterBuilder.getLocalizedDateTimePattern(FormatStyle.MEDIUM, null, IsoChronology.INSTANCE, locale)
         .replace(Regex("[\\s,]*y+[\\s.,]*"), "")
         .trim()
-    return DateTimeFormatter.ofPattern("EEE $date", locale).format(local) + " " + time
-}
 
 private fun ZonedDateTime.clock(locale: Locale): String =
     DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale).format(this)
