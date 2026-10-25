@@ -11,6 +11,7 @@ What the backend answers and the app reads, one file per case. Both sides test a
 - `lines`: the lines of the way being watched, with their `color` (`#RRGGBB`, or `null` when not configured) and `severity` `blocking`, `disrupted`, or `null` when fine.
 - `planned`: the titles of the planned disruptions announced today.
 - `school_holiday`: the name of the school holidays today is in, as the open data names them, or `null`: also when the zone is not configured, or before the backend could read them.
+- `school_holiday_first` and `school_holiday_last`: the first and last days of those holidays, local (`2026-10-17`), or `null` with them.
 
 Times are UTC, in RFC 3339.
 

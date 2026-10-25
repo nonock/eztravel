@@ -8,5 +8,7 @@
     { "line": "X", "mode": "metro", "color": "#E07A1F", "severity": null }
   ],
   "planned": ["Ligne L : travaux entre Nanterre et Cergy"],
-  "school_holiday": null
+  "school_holiday": "Vacances d'automne",
+  "school_holiday_first": "2026-10-31",
+  "school_holiday_last": "2026-11-08"
 }

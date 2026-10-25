@@ -5,5 +5,7 @@
   "outage": null,
   "lines": [],
   "planned": [],
-  "school_holiday": null
+  "school_holiday": null,
+  "school_holiday_first": null,
+  "school_holiday_last": null
 }
