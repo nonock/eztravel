@@ -63,6 +63,17 @@ class CommuteStatusTest {
         Status(direction, now, now.plus(Duration.ofHours(8)), outage, lines.toList(), planned)
 
     @Test
+    fun theSchoolHolidaysAreSaidOnTheirDays() {
+        val backend = FakeBackend(status = watching(Direction.OUTBOUND, LineState(train, null)))
+        show(backend)
+        waitFor(text(R.string.status_watching_outbound))
+        compose.onNodeWithText(text(R.string.status_school_holiday, "Vacances de la Toussaint")).assertDoesNotExist()
+        backend.status = backend.status.copy(schoolHoliday = "Vacances de la Toussaint")
+        refresh++
+        waitFor(text(R.string.status_school_holiday, "Vacances de la Toussaint"))
+    }
+
+    @Test
     fun whileWatchingEachLineAndTheLastCheckAreShown() {
         show(
             FakeBackend(

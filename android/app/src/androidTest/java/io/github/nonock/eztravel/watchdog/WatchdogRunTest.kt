@@ -52,6 +52,8 @@ class WatchdogRunTest {
         Watchdog.schedule = { _, at -> scheduled += at }
         Watchdog.forget(context)
         manager.cancelAll()
+        // A warning left by the test before is gone before this one looks.
+        waitFor { shown() == null }
     }
 
     @After
@@ -64,6 +66,23 @@ class WatchdogRunTest {
 
     private fun shown(): StatusBarNotification? = manager.activeNotifications.firstOrNull { it.tag == Watchdog.TAG }
 
+    /** The system shows and takes away notifications a moment after asked: wait for it, five seconds at most. */
+    private fun waitFor(done: () -> Boolean) {
+        val until = System.currentTimeMillis() + 5_000
+        while (!done() && System.currentTimeMillis() < until) Thread.sleep(50)
+    }
+
+    /** The warning, once shown with [title]. */
+    private fun warning(title: String): StatusBarNotification {
+        waitFor { shown()?.title() == title }
+        return shown()!!.also { assertEquals(title, it.title()) }
+    }
+
+    private fun assertGone() {
+        waitFor { shown() == null }
+        assertNull(shown())
+    }
+
     private fun StatusBarNotification.title() = notification.extras.getString(Notification.EXTRA_TITLE)
 
     private fun StatusBarNotification.body() = notification.extras.getString(Notification.EXTRA_TEXT)
@@ -74,8 +93,7 @@ class WatchdogRunTest {
     fun aBackendThatDoesNotAnswerIsSaidSoAndTriedAgainForAWhile() = runBlocking {
         AppBackend.current = FakeBackend(failing = true)
         Watchdog.run(context, notify = true, now = now)
-        assertEquals(text(R.string.watchdog_unreachable), shown()!!.title())
-        assertEquals(text(R.string.watchdog_unreachable_text), shown()!!.body())
+        assertEquals(text(R.string.watchdog_unreachable_text), warning(text(R.string.watchdog_unreachable)).body())
         assertEquals(listOf<Instant?>(now.plus(Duration.ofMinutes(20))), scheduled)
         // An answer that cannot be read is no answer: six in a row, then no more until the app is opened.
         AppBackend.current = FakeBackend(garbled = true)
@@ -89,8 +107,7 @@ class WatchdogRunTest {
         for ((cause, title) in listOf(Cause.SERVER to R.string.watchdog_stopped, Cause.FIREBASE to R.string.watchdog_cannot_send)) {
             AppBackend.current = FakeBackend(status = watching(Outage(since, cause)))
             Watchdog.run(context, notify = true, now = now)
-            assertEquals(text(title), shown()!!.title())
-            assertEquals(text(R.string.watchdog_since, since.clock()), shown()!!.body())
+            assertEquals(text(R.string.watchdog_since, since.clock()), warning(text(title)).body())
         }
     }
 
@@ -98,10 +115,10 @@ class WatchdogRunTest {
     fun onceTheBackendIsBackTheWarningGoesAndAnswersAreCountedAfresh() = runBlocking {
         AppBackend.current = FakeBackend(failing = true)
         Watchdog.run(context, notify = true, now = now)
-        assertNotNull(shown())
+        warning(text(R.string.watchdog_unreachable))
         AppBackend.current = FakeBackend(status = watching(null))
         Watchdog.run(context, notify = false, now = now)
-        assertNull(shown())
+        assertGone()
         AppBackend.current = FakeBackend(failing = true)
         repeat(Watchdog.RETRIES - 1) { Watchdog.run(context, notify = false, now = now) }
         assertNotNull(scheduled.last())
@@ -127,9 +144,7 @@ class WatchdogRunTest {
     fun theAlarmBringsTheLook() {
         AppBackend.current = FakeBackend(failing = true)
         context.sendBroadcast(Intent(context, WatchdogReceiver::class.java).setAction(WatchdogReceiver.ACTION_LOOK))
-        val until = System.currentTimeMillis() + 10_000
-        while (shown() == null && System.currentTimeMillis() < until) Thread.sleep(100)
-        assertNotNull(shown())
+        warning(text(R.string.watchdog_unreachable))
     }
 
     @Test

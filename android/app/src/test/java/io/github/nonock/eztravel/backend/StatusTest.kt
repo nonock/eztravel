@@ -96,6 +96,16 @@ class StatusTest {
         .toString()
 
     @Test
+    fun readsTheSchoolHolidaysTodayIsIn() {
+        assertNull(Status.parse(fixture("status-idle")).schoolHoliday)
+        val json = JSONObject(fixture("status-idle")).put("school_holiday", "Vacances de la Toussaint")
+        assertEquals("Vacances de la Toussaint", Status.parse(json.toString()).schoolHoliday)
+        // From a backend without them.
+        json.remove("school_holiday")
+        assertNull(Status.parse(json.toString()).schoolHoliday)
+    }
+
+    @Test
     fun eachCauseOfAnOutageIsRead() {
         assertEquals(Cause.FIREBASE, Status.parse(withOutage("firebase")).outage?.cause)
         assertEquals(Cause.SERVER, Status.parse(withOutage("server")).outage?.cause)

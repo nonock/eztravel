@@ -274,6 +274,7 @@ private fun Day(day: CalendarDay, today: LocalDate, onSet: (LocalDate, Kind?) ->
         DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(LocalLocale.current.platformLocale).format(day.date),
         stringResource(day.label()),
         stringResource(R.string.calendar_set).takeIf { day.why == Why.SET },
+        day.schoolHoliday,
         stringResource(R.string.calendar_today).takeIf { day.date == today },
     ).joinToString(", ")
     val ring = when {
@@ -298,6 +299,7 @@ private fun Day(day: CalendarDay, today: LocalDate, onSet: (LocalDate, Kind?) ->
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = if (day.date == today) FontWeight.Bold else FontWeight.Medium,
         )
+        if (day.schoolHoliday != null) SchoolMark(ink, Modifier.align(Alignment.TopCenter).padding(top = 5.dp))
         if (day.why == Why.SET) {
             Box(
                 Modifier
@@ -395,7 +397,23 @@ private fun Legend() {
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.calendar_set_legend), style = MaterialTheme.typography.bodyMedium)
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SchoolMark(MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.calendar_school_legend), style = MaterialTheme.typography.bodyMedium)
+        }
     }
+}
+
+/** The mark of a school holiday: a short bar across the top of the day. */
+@Composable
+private fun SchoolMark(color: Color, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(width = 14.dp, height = 3.dp)
+            .clip(CircleShape)
+            .background(color),
+    )
 }
 
 /** A color and what it says; none for a public holiday, outlined as in the grid. */

@@ -66,7 +66,7 @@ private sealed interface Seen {
  */
 @Composable
 fun CommuteStatus(backend: Backend, refresh: Int, modifier: Modifier = Modifier, now: () -> Instant = Instant::now) {
-    // The time away section already says that this build has no server.
+    // The settings already say that this build has no server.
     if (!backend.configured) return
     var seen by remember { mutableStateOf<Seen>(Seen.Loading) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -185,5 +185,13 @@ private fun Known(status: Status, now: Instant) {
             Text(stringResource(R.string.status_planned), fontWeight = FontWeight.Bold)
         }
         for (title in status.planned) Text(title)
+    }
+    status.schoolHoliday?.let { name ->
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.status_school_holiday, name))
+        }
     }
 }

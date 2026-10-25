@@ -57,12 +57,16 @@ class CalendarPageTest {
 
     private fun day(day: Int) = november.atDay(day)
 
-    /** A day of the grid, by what it tells a screen reader: its date, what it is, whether set, whether today. */
-    private fun cell(date: LocalDate, what: Int, set: Boolean = false) = compose.onNodeWithContentDescription(
+    /**
+     * A day of the grid, by what it tells a screen reader: its date, what it is,
+     * whether set, its school holidays, whether today.
+     */
+    private fun cell(date: LocalDate, what: Int, set: Boolean = false, school: String? = null) = compose.onNodeWithContentDescription(
         listOfNotNull(
             DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).format(date),
             text(what),
             text(R.string.calendar_set).takeIf { set },
+            school,
             text(R.string.calendar_today).takeIf { date == today },
         ).joinToString(", "),
     )
@@ -104,6 +108,19 @@ class CalendarPageTest {
             compose.onNodeWithText(text(label)).assertIsDisplayed()
         }
         compose.onNodeWithText(text(R.string.calendar_set_legend)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.calendar_school_legend)).assertIsDisplayed()
+    }
+
+    @Test
+    fun schoolHolidaysAreMarkedAndNamed() {
+        val toussaint = "Vacances de la Toussaint"
+        val backend = FakeBackend(plan = { date -> plannedWeekdays(date).copy(schoolHoliday = toussaint.takeIf { date <= day(6) }) })
+        show(backend)
+        // Through Friday 6, today among them: gone by or not.
+        cell(day(3), R.string.calendar_office, school = toussaint).assertExists()
+        cell(day(4), R.string.calendar_office, school = toussaint).assertIsDisplayed()
+        cell(day(6), R.string.calendar_remote, school = toussaint).assertExists()
+        cell(day(9), R.string.calendar_office).assertExists()
     }
 
     @Test

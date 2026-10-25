@@ -18,7 +18,7 @@ class CalendarDayTest {
     fun readsEachDayOfTheMonthWithWhatItIsAndWhy() {
         val days = CalendarDay.parse(fixture)
         assertEquals((1..30).map(::day), days.map { it.date })
-        assertEquals(CalendarDay(day(1), Kind.AWAY, Why.SET), days[0])
+        assertEquals(CalendarDay(day(1), Kind.AWAY, Why.SET, schoolHoliday = "Vacances de la Toussaint"), days[0])
         assertEquals(CalendarDay(day(3), Kind.OFFICE, Why.CYCLE), days[2])
         assertEquals(CalendarDay(day(4), Kind.REMOTE, Why.CYCLE), days[3])
         assertEquals(CalendarDay(day(5), Kind.REMOTE, Why.SET), days[4])
@@ -37,5 +37,8 @@ class CalendarDayTest {
         val days = CalendarDay.parse(json.toString())
         assertEquals(CalendarDay(day(3), Kind.OFF, Why.CYCLE), days[2])
         assertEquals(Why.CYCLE, days[3].why)
+        // From a backend without the school holidays.
+        json.getJSONArray("days").getJSONObject(0).remove("school_holiday")
+        assertEquals(null, CalendarDay.parse(json.toString())[0].schoolHoliday)
     }
 }

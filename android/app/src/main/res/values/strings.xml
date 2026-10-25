@@ -51,6 +51,7 @@
     <string name="status_no_next">No office day ahead: nothing will be watched.</string>
     <string name="status_checked">Last check: %1$s.</string>
     <string name="status_planned">Planned today:</string>
+    <string name="status_school_holiday">%1$s: fewer trains and metros than usual.</string>
     <string name="status_outage_prim">Watching interrupted since %1$s: Île-de-France Mobilités data cannot be read. Check the traffic elsewhere.</string>
     <string name="status_outage_firebase">Watching interrupted since %1$s: notifications cannot be sent. Check the traffic elsewhere.</string>
     <string name="status_outage_server">Watching interrupted since %1$s: the server has stopped checking. Check the traffic elsewhere.</string>
@@ -149,6 +150,7 @@
     <string name="calendar_weekend">Weekend</string>
     <string name="calendar_set">changed in the app</string>
     <string name="calendar_set_legend">Changed in the app</string>
+    <string name="calendar_school_legend">School holidays: fewer trains</string>
     <string name="calendar_today">today</string>
     <string name="calendar_change">change this day</string>
     <string name="calendar_as_planned">As planned</string>
