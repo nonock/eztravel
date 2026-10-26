@@ -35,7 +35,7 @@ pub struct Needed<'a> {
 
 /// The backups of the way `direction`, whose rides are `legs`, to show at `now`
 /// in network local time: those that avoid a line disrupted on one of the legs,
-/// by [`severity_on`].
+/// by [`severity_on`], and whose own rides are not cut.
 pub fn needed<'a>(
     backups: &'a [Backup],
     direction: Direction,
@@ -64,10 +64,12 @@ pub fn needed<'a>(
                     Some((line.as_str(), worst))
                 })
                 .collect();
-            (!avoided.is_empty()).then(|| Needed {
+            let rides: Vec<Option<Severity>> = backup.rides.iter().map(severity).collect();
+            // A backup cut itself is no way round.
+            (!avoided.is_empty() && !rides.contains(&Some(Severity::Blocking))).then_some(Needed {
                 backup,
                 avoided,
-                rides: backup.rides.iter().map(severity).collect(),
+                rides,
             })
         })
         .collect()
@@ -204,6 +206,25 @@ mod tests {
         );
         // Its last ride is on the disrupted train line.
         assert_eq!(shown[0].rides, [None, Some(Severity::Disrupted)]);
+    }
+
+    #[test]
+    fn a_backup_cut_itself_is_not_shown() {
+        // The metro is disrupted, and so is the backup's line.
+        let shown = |backup: Severity| {
+            needed_at(
+                Direction::Outbound,
+                &[
+                    incident(METRO, Severity::Blocking),
+                    incident(BACKUP, backup),
+                ],
+            )
+        };
+        assert_eq!(
+            shown(Severity::Disrupted)[0].rides,
+            [Some(Severity::Disrupted)]
+        );
+        assert_eq!(shown(Severity::Blocking), []);
     }
 
     #[test]

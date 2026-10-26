@@ -5,7 +5,9 @@
 //! starts still stops its trains. So sections are placed on the routes of the
 //! line, whose stops come in travel order from Navitia (`route_schedules`).
 //! When the ends of a section fit both the leg's way and another one, a stop
-//! named in the disruption's text, on one of the ways only, tells which.
+//! named in the disruption's text, on one of the ways only, tells which. A
+//! section that only meets the leg at one of its ends is told apart: it stops
+//! some of the leg's trains, not the leg.
 
 use std::ops::RangeInclusive;
 
@@ -87,6 +89,10 @@ pub fn parse_route(json: &[u8]) -> Result<Route, serde_json::Error> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Bearing {
     Off,
+    /// One of its sections meets the leg at one end only, from beyond:
+    /// trains coming from, or going into, the section stop, but the leg's
+    /// own stretch may still be run.
+    Edge,
     /// One of its sections may be the leg's way, or another way between the
     /// same ends that misses the leg, and its text does not name a stop that
     /// tells which.
@@ -175,6 +181,9 @@ fn on_span(
     }
     let way = &route.stops[first..=last];
     let covered = &route.stops[first.max(*span.start())..=last.min(*span.end())];
+    if covered.len() == 1 && way.len() > 1 {
+        return Bearing::Edge;
+    }
     let passes = |way: &[RouteStop], area: &str| way.iter().any(|stop| stop.stop_area == area);
     // Other ways between the same ends that miss some of the leg.
     let others: Vec<&[RouteStop]> = routes
@@ -360,6 +369,11 @@ mod tests {
             &leg("N1", "P"),
             &routes()
         ));
+        // But those starting at N1 may still run.
+        assert_eq!(
+            bearing(&on_sections(&[("N1", "N2")]), &leg("N1", "P"), &routes()),
+            Bearing::Edge
+        );
     }
 
     #[test]
@@ -369,6 +383,19 @@ mod tests {
             &leg("P", "N1"),
             &routes()
         ));
+        assert_eq!(
+            bearing(&on_sections(&[("N2", "N1")]), &leg("P", "N1"), &routes()),
+            Bearing::Edge
+        );
+    }
+
+    #[test]
+    fn a_closed_stop_at_the_end_of_the_leg_is_on_it() {
+        // A section of one stop: the leg cannot be boarded.
+        assert_eq!(
+            bearing(&on_sections(&[("N1", "N1")]), &leg("N1", "P"), &routes()),
+            Bearing::On
+        );
     }
 
     #[test]
@@ -465,10 +492,18 @@ mod tests {
     }
 
     #[test]
-    fn a_section_touching_the_leg_is_sure() {
-        // Every way from N2 to N1 ends where the leg starts.
+    fn a_section_over_the_leg_and_beyond_is_on_it() {
         assert_eq!(
-            bearing(&on_sections(&[("N1", "N2")]), &leg("N1", "P"), &routes()),
+            bearing(&on_sections(&[("N2", "T1")]), &leg("N1", "P"), &routes()),
+            Bearing::On
+        );
+        // The worst section counts.
+        assert_eq!(
+            bearing(
+                &on_sections(&[("N1", "N2"), ("N2", "T1")]),
+                &leg("N1", "P"),
+                &routes()
+            ),
             Bearing::On
         );
     }
