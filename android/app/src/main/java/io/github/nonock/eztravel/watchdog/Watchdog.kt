@@ -3,10 +3,14 @@ package io.github.nonock.eztravel.watchdog
 import android.Manifest
 import android.app.AlarmManager
 import android.app.PendingIntent
+import android.app.job.JobInfo
+import android.app.job.JobScheduler
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.PersistableBundle
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -40,7 +44,8 @@ data class Check(val finding: Finding, val next: Instant?)
 /**
  * The phone looks at the backend by itself, during the watch windows: the
  * backend cannot say it stopped, nor that it cannot send. An approximate alarm
- * brings each look, a few minutes late at most, with no special permission.
+ * brings each look, with no special permission; the look itself is a job, as
+ * an app brought up by an alarm has no network.
  */
 object Watchdog {
     /** The first look of a window, once the backend has had time to check. */
@@ -55,9 +60,32 @@ object Watchdog {
     /** The warning's tag: one at a time, replaced, and gone once the backend is fine. */
     const val TAG = "watchdog"
 
+    /** The look's job: one at a time, the latest in place of one waiting. */
+    const val JOB = 1
+
     private const val ID = 1
     private const val PREFERENCES = "watchdog"
     private const val FAILURES = "failures"
+    private const val NOTIFY = "notify"
+
+    /**
+     * Has the system [run] a look once the app may use a network: in the
+     * background, as after an alarm, it has none.
+     */
+    fun lookSoon(context: Context, notify: Boolean) {
+        context.getSystemService(JobScheduler::class.java).schedule(job(context, notify))
+    }
+
+    internal fun job(context: Context, notify: Boolean): JobInfo =
+        JobInfo.Builder(JOB, ComponentName(context, WatchdogJob::class.java))
+            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+            .setExtras(PersistableBundle().apply { putBoolean(NOTIFY, notify) })
+            // Run at once, even while the phone sleeps.
+            .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setExpedited(true) }
+            .build()
+
+    /** Whether the job's look may warn. */
+    internal fun notifies(extras: PersistableBundle): Boolean = extras.getBoolean(NOTIFY)
 
     /** [status] is null when the backend could not be read; [failures] are the looks in a row before without an answer. */
     fun check(status: Status?, now: Instant, failures: Int): Check {

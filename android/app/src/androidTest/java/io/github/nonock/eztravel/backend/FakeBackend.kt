@@ -33,6 +33,8 @@ class FakeBackend(
     var dayRefusal: DayRefusal? = null,
     /** While set, months are read once it completes, as from a slow server. */
     var monthGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null,
+    /** While set, the status is read once it completes. */
+    var statusGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null,
 ) : Backend {
     /** Days set otherwise than planned, as the backend keeps them. */
     val set = java.util.concurrent.ConcurrentHashMap<LocalDate, CalendarDay>()
@@ -44,6 +46,8 @@ class FakeBackend(
     val picks = CopyOnWriteArrayList<String?>()
     val usualSaved = CopyOnWriteArrayList<Pair<Status.Direction, LocalTime?>>()
     val statusReads = AtomicInteger()
+    /** Status reads given up before their answer, as when the look is stopped. */
+    val statusDropped = AtomicInteger()
     val departuresReads = AtomicInteger()
     val alertsReads = AtomicInteger()
     val historyReads = AtomicInteger()
@@ -114,6 +118,12 @@ class FakeBackend(
 
     override suspend fun status(): Status {
         statusReads.incrementAndGet()
+        try {
+            statusGate?.await()
+        } catch (stopped: kotlinx.coroutines.CancellationException) {
+            statusDropped.incrementAndGet()
+            throw stopped
+        }
         if (failing) throw IOException("unreachable")
         if (garbled) throw JSONException("not JSON")
         return status
