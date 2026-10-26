@@ -1,6 +1,7 @@
 package io.github.nonock.eztravel.watchdog
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.app.job.JobInfo
@@ -9,8 +10,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.PersistableBundle
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -43,9 +46,10 @@ data class Check(val finding: Finding, val next: Instant?)
 
 /**
  * The phone looks at the backend by itself, during the watch windows: the
- * backend cannot say it stopped, nor that it cannot send. An approximate alarm
- * brings each look, with no special permission; the look itself is a job, as
- * an app brought up by an alarm has no network.
+ * backend cannot say it stopped, nor that it cannot send. An exact alarm
+ * brings each look, once the user allows it in Android's settings; else an
+ * approximate one, which the phone may bring up to an hour late. The look
+ * itself is a job, as an app brought up by an alarm has no network.
  */
 object Watchdog {
     /** The first look of a window, once the backend has had time to check. */
@@ -95,6 +99,17 @@ object Watchdog {
         return Check(silent?.let { Finding.Silent(it) } ?: Finding.Fine, next)
     }
 
+    /** Whether the phone lets the app set exact alarms, as the user allows; tests put a fake in its place. */
+    @Volatile
+    var exactAllowed: (Context) -> Boolean = { context ->
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S || context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+    }
+
+    /** Android's page where the user lets the app set exact alarms: only Android 12 and later ask for it. */
+    @SuppressLint("InlinedApi")
+    fun allowExact(context: Context): Intent =
+        Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.fromParts("package", context.packageName, null))
+
     /** Sets the next look, or none; tests put a fake in its place. */
     @Volatile
     var schedule: (Context, Instant?) -> Unit = ::alarm
@@ -110,7 +125,10 @@ object Watchdog {
         if (at == null) {
             alarms.cancel(look)
             look.cancel()
+        } else if (exactAllowed(context)) {
+            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at.toEpochMilli(), look)
         } else {
+            // The phone may bring it late: by three quarters of the wait, an hour at most.
             alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at.toEpochMilli(), look)
         }
     }
