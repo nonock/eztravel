@@ -3,6 +3,8 @@
   "line": "X",
   "mode": "metro",
   "severity": "disrupted",
+  "id": "7f3b9d10-2c44-4e8a-b6a1-5d0e9c2f4a63",
+  "scope": "line",
   "previous": "blocking",
   "title": "Métro X : Reprise progressive / trafic reste perturbé",
   "text": "Le trafic reprend mais reste perturbé sur toute la ligne.",
