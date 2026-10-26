@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
+import io.github.nonock.eztravel.notifications.PushMessage.Scope
 import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -33,10 +34,24 @@ class NotificationTextTest {
     private val operatorText = "Le trafic est interrompu entre Nanterre et Cergy.\nMotif : panne d'un train."
 
     @Test
-    fun aStartIsTitledInThePhoneLanguageWithTheOperatorTextAsBody() {
-        val started = PushMessage.Started(train, Severity.BLOCKING, operatorTitle, operatorText)
-        assertEquals(NotificationText("Line L: service interrupted", operatorText), started.text(english))
-        assertEquals(NotificationText("Ligne L : trafic interrompu", operatorText), started.text(french))
+    fun aStartIsTitledInThePhoneLanguageAndSaysWhereInOneLine() {
+        val started = PushMessage.Started(train, Severity.BLOCKING, operatorTitle, operatorText, scope = Scope.Section("Nanterre", "Cergy"))
+        assertEquals(NotificationText("Line L: service interrupted", "Between Nanterre and Cergy"), started.text(english))
+        assertEquals(NotificationText("Ligne L : trafic interrompu", "Entre Nanterre et Cergy"), started.text(french))
+    }
+
+    @Test
+    fun whereADisruptionIsSaid() {
+        fun body(scope: Scope, resources: Resources) =
+            PushMessage.Started(train, Severity.DISRUPTED, operatorTitle, operatorText, scope = scope).text(resources).body
+        assertEquals("Whole line", body(Scope.WholeLine, english))
+        assertEquals("Toute la ligne", body(Scope.WholeLine, french))
+        assertEquals("At Gare Centrale", body(Scope.Stops("Gare Centrale", 1), english))
+        assertEquals("À Gare Centrale", body(Scope.Stops("Gare Centrale", 1), french))
+        assertEquals("Gare Centrale and 1 other stop", body(Scope.Stops("Gare Centrale", 2), english))
+        assertEquals("Gare Centrale and 2 other stops", body(Scope.Stops("Gare Centrale", 3), english))
+        assertEquals("Gare Centrale et 1 autre arrêt", body(Scope.Stops("Gare Centrale", 2), french))
+        assertEquals("Gare Centrale et 2 autres arrêts", body(Scope.Stops("Gare Centrale", 3), french))
     }
 
     @Test
@@ -47,9 +62,11 @@ class NotificationTextTest {
     }
 
     @Test
-    fun withoutTextTheOperatorTitleIsTheBody() {
-        val titleOnly = PushMessage.Started(train, Severity.DISRUPTED, operatorTitle, null)
-        assertEquals(operatorTitle, titleOnly.text(french).body)
+    fun fromABackendThatDoesNotSayWhereTheOperatorTitleIsTheBody() {
+        val older = PushMessage.Started(train, Severity.DISRUPTED, operatorTitle, operatorText)
+        assertEquals(operatorTitle, older.text(french).body)
+        val textOnly = PushMessage.Started(train, Severity.DISRUPTED, null, operatorText)
+        assertEquals(operatorText, textOnly.text(french).body)
         val nothing = PushMessage.Started(train, Severity.DISRUPTED, null, null)
         assertEquals("", nothing.text(french).body)
     }
@@ -57,7 +74,8 @@ class NotificationTextTest {
     @Test
     fun changesSayWhichWay() {
         val worse = PushMessage.Changed(train, Severity.BLOCKING, Severity.DISRUPTED, operatorTitle, operatorText)
-        assertEquals(NotificationText("Line L: now interrupted", operatorText), worse.text(english))
+        assertEquals(NotificationText("Line L: now interrupted", operatorTitle), worse.text(english))
+        assertEquals("Whole line", worse.copy(scope = Scope.WholeLine).text(english).body)
         assertEquals("Ligne L : trafic désormais interrompu", worse.text(french).title)
         val better = PushMessage.Changed(metro, Severity.DISRUPTED, Severity.BLOCKING, null, "Reprise progressive.")
         assertEquals(NotificationText("Metro X: running again, still disrupted", "Reprise progressive."), better.text(english))

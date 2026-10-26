@@ -9,6 +9,14 @@
     <string name="notification_changed_blocking">%1$s : trafic désormais interrompu</string>
     <string name="notification_changed_disrupted">%1$s : reprise, trafic encore perturbé</string>
     <string name="notification_ended">%1$s : trafic rétabli</string>
+    <string name="notification_where_line">Toute la ligne</string>
+    <string name="notification_where_section">Entre %1$s et %2$s</string>
+    <string name="notification_where_stop">À %1$s</string>
+    <plurals name="notification_where_stops">
+        <item quantity="one">%1$s et %2$d autre arrêt</item>
+        <item quantity="many">%1$s et %2$d autres arrêts</item>
+        <item quantity="other">%1$s et %2$d autres arrêts</item>
+    </plurals>
     <plurals name="notification_planned">
         <item quantity="one">%d perturbation prévue sur vos lignes aujourd’hui</item>
         <item quantity="many">%d perturbations prévues sur vos lignes aujourd’hui</item>

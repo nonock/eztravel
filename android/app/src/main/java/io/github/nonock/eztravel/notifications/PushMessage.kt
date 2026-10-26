@@ -13,13 +13,29 @@ sealed interface PushMessage {
 
     enum class Severity { BLOCKING, DISRUPTED }
 
-    /** `title` and `text` are the operator's own words, in French, as published. */
+    /** Where a line's disruption is, as the backend says. */
+    sealed interface Scope {
+        /** The whole line, as far as the operator says. */
+        data object WholeLine : Scope
+
+        data class Section(val from: String, val to: String) : Scope
+
+        /** Its stops: the first, and how many. */
+        data class Stops(val first: String, val count: Int) : Scope
+    }
+
+    /**
+     * `title` and `text` are the operator's own words, in French, as published;
+     * `id` is the record's, and `scope` where it is, from a backend that says.
+     */
     data class Started(
         val line: Line,
         val severity: Severity,
         val title: String?,
         val text: String?,
         override val until: Instant? = null,
+        val id: String? = null,
+        val scope: Scope? = null,
     ) : PushMessage
 
     data class Changed(
@@ -29,6 +45,8 @@ sealed interface PushMessage {
         val title: String?,
         val text: String?,
         override val until: Instant? = null,
+        val id: String? = null,
+        val scope: Scope? = null,
     ) : PushMessage
 
     data class Ended(val line: Line, override val until: Instant? = null) : PushMessage
@@ -88,6 +106,17 @@ sealed interface PushMessage {
     val until: Instant?
         get() = null
 
+    /** What tapping it opens in the app: a line's alerts, or the page alone; null for the commute. */
+    val opening: Opening?
+        get() = when (this) {
+            is Started -> Opening(line.name, id, title)
+            is Changed -> Opening(line.name, id, title)
+            is Ended -> Opening(line.name, null, null)
+            // Planned works may be on several lines.
+            is Planned -> Opening(null, null, null)
+            else -> null
+        }
+
     /** Notifications with the same tag replace each other. */
     val tag: String
         get() = when (this) {
@@ -116,6 +145,8 @@ sealed interface PushMessage {
                     data["title"],
                     data["text"],
                     until,
+                    data["id"],
+                    scope(data),
                 )
                 "changed" -> Changed(
                     line ?: return null,
@@ -124,6 +155,8 @@ sealed interface PushMessage {
                     data["title"],
                     data["text"],
                     until,
+                    data["id"],
+                    scope(data),
                 )
                 "ended" -> Ended(line ?: return null, until)
                 "planned" -> Planned(
@@ -165,6 +198,14 @@ sealed interface PushMessage {
             )
         }
 
+        /** Null from a backend that does not say where, or says it in a way this version cannot read. */
+        private fun scope(data: Map<String, String>): Scope? = when (data["scope"]) {
+            "line" -> Scope.WholeLine
+            "section" -> Scope.Section(data["section_from"] ?: return null, data["section_to"] ?: return null)
+            "stops" -> Scope.Stops(data["stop"] ?: return null, data["stop_count"]?.toIntOrNull() ?: 1)
+            else -> null
+        }
+
         private fun instant(text: String?): Instant? = text?.let { runCatching { Instant.parse(it) }.getOrNull() }
 
         /** `train`, `metro`, or any other mode, as named by the backend. */
@@ -181,3 +222,10 @@ sealed interface PushMessage {
         }
     }
 }
+
+/**
+ * A place on the Alerts page, opened from a notification: [line]'s alerts,
+ * its record unfolded, by its [record] id or else its [title]; without a
+ * line, the page alone.
+ */
+data class Opening(val line: String?, val record: String?, val title: String?)

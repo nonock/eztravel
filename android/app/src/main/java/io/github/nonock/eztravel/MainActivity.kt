@@ -64,6 +64,7 @@ import io.github.nonock.eztravel.home.polled
 import io.github.nonock.eztravel.home.NextDepartures
 import io.github.nonock.eztravel.home.NotificationHistory
 import io.github.nonock.eztravel.notifications.Notifier
+import io.github.nonock.eztravel.notifications.Opening
 import io.github.nonock.eztravel.notifications.PushToken
 import io.github.nonock.eztravel.settings.SettingsMenu
 import io.github.nonock.eztravel.settings.SettingsPage
@@ -100,7 +101,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         setContent {
-            EztravelTheme { App() }
+            EztravelTheme { App(opening = Notifier.opening(intent)) }
         }
     }
 }
@@ -116,12 +117,14 @@ enum class Tab(@StringRes val label: Int, @StringRes val title: Int, val icon: I
  * of the calendar, the usual trains and the history of notifications, each
  * its own page. Pages are read again when pulled down, but for the list and
  * the usual trains. Back leaves a page for the list, the list for the tabs,
- * then goes back to the commute.
+ * then goes back to the commute. Opened from a line's notification, the app
+ * shows its [opening] on the alerts, once.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun App() {
-    var tab by rememberSaveable { mutableStateOf(Tab.TRIP) }
+fun App(opening: Opening? = null) {
+    var tab by rememberSaveable { mutableStateOf(if (opening != null) Tab.ALERTS else Tab.TRIP) }
+    var shown by remember { mutableStateOf(opening) }
     // Behind the gear: the list, then the page opened from it.
     var settings by rememberSaveable { mutableStateOf(false) }
     var opened by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
@@ -183,7 +186,10 @@ fun App() {
                     for (each in Tab.entries) {
                         NavigationBarItem(
                             selected = tab == each,
-                            onClick = { tab = each },
+                            onClick = {
+                                tab = each
+                                shown = null
+                            },
                             icon = { Icon(if (tab == each) each.selected else each.icon, contentDescription = null) },
                             label = { Text(stringResource(each.label)) },
                         )
@@ -216,7 +222,7 @@ fun App() {
                         }
                         NextDepartures(backend, Modifier.padding(top = 8.dp), refresh = refresh, onRead = read)
                     }
-                    else -> AlertsPage(backend, refresh = refresh, onRead = read)
+                    else -> AlertsPage(backend, refresh = refresh, onRead = read, opening = shown)
                 }
             }
         }

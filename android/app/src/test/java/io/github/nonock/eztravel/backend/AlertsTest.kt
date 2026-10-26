@@ -89,4 +89,18 @@ class AlertsTest {
         val split = line.copy(alerts = line.alerts + works.copy(id = "works-l-2") + works.copy(id = "works-l-3"))
         assertEquals(listOf(line.alerts[0] to 0, works to 2), split.grouped)
     }
+
+    @Test
+    fun aNotificationOpensTheTitleOfItsRecord() {
+        val line = Alerts.parse(fixture("alerts")).lines!![0]
+        val (incident, works) = line.alerts
+        val split = line.copy(alerts = line.alerts + works.copy(id = "works-l-2"))
+        // By its id, though it shows under the first of its title.
+        assertEquals(works.title, split.unfolded("works-l-2", "An older title"))
+        // Edited since, under another id: by its title.
+        assertEquals(incident.title, split.unfolded("gone", incident.title))
+        // Neither: nothing unfolded.
+        assertNull(split.unfolded("gone", "An older title"))
+        assertNull(split.unfolded(null, null))
+    }
 }

@@ -22,7 +22,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -44,6 +49,7 @@ import io.github.nonock.eztravel.backend.Alerts
 import io.github.nonock.eztravel.backend.Alerts.Alert
 import io.github.nonock.eztravel.backend.Alerts.Severity
 import io.github.nonock.eztravel.backend.Backend
+import io.github.nonock.eztravel.notifications.Opening
 import io.github.nonock.eztravel.notifications.label
 import java.time.Instant
 import java.time.ZoneId
@@ -58,6 +64,8 @@ private const val FOLDED_LINES = 3
  * Every disruption of the lines that is not over yet, line by line: under way
  * first, the worst first, then those to come. Read when shown, every two
  * minutes while it is, and when [refresh] changes; [onRead] follows each read.
+ * Opened from a notification, the [opening]'s line shows unfolded, and its
+ * record in full.
  */
 @Composable
 fun AlertsPage(
@@ -66,6 +74,7 @@ fun AlertsPage(
     now: () -> Instant = Instant::now,
     refresh: Int = 0,
     onRead: () -> Unit = {},
+    opening: Opening? = null,
 ) {
     // Unreadable is not "no alert": the backend says when it could not read them.
     val read by polled(backend, refresh, everyMs = REFRESH_MS, onRead = onRead) { backend.alerts().lines }
@@ -78,7 +87,7 @@ fun AlertsPage(
                 if (current.value.all { it.alerts.isEmpty() }) {
                     Text(stringResource(R.string.alerts_none_at_all), style = MaterialTheme.typography.titleMedium)
                 }
-                for (line in current.value) LineSection(line, now())
+                for (line in current.value) LineSection(line, now(), opening?.takeIf { it.line == line.line.name })
             }
         }
     }
@@ -86,11 +95,13 @@ fun AlertsPage(
 
 /**
  * A line, folded to its header until tapped: what is under way and to come,
- * and the worst under way, so that nothing urgent hides in a fold.
+ * and the worst under way, so that nothing urgent hides in a fold. Unfolded
+ * when [opened], with its record in full.
  */
 @Composable
-private fun LineSection(line: Alerts.LineAlerts, now: Instant) {
-    var open by rememberSaveable(line.line.name) { mutableStateOf(false) }
+private fun LineSection(line: Alerts.LineAlerts, now: Instant, opened: Opening?) {
+    var open by rememberSaveable(line.line.name) { mutableStateOf(opened != null) }
+    val unfolded = opened?.let { line.unfolded(it.record, it.title) }
     val any = line.alerts.isNotEmpty()
     val tap = if (any) {
         Modifier.clickable(onClickLabel = stringResource(if (open) R.string.alerts_hide_line else R.string.alerts_show_line)) { open = !open }
@@ -137,7 +148,7 @@ private fun LineSection(line: Alerts.LineAlerts, now: Instant) {
     }
     AnimatedVisibility(open) {
         Column {
-            for ((alert, more) in line.grouped) AlertCard(alert, more, now)
+            for ((alert, more) in line.grouped) AlertCard(alert, more, now, opened = alert.title == unfolded)
         }
     }
 }
@@ -150,13 +161,22 @@ private fun severityMark(severity: Severity): Pair<ImageVector, Color> = when (s
     Severity.INFORMATION -> Icons.Outlined.Info to MaterialTheme.colorScheme.onSurfaceVariant
 }
 
-/** One alert, folded to its first lines until tapped; [more] alerts share its title. */
+/** One alert, folded to its first lines until tapped, or [opened] in full and in view; [more] alerts share its title. */
 @Composable
-private fun AlertCard(alert: Alert, more: Int, now: Instant) {
-    var unfolded by rememberSaveable(alert.id) { mutableStateOf(false) }
+private fun AlertCard(alert: Alert, more: Int, now: Instant, opened: Boolean) {
+    var unfolded by rememberSaveable(alert.id) { mutableStateOf(opened) }
     val today = now.atZone(ZoneId.systemDefault()).toLocalDate()
+    val view = remember { BringIntoViewRequester() }
+    if (opened) {
+        // Once laid out, as the line unfolds.
+        LaunchedEffect(Unit) {
+            withFrameNanos {}
+            view.bringIntoView()
+        }
+    }
     Card(
         Modifier
+            .bringIntoViewRequester(view)
             .fillMaxWidth()
             .padding(top = 8.dp)
             .clickable(onClickLabel = stringResource(if (unfolded) R.string.alerts_fold else R.string.alerts_unfold)) { unfolded = !unfolded },

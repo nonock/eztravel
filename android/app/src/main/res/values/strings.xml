@@ -10,6 +10,13 @@
     <string name="notification_changed_blocking">%1$s: now interrupted</string>
     <string name="notification_changed_disrupted">%1$s: running again, still disrupted</string>
     <string name="notification_ended">%1$s: back to normal</string>
+    <string name="notification_where_line">Whole line</string>
+    <string name="notification_where_section">Between %1$s and %2$s</string>
+    <string name="notification_where_stop">At %1$s</string>
+    <plurals name="notification_where_stops">
+        <item quantity="one">%1$s and %2$d other stop</item>
+        <item quantity="other">%1$s and %2$d other stops</item>
+    </plurals>
     <plurals name="notification_planned">
         <item quantity="one">%d planned disruption on your lines today</item>
         <item quantity="other">%d planned disruptions on your lines today</item>

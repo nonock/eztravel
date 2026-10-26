@@ -2,6 +2,7 @@ package io.github.nonock.eztravel.notifications
 
 import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
+import io.github.nonock.eztravel.notifications.PushMessage.Scope
 import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -29,6 +30,8 @@ class PushMessageTest {
                 title = "Ligne L : Nanterre <-> Cergy trafic interrompu",
                 text = "Le trafic est interrompu entre Nanterre et Cergy jusqu'à 20h.\nMotif : panne d'un train.",
                 until = windowEnd,
+                id = "0c1d7a2e-4f1b-4b55-9a37-2f6c1e0d5b11",
+                scope = Scope.Section("Nanterre", "Cergy"),
             ),
             PushMessage.parse(fixture("started")),
         )
@@ -44,9 +47,41 @@ class PushMessageTest {
                 title = "Métro X : Reprise progressive / trafic reste perturbé",
                 text = "Le trafic reprend mais reste perturbé sur toute la ligne.",
                 until = windowEnd,
+                id = "7f3b9d10-2c44-4e8a-b6a1-5d0e9c2f4a63",
+                scope = Scope.WholeLine,
             ),
             PushMessage.parse(fixture("changed")),
         )
+    }
+
+    @Test
+    fun readsWhereADisruptionIs() {
+        val start = fixture("started") - "section_from" - "section_to"
+        fun scope(vararg where: Pair<String, String>) = (PushMessage.parse(start + where) as PushMessage.Started).scope
+        assertEquals(Scope.Stops("Gare Centrale", 2), scope("scope" to "stops", "stop" to "Gare Centrale", "stop_count" to "2"))
+        // Without a count, the stop named is the one.
+        assertEquals(Scope.Stops("Gare Centrale", 1), scope("scope" to "stops", "stop" to "Gare Centrale"))
+        // From a backend that does not say, or says what this version cannot read: the record's title will do.
+        assertNull(scope("scope" to "stops"))
+        assertNull(scope("scope" to "section", "section_from" to "Nanterre"))
+        assertNull(scope("scope" to "somewhere-new"))
+        assertNull((PushMessage.parse(start - "scope") as PushMessage.Started).scope)
+    }
+
+    @Test
+    fun aLineNotificationOpensItsRecordOnTheAlertsPage() {
+        assertEquals(
+            Opening("L", "0c1d7a2e-4f1b-4b55-9a37-2f6c1e0d5b11", "Ligne L : Nanterre <-> Cergy trafic interrompu"),
+            PushMessage.parse(fixture("started"))!!.opening,
+        )
+        assertEquals("7f3b9d10-2c44-4e8a-b6a1-5d0e9c2f4a63", PushMessage.parse(fixture("changed"))!!.opening!!.record)
+        assertEquals(Opening("L", null, null), PushMessage.parse(fixture("ended"))!!.opening)
+        // Planned works may be on several lines: the page, folded.
+        assertEquals(Opening(null, null, null), PushMessage.parse(fixture("planned"))!!.opening)
+        // Trains and the watch open the commute.
+        for (name in listOf("train_cancelled", "train_back", "leave", "train_late", "outage", "recovered")) {
+            assertNull(name, PushMessage.parse(fixture(name))!!.opening)
+        }
     }
 
     @Test
