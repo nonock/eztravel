@@ -9,6 +9,7 @@
 //! section that only meets the leg at one of its ends is told apart: it stops
 //! some of the leg's trains, not the leg.
 
+use std::cmp::Reverse;
 use std::ops::RangeInclusive;
 
 use serde::{Deserialize, Serialize};
@@ -111,15 +112,7 @@ pub fn bearing(disruption: &Disruption, leg: &Leg, routes: &[Route]) -> Bearing 
     if !disruption.lines.contains(&leg.line) {
         return Bearing::Off;
     }
-    // Routes that serve the leg, with the leg's position on each.
-    let spans: Vec<_> = routes
-        .iter()
-        .filter_map(|route| {
-            let board = route.area_index(&leg.board)?;
-            let alight = route.area_index(&leg.alight)?;
-            (board < alight).then_some((route, board..=alight))
-        })
-        .collect();
+    let spans = spans(leg, routes);
     if spans.is_empty() {
         // Unknown layout: better an alert too many than one missed.
         return Bearing::On;
@@ -130,19 +123,10 @@ pub fn bearing(disruption: &Disruption, leg: &Leg, routes: &[Route]) -> Bearing 
         .filter(|section| section.line == leg.line)
         .collect();
     if !sections.is_empty() {
-        let text = words(&format!(
-            "{} {} {}",
-            disruption.title,
-            disruption.short_message.as_deref().unwrap_or_default(),
-            push::plain_text(&disruption.message)
-        ));
-        return spans
+        let text = text(disruption);
+        return sections
             .iter()
-            .flat_map(|(route, span)| {
-                sections
-                    .iter()
-                    .map(|section| on_span(section, route, span, routes, &text))
-            })
+            .map(|section| section_bearing(section, &spans, routes, &text))
             .max()
             .unwrap_or(Bearing::Off);
     }
@@ -157,6 +141,97 @@ pub fn bearing(disruption: &Disruption, leg: &Leg, routes: &[Route]) -> Bearing 
         return if on { Bearing::On } else { Bearing::Off };
     }
     Bearing::On
+}
+
+/// Where a disruption is, as told in a notification.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Scope {
+    /// The whole line, as far as the disruption says.
+    Line,
+    Section {
+        from: String,
+        to: String,
+    },
+    /// Its stops, the first of them and how many.
+    Stops {
+        first: String,
+        count: usize,
+    },
+}
+
+/// Where `disruption` is, for the leg: its section on the leg's line that
+/// bears most on the leg, else its stops, else the whole line. Stops are named
+/// without their town. `routes` are the routes of the leg's line.
+pub fn scope(disruption: &Disruption, leg: &Leg, routes: &[Route]) -> Scope {
+    let spans = spans(leg, routes);
+    let text = text(disruption);
+    let most = disruption
+        .sections
+        .iter()
+        .filter(|section| section.line == leg.line)
+        .enumerate()
+        // The first listed among equals.
+        .max_by_key(|(index, section)| {
+            (
+                section_bearing(section, &spans, routes, &text),
+                Reverse(*index),
+            )
+        });
+    match (most, disruption.stops.as_slice()) {
+        (Some((_, section)), _) => Scope::Section {
+            from: town_less(&section.from.name),
+            to: town_less(&section.to.name),
+        },
+        (None, [first, ..]) => Scope::Stops {
+            first: town_less(&first.name),
+            count: disruption.stops.len(),
+        },
+        (None, []) => Scope::Line,
+    }
+}
+
+/// "Gare Centrale (Ville)" -> "Gare Centrale", as PRIM names a section's ends.
+fn town_less(name: &str) -> String {
+    match name.rsplit_once(" (") {
+        Some((stop, town)) if town.ends_with(')') => stop.to_string(),
+        _ => name.to_string(),
+    }
+}
+
+/// The routes that serve the leg, with the leg's position on each.
+fn spans<'a>(leg: &Leg, routes: &'a [Route]) -> Vec<(&'a Route, RangeInclusive<usize>)> {
+    routes
+        .iter()
+        .filter_map(|route| {
+            let board = route.area_index(&leg.board)?;
+            let alight = route.area_index(&leg.alight)?;
+            (board < alight).then_some((route, board..=alight))
+        })
+        .collect()
+}
+
+/// The disruption's title and texts, by [`words`].
+fn text(disruption: &Disruption) -> String {
+    words(&format!(
+        "{} {} {}",
+        disruption.title,
+        disruption.short_message.as_deref().unwrap_or_default(),
+        push::plain_text(&disruption.message)
+    ))
+}
+
+/// How `section` bears on the leg at any of its `spans`.
+fn section_bearing(
+    section: &Section,
+    spans: &[(&Route, RangeInclusive<usize>)],
+    routes: &[Route],
+    text: &str,
+) -> Bearing {
+    spans
+        .iter()
+        .map(|(route, span)| on_span(section, route, span, routes, text))
+        .max()
+        .unwrap_or(Bearing::Off)
 }
 
 /// How `section` bears on the leg at `span` of `route`, one of `routes`;
@@ -505,6 +580,78 @@ mod tests {
                 &routes()
             ),
             Bearing::On
+        );
+    }
+
+    #[test]
+    fn a_disruption_is_said_where_it_bears_most_on_the_leg() {
+        // The first section is on the other branch, the second on the leg.
+        let both = on_sections(&[("F", "W1"), ("W1", "F"), ("N2", "T1"), ("T1", "N2")]);
+        assert_eq!(
+            scope(&both, &leg("N1", "P"), &routes()),
+            Scope::Section {
+                from: "N2".into(),
+                to: "T1".into()
+            }
+        );
+        // Among equals, the first listed.
+        assert_eq!(
+            scope(&both, &leg("W1", "P"), &routes()),
+            Scope::Section {
+                from: "F".into(),
+                to: "W1".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_stop_is_named_without_its_town() {
+        let mut town = section("N2", "T1");
+        town.from.name = "Gare Centrale (Ville)".into();
+        town.to.name = "Les Aubépines (Autre Ville)".into();
+        assert_eq!(
+            scope(&disruption(vec![town], vec![]), &leg("N1", "P"), &routes()),
+            Scope::Section {
+                from: "Gare Centrale".into(),
+                to: "Les Aubépines".into()
+            }
+        );
+    }
+
+    #[test]
+    fn without_section_a_disruption_is_said_at_its_stops_or_on_the_line() {
+        let at = |stops: &[&str]| {
+            scope(
+                &disruption(vec![], stops.iter().map(|stop| place(stop, "sp")).collect()),
+                &leg("N1", "P"),
+                &routes(),
+            )
+        };
+        assert_eq!(
+            at(&["T1"]),
+            Scope::Stops {
+                first: "T1".into(),
+                count: 1
+            }
+        );
+        assert_eq!(
+            at(&["T1", "T2"]),
+            Scope::Stops {
+                first: "T1".into(),
+                count: 2
+            }
+        );
+        assert_eq!(at(&[]), Scope::Line);
+        // Another line's sections say nothing of ours.
+        let mut elsewhere = section("F", "W1");
+        elsewhere.line = "C02000".into();
+        assert_eq!(
+            scope(
+                &disruption(vec![elsewhere], vec![]),
+                &leg("N1", "P"),
+                &routes()
+            ),
+            Scope::Line
         );
     }
 

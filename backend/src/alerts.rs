@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::calendar::Direction;
 use crate::disruptions::{Cause, Disruption, Severity};
-use crate::relevance::{Bearing, Leg, Route, affects, bearing};
+use crate::relevance::{Bearing, Leg, Route, Scope, affects, bearing, scope};
 use crate::trains::{Train, Why};
 
 /// One ride of the commute, with the routes of its line.
@@ -32,16 +32,19 @@ pub struct Commute {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Notification {
+    /// `scope` says where the record shown is, on the leg: see [`shown`].
     Started {
         line: String,
         severity: Severity,
         disruptions: Vec<Disruption>,
+        scope: Scope,
     },
     Changed {
         line: String,
         from: Severity,
         to: Severity,
         disruptions: Vec<Disruption>,
+        scope: Scope,
     },
     Ended {
         line: String,
@@ -182,11 +185,17 @@ pub fn decide(
         if let Some(severity) = severity {
             state.lines.push((line.clone(), severity));
         }
+        let scope = |severity| {
+            shown(severity, &incidents).map_or(Scope::Line, |record| {
+                scope(record, &watched.leg, &watched.routes)
+            })
+        };
         match (previous, severity) {
             (None, Some(severity)) => {
                 notifications.push(Notification::Started {
                     line,
                     severity,
+                    scope: scope(severity),
                     disruptions: incidents,
                 });
             }
@@ -195,6 +204,7 @@ pub fn decide(
                     line,
                     from,
                     to,
+                    scope: scope(to),
                     disruptions: incidents,
                 });
             }
@@ -203,6 +213,15 @@ pub fn decide(
         }
     }
     notifications
+}
+
+/// The record a line's notification shows, of those behind its `severity`:
+/// the first as bad, or else the first.
+pub fn shown(severity: Severity, disruptions: &[Disruption]) -> Option<&Disruption> {
+    disruptions
+        .iter()
+        .find(|disruption| disruption.severity == severity)
+        .or(disruptions.first())
 }
 
 /// Works, or anything whose current period lasts a day or more.
@@ -337,6 +356,8 @@ mod tests {
             line: line.into(),
             severity,
             disruptions: disruptions.to_vec(),
+            // Records without section nor stop.
+            scope: Scope::Line,
         }
     }
 
@@ -400,7 +421,8 @@ mod tests {
                 line: TRAIN.into(),
                 from: Severity::Disrupted,
                 to: Severity::Blocking,
-                disruptions: worse.to_vec()
+                disruptions: worse.to_vec(),
+                scope: Scope::Line,
             }]
         );
         let better = [incident("c", Severity::Disrupted)];
@@ -410,7 +432,8 @@ mod tests {
                 line: TRAIN.into(),
                 from: Severity::Blocking,
                 to: Severity::Disrupted,
-                disruptions: better.to_vec()
+                disruptions: better.to_vec(),
+                scope: Scope::Line,
             }]
         );
     }
@@ -752,6 +775,10 @@ mod tests {
             outbound: vec![train],
             inbound: vec![],
         };
+        let either_scope = Scope::Section {
+            from: "Z".into(),
+            to: "B".into(),
+        };
         assert_eq!(
             decide(
                 &mut State::default(),
@@ -760,7 +787,86 @@ mod tests {
                 &commute,
                 std::slice::from_ref(&either)
             ),
-            [started(TRAIN, Severity::Blocking, &[either])]
+            [Notification::Started {
+                line: TRAIN.into(),
+                severity: Severity::Blocking,
+                disruptions: vec![either],
+                scope: either_scope,
+            }]
         );
+    }
+
+    #[test]
+    fn a_notification_says_where_the_shown_record_is_on_the_leg() {
+        let route = |names: &[&str]| Route {
+            stops: names
+                .iter()
+                .map(|name| RouteStop {
+                    stop_point: format!("sp:{name}"),
+                    stop_area: format!("sa:{name}"),
+                    name: (*name).into(),
+                    coord: None,
+                })
+                .collect(),
+        };
+        let train = WatchedLeg {
+            routes: vec![route(&["Z", "A", "B"]), route(&["Y", "B"])],
+            ..leg(TRAIN)
+        };
+        let section = |from: &str, to: &str| Section {
+            line: TRAIN.into(),
+            from: Place {
+                id: format!("sa:{from}"),
+                name: format!("{from} (Ville)"),
+            },
+            to: Place {
+                id: format!("sa:{to}"),
+                name: to.into(),
+            },
+        };
+        // The worse record is shown: its first section is off the leg.
+        let records = [
+            incident("a", Severity::Disrupted),
+            Disruption {
+                title: "Incident".into(),
+                message: String::new(),
+                sections: vec![section("Y", "B"), section("Z", "A")],
+                ..incident("b", Severity::Blocking)
+            },
+        ];
+        let commute = Commute {
+            outbound: vec![train],
+            inbound: vec![],
+        };
+        assert_eq!(
+            decide(
+                &mut State::default(),
+                at(3, 7, 30),
+                MORNING,
+                &commute,
+                &records,
+            ),
+            [Notification::Started {
+                line: TRAIN.into(),
+                severity: Severity::Blocking,
+                disruptions: records.to_vec(),
+                scope: Scope::Section {
+                    from: "Z".into(),
+                    to: "A".into()
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn a_line_notification_shows_its_worst_record() {
+        let records = [
+            incident("a", Severity::Disrupted),
+            incident("b", Severity::Blocking),
+        ];
+        assert_eq!(shown(Severity::Blocking, &records), Some(&records[1]));
+        // A severity no record has: the first.
+        assert_eq!(shown(Severity::Unknown, &records), Some(&records[0]));
+        assert_eq!(shown(Severity::Blocking, &[]), None);
     }
 }

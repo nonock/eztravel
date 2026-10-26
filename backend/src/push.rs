@@ -15,9 +15,10 @@ use jiff::{SignedDuration, Timestamp};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 
-use crate::alerts::Notification;
+use crate::alerts::{Notification, shown};
 use crate::disruptions::{Disruption, Severity};
 use crate::http;
+use crate::relevance::Scope;
 use crate::trains::{Train, Why};
 
 /// Firebase caps the data of a message at 4 KB: titles and texts are cut well below.
@@ -105,23 +106,25 @@ pub fn data(
             line: code,
             severity,
             disruptions,
+            scope,
         } => {
             put("type", "started");
             line(code, &mut put);
             put("until", &until);
-            describe(*severity, disruptions, &mut put);
+            describe(*severity, disruptions, scope, &mut put);
         }
         Notification::Changed {
             line: code,
             from,
             to,
             disruptions,
+            scope,
         } => {
             put("type", "changed");
             line(code, &mut put);
             put("until", &until);
             put("previous", severity_name(*from));
-            describe(*to, disruptions, &mut put);
+            describe(*to, disruptions, scope, &mut put);
         }
         Notification::Ended { line: code } => {
             put("type", "ended");
@@ -209,14 +212,29 @@ pub fn label(code: &str, labels: &[LineLabel]) -> (String, &'static str, Option<
     }
 }
 
-/// Severity, and the words of the record that has it.
-fn describe(severity: Severity, disruptions: &[Disruption], put: &mut dyn FnMut(&str, &str)) {
+/// Severity, where it is, and the record shown: its id and words.
+fn describe(
+    severity: Severity,
+    disruptions: &[Disruption],
+    scope: &Scope,
+    put: &mut dyn FnMut(&str, &str),
+) {
     put("severity", severity_name(severity));
-    let shown = disruptions
-        .iter()
-        .find(|disruption| disruption.severity == severity)
-        .or(disruptions.first());
-    if let Some(record) = shown {
+    match scope {
+        Scope::Line => put("scope", "line"),
+        Scope::Section { from, to } => {
+            put("scope", "section");
+            put("section_from", &truncate(from, TITLE_MAX_BYTES));
+            put("section_to", &truncate(to, TITLE_MAX_BYTES));
+        }
+        Scope::Stops { first, count } => {
+            put("scope", "stops");
+            put("stop", &truncate(first, TITLE_MAX_BYTES));
+            put("stop_count", &count.to_string());
+        }
+    }
+    if let Some(record) = shown(severity, disruptions) {
+        put("id", &record.id);
         put("title", &truncate(&record.title, TITLE_MAX_BYTES));
         put(
             "text",
@@ -609,12 +627,19 @@ mod tests {
                     Severity::Disrupted,
                     "<p>Autre chose</p>",
                 ),
-                record(
-                    "Ligne L : Nanterre <-> Cergy trafic interrompu",
-                    Severity::Blocking,
-                    "<p>Le trafic est interrompu entre Nanterre et Cergy jusqu&#39;à 20h.</p><p>Motif : panne d'un train.</p>",
-                ),
+                Disruption {
+                    id: "0c1d7a2e-4f1b-4b55-9a37-2f6c1e0d5b11".into(),
+                    ..record(
+                        "Ligne L : Nanterre <-> Cergy trafic interrompu",
+                        Severity::Blocking,
+                        "<p>Le trafic est interrompu entre Nanterre et Cergy jusqu&#39;à 20h.</p><p>Motif : panne d'un train.</p>",
+                    )
+                },
             ],
+            scope: Scope::Section {
+                from: "Nanterre".into(),
+                to: "Cergy".into(),
+            },
         };
         assert_eq!(data(&notification, &labels(), until()), fixture("started"));
     }
@@ -625,11 +650,15 @@ mod tests {
             line: "C02000".into(),
             from: Severity::Blocking,
             to: Severity::Disrupted,
-            disruptions: vec![record(
-                "Métro X : Reprise progressive / trafic reste perturbé",
-                Severity::Unknown,
-                "Le trafic reprend mais reste perturbé sur toute la ligne.",
-            )],
+            disruptions: vec![Disruption {
+                id: "7f3b9d10-2c44-4e8a-b6a1-5d0e9c2f4a63".into(),
+                ..record(
+                    "Métro X : Reprise progressive / trafic reste perturbé",
+                    Severity::Unknown,
+                    "Le trafic reprend mais reste perturbé sur toute la ligne.",
+                )
+            }],
+            scope: Scope::Line,
         };
         assert_eq!(data(&notification, &labels(), until()), fixture("changed"));
     }
@@ -665,10 +694,32 @@ mod tests {
             line: "C01740".into(),
             severity: Severity::Disrupted,
             disruptions: vec![],
+            scope: Scope::Line,
         };
         let sent = data(&started, &labels(), until());
         assert_eq!(sent["severity"], "disrupted");
-        assert!(!sent.contains_key("title") && !sent.contains_key("text"));
+        assert!(
+            !sent.contains_key("title") && !sent.contains_key("text") && !sent.contains_key("id")
+        );
+    }
+
+    #[test]
+    fn a_disruption_at_stops_names_the_first_and_counts_them() {
+        let started = Notification::Started {
+            line: "C02000".into(),
+            severity: Severity::Blocking,
+            disruptions: vec![record("Métro X : station fermée", Severity::Blocking, "")],
+            scope: Scope::Stops {
+                first: "Gare Centrale".into(),
+                count: 2,
+            },
+        };
+        let sent = data(&started, &labels(), until());
+        assert_eq!(
+            [&sent["scope"], &sent["stop"], &sent["stop_count"]],
+            ["stops", "Gare Centrale", "2"]
+        );
+        assert!(!sent.contains_key("section_from"));
     }
 
     #[test]
@@ -693,8 +744,14 @@ mod tests {
             line: "C01740".into(),
             severity: Severity::Disrupted,
             disruptions: vec![record(&long, Severity::Disrupted, &long)],
+            scope: Scope::Section {
+                from: long.clone(),
+                to: long.clone(),
+            },
         };
         let sent = data(&notification, &labels(), until());
+        assert!(sent["section_from"].len() <= TITLE_MAX_BYTES);
+        assert!(sent["section_to"].len() <= TITLE_MAX_BYTES);
         assert!(sent["title"].len() <= TITLE_MAX_BYTES);
         assert!(sent["text"].len() <= TEXT_MAX_BYTES);
         assert!(sent["text"].ends_with('…'));

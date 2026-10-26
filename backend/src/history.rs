@@ -279,6 +279,7 @@ mod tests {
             from: Severity::Blocking,
             to: Severity::Disrupted,
             disruptions: vec![one_way()],
+            scope: crate::relevance::Scope::Line,
         };
         assert_eq!(records(&changed), [Record::from(&one_way())]);
         let ended = Notification::Ended {
