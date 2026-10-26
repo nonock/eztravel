@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::calendar::Direction;
 use crate::disruptions::{Cause, Disruption, Severity};
-use crate::relevance::{Leg, Route, affects};
+use crate::relevance::{Bearing, Leg, Route, affects, bearing};
 use crate::trains::{Train, Why};
 
 /// One ride of the commute, with the routes of its line.
@@ -232,7 +232,8 @@ pub fn severity_on(
         .filter(|disruption| {
             !is_planned(disruption, now) || disruption.severity == Severity::Blocking
         })
-        .filter(|disruption| affects(disruption, leg, routes))
+        // A detour is not taken on a guess.
+        .filter(|disruption| bearing(disruption, leg, routes) == Bearing::On)
         .map(|disruption| level(disruption.severity))
         .max_by_key(|severity| *severity == Severity::Blocking)
 }
@@ -248,7 +249,8 @@ fn level(severity: Severity) -> Severity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::disruptions::{Period, Section};
+    use crate::disruptions::{Period, Place, Section};
+    use crate::relevance::RouteStop;
     use jiff::civil::date;
 
     const TRAIN: &str = "C01740";
@@ -681,5 +683,65 @@ mod tests {
         assert_eq!(on_train(&[cut]), Some(Severity::Blocking));
         let days_long = planned("d", Cause::Incident, at(1, 0, 0), at(5, 0, 0));
         assert_eq!(on_train(&[days_long]), None);
+    }
+
+    #[test]
+    fn a_leg_is_not_disrupted_on_a_guess() {
+        // Z to B is the leg's way through A, or another way through Y: the
+        // record does not say which.
+        let route = |names: &[&str]| Route {
+            stops: names
+                .iter()
+                .map(|name| RouteStop {
+                    stop_point: format!("sp:{name}"),
+                    stop_area: format!("sa:{name}"),
+                    name: (*name).into(),
+                    coord: None,
+                })
+                .collect(),
+        };
+        let train = WatchedLeg {
+            routes: vec![route(&["Z", "A", "B"]), route(&["Z", "Y", "B"])],
+            ..leg(TRAIN)
+        };
+        let place = |name: &str| Place {
+            id: format!("sa:{name}"),
+            name: name.into(),
+        };
+        let either = Disruption {
+            title: "Incident".into(),
+            message: String::new(),
+            sections: vec![Section {
+                line: TRAIN.into(),
+                from: place("Z"),
+                to: place("B"),
+            }],
+            ..incident("a", Severity::Blocking)
+        };
+        // No backup on a guess...
+        assert_eq!(
+            severity_on(
+                std::slice::from_ref(&either),
+                at(3, 7, 30),
+                &train.leg,
+                &train.routes
+            ),
+            None
+        );
+        // ...but notified all the same.
+        let commute = Commute {
+            outbound: vec![train],
+            inbound: vec![],
+        };
+        assert_eq!(
+            decide(
+                &mut State::default(),
+                at(3, 7, 30),
+                MORNING,
+                &commute,
+                std::slice::from_ref(&either)
+            ),
+            [started(TRAIN, Severity::Blocking, &[either])]
+        );
     }
 }

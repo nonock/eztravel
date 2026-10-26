@@ -4,10 +4,15 @@
 //! both of them with another branch, and a section that ends where the leg
 //! starts still stops its trains. So sections are placed on the routes of the
 //! line, whose stops come in travel order from Navitia (`route_schedules`).
+//! When the ends of a section fit both the leg's way and another one, a stop
+//! named in the disruption's text, on one of the ways only, tells which.
+
+use std::ops::RangeInclusive;
 
 use serde::{Deserialize, Serialize};
 
-use crate::disruptions::Disruption;
+use crate::disruptions::{Disruption, Section};
+use crate::push;
 
 /// One route of a line, its stops in travel order.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,10 +83,27 @@ pub fn parse_route(json: &[u8]) -> Result<Route, serde_json::Error> {
     Ok(Route { stops })
 }
 
-/// `routes` are the routes of the leg's line.
+/// How a disruption bears on a leg.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Bearing {
+    Off,
+    /// One of its sections may be the leg's way, or another way between the
+    /// same ends that misses the leg, and its text does not name a stop that
+    /// tells which.
+    Unsure,
+    On,
+}
+
+/// Whether a disruption may affect the leg: better an alert too many than
+/// one missed. `routes` are the routes of the leg's line.
 pub fn affects(disruption: &Disruption, leg: &Leg, routes: &[Route]) -> bool {
+    bearing(disruption, leg, routes) != Bearing::Off
+}
+
+/// `routes` are the routes of the leg's line.
+pub fn bearing(disruption: &Disruption, leg: &Leg, routes: &[Route]) -> Bearing {
     if !disruption.lines.contains(&leg.line) {
-        return false;
+        return Bearing::Off;
     }
     // Routes that serve the leg, with the leg's position on each.
     let spans: Vec<_> = routes
@@ -94,7 +116,7 @@ pub fn affects(disruption: &Disruption, leg: &Leg, routes: &[Route]) -> bool {
         .collect();
     if spans.is_empty() {
         // Unknown layout: better an alert too many than one missed.
-        return true;
+        return Bearing::On;
     }
     let sections: Vec<_> = disruption
         .sections
@@ -102,31 +124,106 @@ pub fn affects(disruption: &Disruption, leg: &Leg, routes: &[Route]) -> bool {
         .filter(|section| section.line == leg.line)
         .collect();
     if !sections.is_empty() {
-        return spans.iter().any(|(route, span)| {
-            sections.iter().any(|section| {
-                match (
-                    route.area_index(&section.from.id),
-                    route.area_index(&section.to.id),
-                ) {
-                    // Touching the leg counts: trains cannot come from, or go into, the section.
-                    (Some(from), Some(to)) => {
-                        from.min(to) <= *span.end() && from.max(to) >= *span.start()
-                    }
-                    _ => false,
-                }
+        let text = words(&format!(
+            "{} {} {}",
+            disruption.title,
+            disruption.short_message.as_deref().unwrap_or_default(),
+            push::plain_text(&disruption.message)
+        ));
+        return spans
+            .iter()
+            .flat_map(|(route, span)| {
+                sections
+                    .iter()
+                    .map(|section| on_span(section, route, span, routes, &text))
             })
-        });
+            .max()
+            .unwrap_or(Bearing::Off);
     }
     if !disruption.stops.is_empty() {
-        return spans.iter().any(|(route, span)| {
+        let on = spans.iter().any(|(route, span)| {
             disruption.stops.iter().any(|stop| {
                 route
                     .point_index(&stop.id)
                     .is_some_and(|index| span.contains(&index))
             })
         });
+        return if on { Bearing::On } else { Bearing::Off };
     }
-    true
+    Bearing::On
+}
+
+/// How `section` bears on the leg at `span` of `route`, one of `routes`;
+/// `text` is the disruption's, by [`words`].
+fn on_span(
+    section: &Section,
+    route: &Route,
+    span: &RangeInclusive<usize>,
+    routes: &[Route],
+    text: &str,
+) -> Bearing {
+    let (Some(from), Some(to)) = (
+        route.area_index(&section.from.id),
+        route.area_index(&section.to.id),
+    ) else {
+        return Bearing::Off;
+    };
+    let (first, last) = (from.min(to), from.max(to));
+    // Touching the leg counts: trains cannot come from, or go into, the section.
+    if first > *span.end() || last < *span.start() {
+        return Bearing::Off;
+    }
+    let way = &route.stops[first..=last];
+    let covered = &route.stops[first.max(*span.start())..=last.min(*span.end())];
+    let passes = |way: &[RouteStop], area: &str| way.iter().any(|stop| stop.stop_area == area);
+    // Other ways between the same ends that miss some of the leg.
+    let others: Vec<&[RouteStop]> = routes
+        .iter()
+        .filter_map(|other| {
+            let from = other.area_index(&section.from.id)?;
+            let to = other.area_index(&section.to.id)?;
+            let other_way = &other.stops[from.min(to)..=from.max(to)];
+            (!covered
+                .iter()
+                .all(|stop| passes(other_way, &stop.stop_area)))
+            .then_some(other_way)
+        })
+        .collect();
+    if others.is_empty() {
+        return Bearing::On;
+    }
+    // A stop the text names on one of the ways only tells which is meant.
+    let named = |stop: &&RouteStop| text.contains(&words(&stop.name));
+    if way
+        .iter()
+        .filter(named)
+        .any(|stop| !others.iter().any(|other| passes(other, &stop.stop_area)))
+    {
+        return Bearing::On;
+    }
+    if others
+        .iter()
+        .flat_map(|other| other.iter())
+        .filter(named)
+        .any(|stop| !passes(way, &stop.stop_area))
+    {
+        return Bearing::Off;
+    }
+    Bearing::Unsure
+}
+
+/// The words of `text` in lower case, each between spaces, so that a name is
+/// found whole: " pont d en haut ".
+fn words(text: &str) -> String {
+    let mut words = String::from(" ");
+    for word in text
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+    {
+        words.push_str(&word.to_lowercase());
+        words.push(' ');
+    }
+    words
 }
 
 #[derive(Deserialize)]
@@ -306,6 +403,74 @@ mod tests {
             &leg("N1", "P"),
             &routes()
         ));
+        // But it is only a guess.
+        assert_eq!(
+            bearing(&on_sections(&[("F", "P")]), &leg("N1", "P"), &routes()),
+            Bearing::Unsure
+        );
+    }
+
+    fn told(sections: &[(&str, &str)], message: &str) -> Disruption {
+        Disruption {
+            message: message.into(),
+            ..on_sections(sections)
+        }
+    }
+
+    #[test]
+    fn a_stop_named_on_one_branch_only_tells_which() {
+        // W1 is only on the west branch, N2 only on the north one.
+        let to_town = leg("N1", "P");
+        assert_eq!(
+            bearing(
+                &told(&[("F", "P")], "<p>Trains ending at W1 do not run.</p>"),
+                &to_town,
+                &routes()
+            ),
+            Bearing::Off
+        );
+        assert_eq!(
+            bearing(
+                &told(&[("F", "P")], "Trains calling at N2 do not run."),
+                &to_town,
+                &routes()
+            ),
+            Bearing::On
+        );
+        // On the way back too.
+        assert_eq!(
+            bearing(&told(&[("P", "F")], "W1"), &leg("P", "N1"), &routes()),
+            Bearing::Off
+        );
+        // The title tells as well.
+        let titled = Disruption {
+            title: "Suppression W1 <> P".into(),
+            ..on_sections(&[("F", "P")])
+        };
+        assert_eq!(bearing(&titled, &to_town, &routes()), Bearing::Off);
+        assert!(!affects(&titled, &to_town, &routes()));
+    }
+
+    #[test]
+    fn a_stop_on_both_branches_tells_nothing() {
+        // F and P are on both, and a longer name is not W1.
+        assert_eq!(
+            bearing(
+                &told(&[("F", "P")], "Between F and P, W10 is closed."),
+                &leg("N1", "P"),
+                &routes()
+            ),
+            Bearing::Unsure
+        );
+    }
+
+    #[test]
+    fn a_section_touching_the_leg_is_sure() {
+        // Every way from N2 to N1 ends where the leg starts.
+        assert_eq!(
+            bearing(&on_sections(&[("N1", "N2")]), &leg("N1", "P"), &routes()),
+            Bearing::On
+        );
     }
 
     #[test]
