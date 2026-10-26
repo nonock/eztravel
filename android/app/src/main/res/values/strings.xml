@@ -158,6 +158,8 @@
     <string name="settings_calendar_about">Office, remote work and days off</string>
     <string name="settings_usual_about">The reminder to leave, each office day</string>
     <string name="settings_history_about">The notifications sent</string>
+    <string name="settings_on_time">Checks on time</string>
+    <string name="settings_on_time_about">Allow “Alarms &amp; reminders”: the phone’s own checks of the server can be up to an hour late without it</string>
     <string name="calendar_holiday">Public holiday</string>
     <string name="calendar_weekend">Weekend</string>
     <string name="calendar_set">changed in the app</string>

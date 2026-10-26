@@ -1,6 +1,7 @@
 package io.github.nonock.eztravel.watchdog
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -9,6 +10,7 @@ import android.app.job.JobScheduler
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.ParcelFileDescriptor
 import android.service.notification.StatusBarNotification
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
@@ -53,6 +55,7 @@ class WatchdogRunTest {
 
     private val backend = AppBackend.current
     private val alarm = Watchdog.schedule
+    private val exact = Watchdog.exactAllowed
     private val scheduled = CopyOnWriteArrayList<Instant?>()
 
     @Before
@@ -69,6 +72,7 @@ class WatchdogRunTest {
         jobs.cancel(Watchdog.JOB)
         AppBackend.current = backend
         Watchdog.schedule = alarm
+        Watchdog.exactAllowed = exact
         Watchdog.forget(context)
         manager.cancelAll()
     }
@@ -90,6 +94,18 @@ class WatchdogRunTest {
     private fun assertGone() {
         waitFor { shown() == null }
         assertNull(shown())
+    }
+
+    private fun shell(command: String): String =
+        ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command))
+            .bufferedReader().use { it.readText() }
+
+    /** How late the phone may bring the look set: its window, as the alarm service says it ("0" for none). */
+    private fun lookWindow(): String {
+        val lines = shell("dumpsys alarm").lines()
+        val look = lines.indexOfFirst { it.trim() == "tag=*walarm*:${WatchdogReceiver.ACTION_LOOK}" }
+        assertTrue("no look set", look >= 0)
+        return Regex(" window=(\\S+)").find(lines[look + 1])!!.groupValues[1]
     }
 
     private fun StatusBarNotification.title() = notification.extras.getString(Notification.EXTRA_TITLE)
@@ -208,5 +224,44 @@ class WatchdogRunTest {
         assertNotNull(pending())
         alarm(context, null)
         assertNull(pending())
+    }
+
+    @Test
+    fun withoutLeaveTheNextLookMayComeUpToAnHourLate() {
+        Watchdog.exactAllowed = { false }
+        alarm(context, Instant.now().plus(Duration.ofHours(10)))
+        assertEquals("+1h0m0s0ms", lookWindow())
+        alarm(context, null)
+    }
+
+    @Test
+    @SdkSuppress(minSdkVersion = Build.VERSION_CODES.S)
+    fun onceAllowedTheNextLookComesOnTime() {
+        val alarms = context.getSystemService(AlarmManager::class.java)
+        val before = alarms.canScheduleExactAlarms()
+        AppBackend.current = FakeBackend(failing = true)
+        // As the user does once, in Android's settings.
+        shell("appops set ${context.packageName} SCHEDULE_EXACT_ALARM allow")
+        waitFor { alarms.canScheduleExactAlarms() }
+        // Newly allowed, Android tells the app, which looks: done here, not in a later test.
+        if (!before) waitFor(timeoutMs = 30_000) { scheduled.isNotEmpty() }
+        assertTrue(Watchdog.exactAllowed(context))
+        alarm(context, Instant.now().plus(Duration.ofHours(10)))
+        assertEquals("0", lookWindow())
+        alarm(context, null)
+    }
+
+    @Test
+    @SdkSuppress(minSdkVersion = Build.VERSION_CODES.S)
+    fun onceExactAlarmsAreAllowedTheNextLookIsSetAgain() {
+        val allowed = Intent(AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED).setPackage(context.packageName)
+        // Android tells the app, though it is not running.
+        val receivers = context.packageManager.queryBroadcastReceivers(allowed, 0).map { it.activityInfo.name }
+        assertEquals(listOf(WatchdogReceiver::class.java.name), receivers)
+        AppBackend.current = FakeBackend(failing = true)
+        WatchdogReceiver().onReceive(context, allowed)
+        waitFor { scheduled.isNotEmpty() }
+        assertNotNull(scheduled.single())
+        assertNull(shown())
     }
 }

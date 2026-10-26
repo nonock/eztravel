@@ -159,6 +159,8 @@
     <string name="settings_calendar_about">Bureau, télétravail et congés</string>
     <string name="settings_usual_about">Le rappel pour partir, chaque jour de bureau</string>
     <string name="settings_history_about">Les notifications envoyées</string>
+    <string name="settings_on_time">Vérifications à l’heure</string>
+    <string name="settings_on_time_about">Autorisez « Alarmes et rappels » : sans cela, le téléphone peut vérifier le serveur jusqu’à une heure en retard</string>
     <string name="calendar_holiday">Férié</string>
     <string name="calendar_weekend">Week-end</string>
     <string name="calendar_set">changé dans l’appli</string>
