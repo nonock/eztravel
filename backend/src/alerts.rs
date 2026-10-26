@@ -217,7 +217,8 @@ fn is_planned(disruption: &Disruption, now: DateTime) -> bool {
 
 /// How badly `leg` is disrupted at `now`, in network local time, for its
 /// backups: by an incident under way, as the line's state in a window, or by
-/// planned works that cut it. None when it runs, or is only slowed by works.
+/// planned works that cut it, on the leg itself for sure. None when it runs,
+/// or is only slowed by works.
 pub fn severity_on(
     disruptions: &[Disruption],
     now: DateTime,
@@ -232,7 +233,7 @@ pub fn severity_on(
         .filter(|disruption| {
             !is_planned(disruption, now) || disruption.severity == Severity::Blocking
         })
-        // A detour is not taken on a guess.
+        // A detour is not taken on a guess, nor for trains beyond the leg.
         .filter(|disruption| bearing(disruption, leg, routes) == Bearing::On)
         .map(|disruption| level(disruption.severity))
         .max_by_key(|severity| *severity == Severity::Blocking)
@@ -718,6 +719,24 @@ mod tests {
             }],
             ..incident("a", Severity::Blocking)
         };
+        // Nor for a section beyond the leg that only meets it.
+        let beyond = Disruption {
+            sections: vec![Section {
+                line: TRAIN.into(),
+                from: place("Z"),
+                to: place("A"),
+            }],
+            ..either.clone()
+        };
+        assert_eq!(
+            severity_on(
+                std::slice::from_ref(&beyond),
+                at(3, 7, 30),
+                &train.leg,
+                &train.routes
+            ),
+            None
+        );
         // No backup on a guess...
         assert_eq!(
             severity_on(
