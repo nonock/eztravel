@@ -102,6 +102,8 @@ impl Service {
     ) -> Self {
         let routes: BTreeMap<String, Vec<Route>> =
             load(&data_dir.join(ROUTES_FILE)).unwrap_or_default();
+        let line_alerts = LineAlerts::new(&config, prim.clone());
+        line_alerts.set_routes(routes.clone());
         Self {
             state: load(&data_dir.join(STATE_FILE)).unwrap_or_default(),
             trains: load(&data_dir.join(TRAINS_FILE)).unwrap_or_default(),
@@ -111,7 +113,7 @@ impl Service {
             history: Arc::new(History::open(&data_dir.join(HISTORY_FILE))),
             journal: Arc::new(Journal::open(&data_dir.join(JOURNAL_FILE))),
             departures: Arc::new(NextDepartures::new(&config, prim.clone(), routes.clone())),
-            line_alerts: Arc::new(LineAlerts::new(&config, prim.clone())),
+            line_alerts: Arc::new(line_alerts),
             routes,
             routes_day: None,
             config,
@@ -1710,6 +1712,29 @@ mod tests {
         assert_eq!(from(MORNING).await.as_deref(), Some("Saved"));
         service.poll(at(MORNING)).await;
         assert_eq!(from(TWO_MINUTES_LATER).await.as_deref(), Some("71100"));
+    }
+
+    #[tokio::test]
+    async fn the_alerts_page_places_records_on_the_routes_saved_from_the_start() {
+        let setup = Setup::new().await;
+        let saved = r#"{"C01740":[{"stops":[{"stop_point":"sp:1","stop_area":"stop_area:IDFM:71100","name":"1"},{"stop_point":"sp:2","stop_area":"stop_area:IDFM:71370","name":"2"},{"stop_point":"sp:3","stop_area":"stop_area:IDFM:71390","name":"3"}]},{"stops":[{"stop_point":"sp:3","stop_area":"stop_area:IDFM:71390","name":"3"},{"stop_point":"sp:2","stop_area":"stop_area:IDFM:71370","name":"2"},{"stop_point":"sp:1","stop_area":"stop_area:IDFM:71100","name":"1"}]}]}"#;
+        std::fs::write(setup.dir.path().join("routes.json"), saved).unwrap();
+        // A section beyond both rides of the line: off the way, once placed.
+        let mut beyond = feed(true);
+        beyond["disruptions"][0]["impactedSections"] = serde_json::json!([{
+            "lineId": "line:IDFM:C01740",
+            "from": { "type": "stop_area", "id": "stop_area:IDFM:71390", "name": "3" },
+            "to": { "type": "stop_area", "id": "stop_area:IDFM:71395", "name": "4" }
+        }]);
+        Mock::given(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(beyond))
+            .expect(1)
+            .mount(&setup.server)
+            .await;
+        // Before any poll has read the routes again.
+        let view = setup.service().line_alerts().view(at(MORNING)).await;
+        let lines = view.lines.unwrap();
+        assert!(!lines[0].alerts[0].on_way, "{lines:?}");
     }
 
     #[tokio::test]
