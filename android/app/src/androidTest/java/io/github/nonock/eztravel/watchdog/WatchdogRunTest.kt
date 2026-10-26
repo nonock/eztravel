@@ -4,10 +4,14 @@ import android.Manifest
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.job.JobInfo
+import android.app.job.JobScheduler
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.service.notification.StatusBarNotification
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import io.github.nonock.eztravel.R
@@ -18,11 +22,14 @@ import io.github.nonock.eztravel.backend.Status.Cause
 import io.github.nonock.eztravel.backend.Status.Direction
 import io.github.nonock.eztravel.backend.Status.Outage
 import io.github.nonock.eztravel.home.clock
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -38,6 +45,7 @@ class WatchdogRunTest {
 
     private val context: Context = InstrumentationRegistry.getInstrumentation().targetContext
     private val manager = context.getSystemService(NotificationManager::class.java)
+    private val jobs = context.getSystemService(JobScheduler::class.java)
 
     private fun text(id: Int, vararg args: Any) = context.getString(id, *args)
 
@@ -58,6 +66,7 @@ class WatchdogRunTest {
 
     @After
     fun putBack() {
+        jobs.cancel(Watchdog.JOB)
         AppBackend.current = backend
         Watchdog.schedule = alarm
         Watchdog.forget(context)
@@ -66,9 +75,9 @@ class WatchdogRunTest {
 
     private fun shown(): StatusBarNotification? = manager.activeNotifications.firstOrNull { it.tag == Watchdog.TAG }
 
-    /** The system shows and takes away notifications a moment after asked: wait for it, five seconds at most. */
-    private fun waitFor(done: () -> Boolean) {
-        val until = System.currentTimeMillis() + 5_000
+    /** The system shows and takes away notifications, and runs jobs, a moment after asked: wait for it, five seconds at most. */
+    private fun waitFor(timeoutMs: Long = 5_000, done: () -> Boolean) {
+        val until = System.currentTimeMillis() + timeoutMs
         while (!done() && System.currentTimeMillis() < until) Thread.sleep(50)
     }
 
@@ -145,6 +154,46 @@ class WatchdogRunTest {
         AppBackend.current = FakeBackend(failing = true)
         context.sendBroadcast(Intent(context, WatchdogReceiver::class.java).setAction(WatchdogReceiver.ACTION_LOOK))
         warning(text(R.string.watchdog_unreachable))
+    }
+
+    @Test
+    @SdkSuppress(minSdkVersion = Build.VERSION_CODES.S)
+    fun theLookWaitsForANetworkTheAppMayUse() {
+        // Brought up by an alarm, the app has no network: the system runs the look once it may.
+        val job = Watchdog.job(context, notify = true)
+        @Suppress("DEPRECATION")
+        assertEquals(JobInfo.NETWORK_TYPE_ANY, job.networkType)
+        // Without waiting for the phone to be idle or charging.
+        assertTrue(job.isExpedited)
+        assertTrue(Watchdog.notifies(job.extras))
+        assertFalse(Watchdog.notifies(Watchdog.job(context, notify = false).extras))
+    }
+
+    @Test
+    fun anUpdateOfTheAppSetsTheNextLookWithoutWarning() {
+        AppBackend.current = FakeBackend(failing = true)
+        WatchdogReceiver().onReceive(context, Intent(Intent.ACTION_MY_PACKAGE_REPLACED))
+        // Looked, without an answer: again in twenty minutes.
+        waitFor { scheduled.isNotEmpty() }
+        assertNotNull(scheduled.single())
+        assertNull(shown())
+    }
+
+    @Test
+    fun aLookTheSystemStopsLeavesNothingHalfDone() {
+        val gate = CompletableDeferred<Unit>()
+        val slow = FakeBackend(failing = true, statusGate = gate)
+        AppBackend.current = slow
+        Watchdog.lookSoon(context, notify = true)
+        waitFor { slow.statusReads.get() == 1 }
+        jobs.cancel(Watchdog.JOB)
+        waitFor { slow.statusDropped.get() == 1 }
+        assertEquals(1, slow.statusDropped.get())
+        // Its answer comes too late to count.
+        gate.complete(Unit)
+        waitFor(timeoutMs = 1_000) { shown() != null || scheduled.isNotEmpty() }
+        assertNull(shown())
+        assertEquals(emptyList<Instant?>(), scheduled)
     }
 
     @Test
