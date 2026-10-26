@@ -32,7 +32,13 @@ class NotificationHistoryTest : ScreenTesting() {
 
     private val train = Line("L", Mode.TRAIN)
     private val metro = Line("X", Mode.METRO)
-    private val started = PushMessage.Started(train, Severity.BLOCKING, "Ligne L : trafic interrompu", "Panne d'un train.")
+    private val started = PushMessage.Started(
+        train,
+        Severity.BLOCKING,
+        "Ligne L : trafic interrompu",
+        "Panne d'un train.",
+        scope = PushMessage.Scope.Section("Les Aubépines", "Gare Centrale"),
+    )
     private val ended = PushMessage.Ended(train)
 
     @Test
@@ -51,7 +57,8 @@ class NotificationHistoryTest : ScreenTesting() {
         compose.onNodeWithText(ended.text(context.resources).title).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.history_yesterday)).assertIsDisplayed()
         compose.onNodeWithText(started.text(context.resources).title).assertIsDisplayed()
-        compose.onNodeWithText("Panne d'un train.").assertIsDisplayed()
+        // Where, in one line, as the notification said it.
+        compose.onNodeWithText(text(R.string.notification_where_section, "Les Aubépines", "Gare Centrale")).assertIsDisplayed()
         val day = longAgo.atZone(ZoneId.systemDefault()).toLocalDate()
         compose.onNodeWithText(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).format(day)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.history_closed_disrupted, text(R.string.line_metro, "X"))).assertIsDisplayed()

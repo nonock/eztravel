@@ -11,7 +11,13 @@ import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
 import io.github.nonock.eztravel.notifications.PushMessage.Severity
 import org.junit.After
+import android.app.PendingIntent
+import android.content.Intent
+import io.github.nonock.eztravel.MainActivity
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -49,7 +55,38 @@ class NotifierTest {
         assertEquals(Notifier.CHANNEL, notification.channelId)
         // The logo's amber, for the icon in the notification shade.
         assertEquals(context.getColor(io.github.nonock.eztravel.R.color.brand_amber), notification.color)
-        assertEquals("Texte de l'opérateur", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+        // From a backend that does not say where: the operator's title, in one line.
+        assertEquals("Titre de l'opérateur", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    }
+
+    @Test
+    fun aLineNotificationOpensTheAppOnItsRecord() {
+        val opening = Opening("L", "incident-l", "Ligne L : trafic interrompu")
+        val intent = Notifier.intent(context, opening)
+        assertEquals(opening, Notifier.opening(intent))
+        // Started afresh, so that it shows what was tapped.
+        assertTrue(intent.flags and Intent.FLAG_ACTIVITY_CLEAR_TASK != 0)
+        // Opened from its icon, the app opens nothing in particular.
+        assertNull(Notifier.opening(Intent(context, MainActivity::class.java)))
+        assertNull(Notifier.opening(null))
+    }
+
+    @Test
+    fun theWatchAndTrainsOpenTheCommute() {
+        Notifier.show(context, PushMessage.Outage)
+        waitForTitle("watch", PushMessage.Outage.text(context.resources).title)
+        val commute = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        assertEquals(commute, shown("watch").single().notification.contentIntent)
+    }
+
+    @Test
+    fun eachLineNotificationOpensItsOwnRecord() {
+        Notifier.show(context, started)
+        val metro = PushMessage.Started(Line("X", Mode.METRO), Severity.DISRUPTED, "Autre titre", null)
+        Notifier.show(context, metro)
+        waitForTitle("line-L", started.text(context.resources).title)
+        waitForTitle("line-X", metro.text(context.resources).title)
+        assertNotEquals(shown("line-L").single().notification.contentIntent, shown("line-X").single().notification.contentIntent)
     }
 
     @Test

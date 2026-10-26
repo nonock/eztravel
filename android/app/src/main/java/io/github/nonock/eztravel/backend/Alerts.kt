@@ -16,6 +16,10 @@ data class Alerts(val lines: List<LineAlerts>?) {
         val grouped: List<Pair<Alert, Int>>
             get() = alerts.groupBy { it.title }.map { (_, same) -> same.first() to same.size - 1 }
 
+        /** The title to unfold for a notification's record: by its [record] id, else its [title]; null once gone. */
+        fun unfolded(record: String?, title: String?): String? =
+            (alerts.firstOrNull { it.id == record } ?: alerts.firstOrNull { it.title == title })?.title
+
         /** How many are under way, as shown: one per title. */
         val underWay: Int
             get() = grouped.count { (alert, _) -> alert.active }

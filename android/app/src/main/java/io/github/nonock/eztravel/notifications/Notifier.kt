@@ -22,6 +22,26 @@ object Notifier {
     /** One notification per tag: a newer message about a line replaces the older one. */
     private const val ID = 1
 
+    private const val EXTRA_OPEN = "open"
+    private const val EXTRA_LINE = "line"
+    private const val EXTRA_RECORD = "record"
+    private const val EXTRA_TITLE = "title"
+
+    /** The app, opened on [opening]: started afresh, so that it shows it. */
+    fun intent(context: Context, opening: Opening): Intent =
+        Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            .putExtra(EXTRA_OPEN, true)
+            .putExtra(EXTRA_LINE, opening.line)
+            .putExtra(EXTRA_RECORD, opening.record)
+            .putExtra(EXTRA_TITLE, opening.title)
+
+    /** What the app was opened on, from a notification; null otherwise. */
+    fun opening(intent: Intent?): Opening? =
+        intent?.takeIf { it.getBooleanExtra(EXTRA_OPEN, false) }?.let {
+            Opening(it.getStringExtra(EXTRA_LINE), it.getStringExtra(EXTRA_RECORD), it.getStringExtra(EXTRA_TITLE))
+        }
+
     fun createChannel(context: Context) {
         val channel = NotificationChannel(CHANNEL, context.getString(R.string.channel_disruptions), NotificationManager.IMPORTANCE_HIGH)
         channel.description = context.getString(R.string.channel_disruptions_description)
@@ -46,7 +66,15 @@ object Notifier {
         }
         createChannel(context)
         val text = message.text(context.resources)
-        val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        // Each line's own record: one pending intent per tag.
+        val open = message.opening?.let { opening ->
+            PendingIntent.getActivity(
+                context,
+                message.tag.hashCode(),
+                intent(context, opening),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        } ?: PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val builder = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setColor(ContextCompat.getColor(context, R.color.brand_amber))

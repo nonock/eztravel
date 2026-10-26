@@ -14,8 +14,9 @@ import java.time.format.FormatStyle
 data class NotificationText(val title: String, val body: String)
 
 /**
- * The title in the phone's language; the body is the operator's text, as
- * published. Train times are given in [zone], the phone's own.
+ * The title in the phone's language; the body, for a line, says in one line
+ * where the disruption is, or gives the operator's title from a backend that
+ * does not say. Train times are given in [zone], the phone's own.
  */
 fun PushMessage.text(resources: Resources, zone: ZoneId = ZoneId.systemDefault()): NotificationText = when (this) {
     is PushMessage.Started -> NotificationText(
@@ -23,14 +24,14 @@ fun PushMessage.text(resources: Resources, zone: ZoneId = ZoneId.systemDefault()
             if (severity == Severity.BLOCKING) R.string.notification_started_blocking else R.string.notification_started_disrupted,
             line.label(resources),
         ),
-        text ?: title.orEmpty(),
+        scope?.words(resources) ?: title ?: text.orEmpty(),
     )
     is PushMessage.Changed -> NotificationText(
         resources.getString(
             if (severity == Severity.BLOCKING) R.string.notification_changed_blocking else R.string.notification_changed_disrupted,
             line.label(resources),
         ),
-        text ?: title.orEmpty(),
+        scope?.words(resources) ?: title ?: text.orEmpty(),
     )
     is PushMessage.Ended -> NotificationText(resources.getString(R.string.notification_ended, line.label(resources)), "")
     is PushMessage.Planned -> NotificationText(resources.getQuantityString(R.plurals.notification_planned, count, count), titles)
@@ -73,6 +74,17 @@ fun PushMessage.text(resources: Resources, zone: ZoneId = ZoneId.systemDefault()
             train.lateMinutes,
         ),
     )
+}
+
+/** "Between Nanterre and Cergy", "Whole line"... */
+private fun PushMessage.Scope.words(resources: Resources): String = when (this) {
+    PushMessage.Scope.WholeLine -> resources.getString(R.string.notification_where_line)
+    is PushMessage.Scope.Section -> resources.getString(R.string.notification_where_section, from, to)
+    is PushMessage.Scope.Stops -> if (count <= 1) {
+        resources.getString(R.string.notification_where_stop, first)
+    } else {
+        resources.getQuantityString(R.plurals.notification_where_stops, count - 1, first, count - 1)
+    }
 }
 
 private fun Instant.clock(resources: Resources, zone: ZoneId): String =

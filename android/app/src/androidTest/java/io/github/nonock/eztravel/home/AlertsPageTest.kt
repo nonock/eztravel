@@ -18,6 +18,7 @@ import io.github.nonock.eztravel.backend.Alerts.Cause
 import io.github.nonock.eztravel.backend.Alerts.LineAlerts
 import io.github.nonock.eztravel.backend.Alerts.Severity
 import io.github.nonock.eztravel.backend.FakeBackend
+import io.github.nonock.eztravel.notifications.Opening
 import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
 import org.junit.Test
@@ -52,6 +53,29 @@ class AlertsPageTest : ScreenTesting() {
     private val slowed = alert("slow-x", Severity.DISRUPTED, "Métro X : trafic ralenti", active = true)
 
     private fun show(backend: FakeBackend) = compose.setContent { AlertsPage(backend, now = { now }) }
+
+    private val both = Alerts(
+        listOf(
+            LineAlerts(train, null, listOf(stopped, works)),
+            LineAlerts(metro, null, listOf(slowed)),
+        ),
+    )
+
+    @Test
+    fun aNotificationOpensItsLineAndUnfoldsItsRecord() {
+        compose.setContent { AlertsPage(FakeBackend(alerts = both), now = { now }, opening = Opening("L", "incident-l", null)) }
+        waitFor(hasText(stopped.title) and tapLabel(R.string.alerts_fold))
+        // The line's other records stay folded, and the other lines too.
+        waitFor(hasText(works.title) and tapLabel(R.string.alerts_unfold))
+        compose.onNodeWithText(slowed.title).assertDoesNotExist()
+    }
+
+    @Test
+    fun aRecordGoneSinceStillOpensItsLine() {
+        compose.setContent { AlertsPage(FakeBackend(alerts = both), now = { now }, opening = Opening("L", "gone", "An older title")) }
+        waitFor(header(text(R.string.line_train, "L")) and tapLabel(R.string.alerts_hide_line))
+        waitFor(hasText(stopped.title) and tapLabel(R.string.alerts_unfold))
+    }
 
     private fun tapLabel(label: Int) = SemanticsMatcher("tapped to ${text(label)}") {
         it.config.getOrNull(SemanticsActions.OnClick)?.label == text(label)
