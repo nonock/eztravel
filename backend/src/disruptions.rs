@@ -144,7 +144,8 @@ fn line_code(id: &str) -> &str {
     id.rsplit(':').next().unwrap_or(id)
 }
 
-fn local_time<'de, D: Deserializer<'de>>(deserializer: D) -> Result<DateTime, D::Error> {
+/// Navitia's local times: "20261103T064433".
+pub(crate) fn local_time<'de, D: Deserializer<'de>>(deserializer: D) -> Result<DateTime, D::Error> {
     let text = String::deserialize(deserializer)?;
     DateTime::strptime("%Y%m%dT%H%M%S", &text).map_err(serde::de::Error::custom)
 }
