@@ -50,6 +50,8 @@ pub struct Train {
 pub enum Why {
     /// It left the stop's list before its time.
     Missing,
+    /// Due by the timetable, it never showed in the stop's list while later trains did.
+    Unlisted,
     /// The operator says so.
     Announced,
 }
@@ -315,7 +317,11 @@ pub fn follow(
         let why = if followed.said_cancelled {
             Why::Announced
         } else if followed.missing >= CONFIRM {
-            Why::Missing
+            if followed.listed {
+                Why::Missing
+            } else {
+                Why::Unlisted
+            }
         } else {
             continue;
         };
@@ -456,7 +462,7 @@ mod tests {
         assert_eq!(polls(&mut trains, "05:50", 3, true, later), []);
         assert_eq!(
             polls(&mut trains, "05:56", 1, true, later),
-            cancelled(Why::Missing)
+            cancelled(Why::Unlisted)
         );
         assert_eq!(polls(&mut trains, "05:58", 1, true, later), []);
         // Kept as missing once forgotten; the 7:02 ran.

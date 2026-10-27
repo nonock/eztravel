@@ -81,6 +81,9 @@ sealed interface PushMessage {
         /** It left its station's list before its time, and stayed out. */
         MISSING,
 
+        /** Due by the timetable, it never showed in its station's list while later trains did. */
+        UNLISTED,
+
         /** The operator says so. */
         ANNOUNCED,
     }
@@ -179,7 +182,11 @@ sealed interface PushMessage {
                 "train_cancelled" -> TrainCancelled(
                     train(data, line) ?: return null,
                     // Whatever a newer backend's reason, the train is still cancelled.
-                    if (data["reason"] == "announced") Reason.ANNOUNCED else Reason.MISSING,
+                    when (data["reason"]) {
+                        "announced" -> Reason.ANNOUNCED
+                        "unlisted" -> Reason.UNLISTED
+                        else -> Reason.MISSING
+                    },
                     until,
                 )
                 "train_back" -> TrainBack(train(data, line) ?: return null, until)

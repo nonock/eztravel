@@ -1725,7 +1725,7 @@ mod tests {
         assert_eq!(service.poll(tuesday("05:45")).await, Poll::Sent(1));
         let entry = history(&service).remove(0);
         assert_eq!(entry.data["aimed"], "2026-11-03T06:52:00Z");
-        assert_eq!(entry.data["reason"], "missing");
+        assert_eq!(entry.data["reason"], "unlisted");
     }
 
     #[tokio::test]

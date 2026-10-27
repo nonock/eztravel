@@ -153,6 +153,8 @@ class PushMessageTest {
         )
         val announced = PushMessage.parse(fixture("train_cancelled") + ("reason" to "announced"))
         assertEquals(PushMessage.Reason.ANNOUNCED, (announced as PushMessage.TrainCancelled).reason)
+        val unlisted = PushMessage.parse(fixture("train_cancelled") + ("reason" to "unlisted"))
+        assertEquals(PushMessage.Reason.UNLISTED, (unlisted as PushMessage.TrainCancelled).reason)
         // Whatever a newer backend's reason, the train is still cancelled.
         val other = PushMessage.parse(fixture("train_cancelled") + ("reason" to "something-new"))
         assertEquals(PushMessage.Reason.MISSING, (other as PushMessage.TrainCancelled).reason)
