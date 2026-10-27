@@ -27,6 +27,7 @@ import io.github.nonock.eztravel.notifications.Notifier
 import io.github.nonock.eztravel.calendar.monthTitle
 import io.github.nonock.eztravel.notifications.PushToken
 import io.github.nonock.eztravel.watchdog.Watchdog
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -74,6 +75,9 @@ class MainActivityTest {
 
     @get:Rule(order = 2)
     val compose = createAndroidComposeRule<MainActivity>()
+
+    @After
+    fun everyTapTargetIsNamedAndLargeEnough() = compose.checkTapTargets()
 
     private fun text(id: Int) = compose.activity.getString(id)
 
