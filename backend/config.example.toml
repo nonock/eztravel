@@ -23,6 +23,9 @@ location = "Paris"
 # so that trains cancelled early are known when the window opens.
 outbound = { start = "06:45", end = "08:15", trains_from = "05:30" }
 inbound = { start = "16:00", end = "17:30" }
+# Optional: from then, the evening before an office day, what will disrupt the
+# commute during the next day's windows is announced, each record once.
+eve = "20:00"
 
 # How each line is named in notifications, and its color on the home screen
 # (optional, "#RRGGBB": Navitia gives it as the line's `color`).

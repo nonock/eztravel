@@ -86,7 +86,10 @@ pub fn records(notification: &Notification) -> Vec<Record> {
     match notification {
         Notification::Started { disruptions, .. }
         | Notification::Changed { disruptions, .. }
-        | Notification::Planned { disruptions } => disruptions.iter().map(Record::from).collect(),
+        | Notification::Planned { disruptions }
+        | Notification::Tomorrow { disruptions, .. } => {
+            disruptions.iter().map(Record::from).collect()
+        }
         Notification::Ended { .. }
         | Notification::Outage
         | Notification::Recovered

@@ -26,6 +26,8 @@ const TITLE_MAX_BYTES: usize = 300;
 const TEXT_MAX_BYTES: usize = 3000;
 /// An alert older than this is no longer worth showing.
 const TIME_TO_LIVE: &str = "1800s";
+/// Sent in the evening, the next day's trouble waits until the morning for an offline phone.
+const EVE_TIME_TO_LIVE: &str = "43200s";
 /// A train's message stays this long after the train was due, late or not.
 const TRAIN_SHOWN_AFTER: SignedDuration = SignedDuration::from_mins(10);
 const SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
@@ -133,12 +135,13 @@ pub fn data(
         }
         Notification::Planned { disruptions } => {
             put("type", "planned");
-            put("count", &disruptions.len().to_string());
-            let titles: Vec<&str> = disruptions
-                .iter()
-                .map(|disruption| disruption.title.as_str())
-                .collect();
-            put("titles", &truncate(&titles.join("\n"), TEXT_MAX_BYTES));
+            titled(disruptions, &mut put);
+        }
+        Notification::Tomorrow { date, disruptions } => {
+            put("type", "tomorrow");
+            put("date", &date.to_string());
+            put("until", &until);
+            titled(disruptions, &mut put);
         }
         Notification::Outage => put("type", "outage"),
         Notification::Recovered => put("type", "recovered"),
@@ -177,6 +180,16 @@ pub fn data(
         }
     }
     data
+}
+
+/// How many records, and their titles, one a line.
+fn titled(disruptions: &[Disruption], put: &mut dyn FnMut(&str, &str)) {
+    put("count", &disruptions.len().to_string());
+    let titles: Vec<&str> = disruptions
+        .iter()
+        .map(|disruption| disruption.title.as_str())
+        .collect();
+    put("titles", &truncate(&titles.join("\n"), TEXT_MAX_BYTES));
 }
 
 fn describe_train(train: &Train, labels: &[LineLabel], put: &mut dyn FnMut(&str, &str)) {
@@ -259,14 +272,20 @@ pub fn message(device: &str, data: &BTreeMap<String, String>) -> serde_json::Val
         (Some(line), Some(aimed), _) => format!("train-{line}-{aimed}"),
         (Some(line), None, _) => format!("line-{line}"),
         (None, _, Some("planned")) => "planned".to_string(),
+        (None, _, Some("tomorrow")) => "tomorrow".to_string(),
         // An outage and its end.
         _ => "watch".to_string(),
+    };
+    let ttl = if kind == Some("tomorrow") {
+        EVE_TIME_TO_LIVE
+    } else {
+        TIME_TO_LIVE
     };
     serde_json::json!({
         "message": {
             "token": device,
             "data": data,
-            "android": { "priority": "HIGH", "ttl": TIME_TO_LIVE, "collapse_key": collapse_key },
+            "android": { "priority": "HIGH", "ttl": ttl, "collapse_key": collapse_key },
         }
     })
 }
@@ -829,6 +848,22 @@ mod tests {
             ],
         };
         assert_eq!(data(&notification, &labels(), until()), fixture("planned"));
+    }
+
+    #[test]
+    fn the_next_days_disruptions_are_listed_by_title_with_the_day() {
+        let notification = Notification::Tomorrow {
+            date: jiff::civil::date(2026, 11, 4),
+            disruptions: vec![
+                record("Ligne L : travaux", Severity::Disrupted, ""),
+                record("Métro X : grève", Severity::Blocking, ""),
+            ],
+        };
+        assert_eq!(data(&notification, &labels(), until()), fixture("tomorrow"));
+        // Sent in the evening, it waits for an offline phone until the morning.
+        let body = message("t", &fixture("tomorrow"));
+        assert_eq!(body["message"]["android"]["collapse_key"], "tomorrow");
+        assert_eq!(body["message"]["android"]["ttl"], "43200s");
     }
 
     #[test]

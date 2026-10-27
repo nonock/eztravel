@@ -297,6 +297,14 @@ days = { 2026-12-31 = \"office\" }",
     }
 
     #[test]
+    fn the_evening_notice_is_optional() {
+        let config = Config::parse(EXAMPLE).unwrap();
+        assert_eq!(config.windows.eve, Some(jiff::civil::time(20, 0, 0, 0)));
+        let without = Config::parse(&EXAMPLE.replace("eve = \"20:00\"", "")).unwrap();
+        assert_eq!(without.windows.eve, None);
+    }
+
+    #[test]
     fn the_schedule_is_the_calendar_and_windows_in_their_time_zone() {
         let config = Config::parse(EXAMPLE).unwrap();
         let schedule = config.schedule();
