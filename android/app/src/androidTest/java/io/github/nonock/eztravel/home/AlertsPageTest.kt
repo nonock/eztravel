@@ -1,9 +1,14 @@
 package io.github.nonock.eztravel.home
 
 import io.github.nonock.eztravel.ScreenTesting
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
@@ -16,16 +21,19 @@ import io.github.nonock.eztravel.backend.Alerts
 import io.github.nonock.eztravel.backend.Alerts.Alert
 import io.github.nonock.eztravel.backend.Alerts.Cause
 import io.github.nonock.eztravel.backend.Alerts.LineAlerts
+import io.github.nonock.eztravel.backend.Alerts.Link
 import io.github.nonock.eztravel.backend.Alerts.Severity
 import io.github.nonock.eztravel.backend.FakeBackend
 import io.github.nonock.eztravel.notifications.Opening
 import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
+import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
+import java.util.concurrent.CopyOnWriteArrayList
 
 @RunWith(AndroidJUnit4::class)
 class AlertsPageTest : ScreenTesting() {
@@ -154,6 +162,37 @@ class AlertsPageTest : ScreenTesting() {
         waitFor(hasText(stopped.title) and tapLabel(R.string.alerts_fold))
         compose.onNode(hasText(stopped.title)).performClick()
         waitFor(hasText(stopped.title) and tapLabel(R.string.alerts_unfold))
+    }
+
+    @Test
+    fun aRecordsLinksOpenOnceItIsUnfolded() {
+        val url = "https://example.org/travaux-l"
+        val linked = stopped.copy(text = "Détails sur le site de la ligne.", links = listOf(Link(15, 31, url)))
+        val opened = CopyOnWriteArrayList<String>()
+        // The browser is not opened in the test: the address is kept.
+        val browser = object : UriHandler {
+            override fun openUri(uri: String) {
+                opened += uri
+            }
+        }
+        compose.setContent {
+            CompositionLocalProvider(LocalUriHandler provides browser) {
+                AlertsPage(FakeBackend(alerts = Alerts(listOf(LineAlerts(train, null, listOf(linked))))), now = { now })
+            }
+        }
+        unfold(text(R.string.line_train, "L"))
+        waitFor(hasText(linked.title) and tapLabel(R.string.alerts_unfold))
+        // Folded, the record holds no link: a tap only unfolds it.
+        val link = SemanticsMatcher.keyIsDefined(SemanticsProperties.LinkTestMarker)
+        compose.onAllNodes(link).assertCountEquals(0)
+        compose.onNode(hasText(linked.title)).performClick()
+        waitFor(hasText(linked.title) and tapLabel(R.string.alerts_fold))
+        // In the tree screen readers see: a stop of its own.
+        compose.onNode(link).performClick()
+        compose.waitUntil { opened.isNotEmpty() }
+        assertEquals(listOf(url), opened)
+        // The record stays unfolded.
+        compose.onNode(hasText(linked.title) and tapLabel(R.string.alerts_fold)).assertExists()
     }
 
     @Test

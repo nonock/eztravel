@@ -41,7 +41,13 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.nonock.eztravel.R
@@ -161,7 +167,21 @@ private fun severityMark(severity: Severity): Pair<ImageVector, Color> = when (s
     Severity.INFORMATION -> Icons.Outlined.Info to MaterialTheme.colorScheme.onSurfaceVariant
 }
 
-/** One alert, folded to its first lines until tapped, or [opened] in full and in view; [more] alerts share its title. */
+/** The alert's text with its web links, underlined, which open in the browser. */
+@Composable
+private fun linked(alert: Alert): AnnotatedString {
+    val style = TextLinkStyles(SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline))
+    return buildAnnotatedString {
+        append(alert.text)
+        for (link in alert.links) addLink(LinkAnnotation.Url(link.url, style), link.start, link.end)
+    }
+}
+
+/**
+ * One alert, folded to its first lines until tapped, or [opened] in full and
+ * in view; [more] alerts share its title. Its links work once unfolded, so
+ * that a tap to unfold never opens the browser.
+ */
 @Composable
 private fun AlertCard(alert: Alert, more: Int, now: Instant, opened: Boolean) {
     var unfolded by rememberSaveable(alert.id) { mutableStateOf(opened) }
@@ -210,7 +230,7 @@ private fun AlertCard(alert: Alert, more: Int, now: Instant, opened: Boolean) {
                     )
                 }
                 Text(
-                    alert.text,
+                    if (unfolded) linked(alert) else AnnotatedString(alert.text),
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = if (unfolded) Int.MAX_VALUE else FOLDED_LINES,
                     overflow = TextOverflow.Ellipsis,

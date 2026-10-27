@@ -1,6 +1,7 @@
 package io.github.nonock.eztravel.backend
 
 import io.github.nonock.eztravel.notifications.PushMessage
+import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 
@@ -39,7 +40,8 @@ data class Alerts(val lines: List<LineAlerts>?) {
 
     /**
      * [begin] and [end] are those of the period under way when [active], or
-     * else of the next one; [onWay] when it touches the commute, as notified.
+     * else of the next one; [onWay] when it touches the commute, as notified;
+     * [links] are on words of [text].
      */
     data class Alert(
         val id: String,
@@ -52,7 +54,11 @@ data class Alerts(val lines: List<LineAlerts>?) {
         val end: Instant,
         val onWay: Boolean,
         val updated: Instant,
+        val links: List<Link> = emptyList(),
     )
+
+    /** A web link on the chars of a text from [start] to before [end], as Kotlin counts them; always `https`. */
+    data class Link(val start: Int, val end: Int, val url: String)
 
     companion object {
         /** Values a newer backend may add fall back on the safe side: trouble stays trouble. */
@@ -71,6 +77,7 @@ data class Alerts(val lines: List<LineAlerts>?) {
         }
 
         private fun alert(json: JSONObject) = Alert(
+            links = links(json.optJSONArray("links"), json.getString("text")),
             id = json.getString("id"),
             severity = when (json.getString("severity")) {
                 "blocking" -> Severity.BLOCKING
@@ -91,5 +98,20 @@ data class Alerts(val lines: List<LineAlerts>?) {
             onWay = json.optBoolean("on_way"),
             updated = Instant.parse(json.getString("updated")),
         )
+
+        /** The backend counts code points; any link not safe to open, or off the text, is left out. */
+        private fun links(json: JSONArray?, text: String): List<Link> {
+            val length = text.codePointCount(0, text.length)
+            return json?.objects().orEmpty().mapNotNull { link ->
+                val start = link.optInt("start", -1)
+                val end = link.optInt("end", -1)
+                val url = link.optString("url")
+                if (start in 0 until end && end <= length && url.startsWith("https://")) {
+                    Link(text.offsetByCodePoints(0, start), text.offsetByCodePoints(0, end), url)
+                } else {
+                    null
+                }
+            }
+        }
     }
 }
