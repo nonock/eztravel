@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -130,6 +131,7 @@ private fun LineSection(line: Alerts.LineAlerts, now: Instant, opened: Opening?)
         Column(Modifier.weight(1f)) {
             Text(line.line.label(LocalResources.current), style = MaterialTheme.typography.titleMedium, modifier = Modifier.clearAndSetSemantics {})
             val parts = listOfNotNull(
+                line.worstUnderWay?.let { severityWords(it) },
                 line.underWay.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.alerts_under_way, it, it) },
                 line.toCome.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.alerts_to_come, it, it) },
             )
@@ -165,6 +167,14 @@ private fun severityMark(severity: Severity): Pair<ImageVector, Color> = when (s
     Severity.BLOCKING -> Icons.Filled.Warning to MaterialTheme.colorScheme.error
     Severity.DISRUPTED -> Icons.Filled.Warning to MaterialTheme.colorScheme.primary
     Severity.INFORMATION -> Icons.Outlined.Info to MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+/** How bad, in words: blocking and disrupted share an icon, apart by color only; information has its own. */
+@Composable
+private fun severityWords(severity: Severity): String? = when (severity) {
+    Severity.BLOCKING -> stringResource(R.string.status_state_blocking)
+    Severity.DISRUPTED -> stringResource(R.string.status_state_disrupted)
+    Severity.INFORMATION -> null
 }
 
 /** The alert's text with its web links, underlined, which open in the browser. */
@@ -208,8 +218,14 @@ private fun AlertCard(alert: Alert, more: Int, now: Instant, opened: Boolean) {
             Spacer(Modifier.width(12.dp))
             Column {
                 Text(alert.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Three tags may not fit on one line, in large type or in French.
+                FlowRow(
+                    Modifier.padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Tag(stringResource(if (alert.active) R.string.alerts_now else R.string.alerts_coming))
+                    severityWords(alert.severity)?.let { Tag(it) }
                     if (alert.onWay) Tag(stringResource(R.string.alerts_on_way))
                 }
                 Text(
