@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -414,7 +415,13 @@ private fun DepartureRow(leg: Departures.Leg, departure: Departure, now: Instant
                     modifier = Modifier.weight(1f),
                 )
             }
-            Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // In large type the details wrap, the time to leave last, rather than squeeze it letter by letter.
+            FlowRow(
+                Modifier.padding(top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
                 val details = MaterialTheme.typography.bodySmall
                 // Below the time it leaves at: where it leaves from.
                 departure.platform?.let { Tag(stringResource(R.string.departures_platform, it)) }
