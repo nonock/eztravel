@@ -15,9 +15,9 @@ use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::alerts::{Commute, Notification, State, WatchedLeg, decide};
+use crate::alerts::{Commute, Notification, State, WatchedLeg, decide, eve};
 use crate::api;
-use crate::calendar::{Direction, Phase, phase, watched_direction};
+use crate::calendar::{Calendar, Direction, Phase, phase, watched_direction};
 use crate::config::Config;
 use crate::departures::{NextDepartures, leg_stops, monitoring_ref, one_way};
 use crate::history::{self, Entry, History};
@@ -253,7 +253,10 @@ impl Service {
                     Some((direction, Phase::Observing)) => {
                         self.observe(now, local, direction).await
                     }
-                    _ => Poll::Idle,
+                    _ => {
+                        self.announce_tomorrow(now, local, &profile, &calendar)
+                            .await
+                    }
                 }
             }
             Some(direction) => {
@@ -359,6 +362,55 @@ impl Service {
             }
             Err(error) => Poll::Unavailable(format!("{error:?}")),
         }
+    }
+
+    /// The evening before an office day, once from its time: what will
+    /// disrupt its windows. Tried again at the next poll until sent.
+    async fn announce_tomorrow(
+        &mut self,
+        now: Timestamp,
+        local: DateTime,
+        profile: &Profile,
+        calendar: &Calendar,
+    ) -> Poll {
+        let tomorrow = local
+            .date()
+            .tomorrow()
+            .expect("a date before the year 9999");
+        let due = self
+            .config
+            .windows
+            .eve
+            .is_some_and(|eve| eve <= local.time())
+            && calendar.is_office_day(tomorrow)
+            && self.state.eve() != Some(tomorrow)
+            && !profile.devices.is_empty();
+        if !due {
+            return Poll::Idle;
+        }
+        self.refresh_routes(local.date()).await;
+        let lines = self.config.all_line_codes();
+        let codes: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let disruptions = match self.prim.disruptions(&codes).await {
+            Ok(disruptions) => disruptions,
+            Err(error) => return Poll::Unavailable(format!("{error:?}")),
+        };
+        let mut next = self.state.clone();
+        let notifications = eve(
+            &mut next,
+            tomorrow,
+            &self.config.windows,
+            &self.commute(),
+            &disruptions,
+        );
+        // Gone from the phone once the way to work is watched.
+        let (until, _) =
+            self.window_bounds(tomorrow.to_datetime(local.time()), Direction::Outbound);
+        if let Err(error) = self.send(now, until, profile, &notifications).await {
+            return Poll::NotSent(format!("{error:?}"));
+        }
+        self.commit(next);
+        Poll::Sent(notifications.len())
     }
 
     /// The stops of each train leg of `direction`: a station lists its trains one by one.
@@ -750,6 +802,17 @@ mod tests {
             let uri = self.server.uri();
             Service::new(
                 Config::parse(EXAMPLE).unwrap(),
+                Prim::new(&uri, "key"),
+                Sender::new(account(&format!("{uri}/token")), &uri),
+                self.store.clone(),
+                self.dir.path(),
+            )
+        }
+
+        fn service_with(&self, config: Config) -> Service {
+            let uri = self.server.uri();
+            Service::new(
+                config,
                 Prim::new(&uri, "key"),
                 Sender::new(account(&format!("{uri}/token")), &uri),
                 self.store.clone(),
@@ -1240,6 +1303,82 @@ mod tests {
         assert_eq!(
             status.lock().unwrap().planned,
             ["Ligne L : trafic interrompu"]
+        );
+    }
+
+    // Monday 2 November 2026, the evening before an office day, in Paris.
+    const EVE: &str = "2026-11-02T19:00:00Z";
+
+    #[tokio::test]
+    async fn the_evening_before_an_office_day_its_trouble_is_sent_once() {
+        let setup = Setup::new().await;
+        // The incident of the feed is on Tuesday morning.
+        setup.prim_answers(200, true, 1).await;
+        setup.firebase_answers_to("tomorrow", 200, 1).await;
+        let mut service = setup.service();
+        assert_eq!(service.poll(at("2026-11-02T18:58:00Z")).await, Poll::Idle);
+        assert_eq!(service.poll(at(EVE)).await, Poll::Sent(1));
+        assert_eq!(service.poll(at("2026-11-02T19:02:00Z")).await, Poll::Idle);
+        let entry = history(&service).remove(0);
+        assert_eq!(entry.data["type"], "tomorrow");
+        assert_eq!(entry.data["date"], "2026-11-03");
+        assert_eq!(entry.records.len(), 1);
+        // Across a restart too.
+        assert_eq!(
+            setup.service().poll(at("2026-11-02T19:04:00Z")).await,
+            Poll::Idle
+        );
+    }
+
+    #[tokio::test]
+    async fn a_quiet_evening_sends_nothing_and_reads_once() {
+        let setup = Setup::new().await;
+        setup.prim_answers(200, false, 1).await;
+        setup.firebase_answers_to("tomorrow", 200, 0).await;
+        let mut service = setup.service();
+        assert_eq!(service.poll(at(EVE)).await, Poll::Sent(0));
+        assert_eq!(service.poll(at("2026-11-02T19:02:00Z")).await, Poll::Idle);
+    }
+
+    #[tokio::test]
+    async fn no_evening_notice_before_a_day_at_home_without_its_time_or_a_phone() {
+        let setup = Setup::new().await;
+        setup.prim_answers(200, true, 0).await;
+        // Wednesday 4 November works from home in the example.
+        assert_eq!(
+            setup.service().poll(at("2026-11-03T19:00:00Z")).await,
+            Poll::Idle
+        );
+        let config = Config::parse(&EXAMPLE.replace("eve = \"20:00\"", "")).unwrap();
+        let mut without = setup.service_with(config);
+        assert_eq!(without.poll(at(EVE)).await, Poll::Idle);
+        setup.store.update(|profile| profile.forget("phone"));
+        assert_eq!(setup.service().poll(at(EVE)).await, Poll::Idle);
+    }
+
+    #[tokio::test]
+    async fn an_evening_notice_that_could_not_be_read_or_sent_is_tried_again() {
+        let setup = Setup::new().await;
+        Mock::given(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .mount(&setup.server)
+            .await;
+        setup.prim_answers(200, true, 2).await;
+        setup.firebase_answers_to("tomorrow", 500, 1).await;
+        setup.firebase_answers_to("tomorrow", 200, 1).await;
+        let mut service = setup.service();
+        assert_eq!(
+            service.poll(at(EVE)).await,
+            Poll::Unavailable("Status(503)".into())
+        );
+        assert_eq!(
+            service.poll(at("2026-11-02T19:02:00Z")).await,
+            Poll::NotSent(r#"Status(500, "")"#.into())
+        );
+        assert_eq!(
+            service.poll(at("2026-11-02T19:04:00Z")).await,
+            Poll::Sent(1)
         );
     }
 

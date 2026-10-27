@@ -121,6 +121,10 @@ pub struct Window {
 pub struct WatchWindows {
     pub outbound: Window,
     pub inbound: Window,
+    /// From then, the evening before an office day, what will disrupt the
+    /// next day's windows is announced; never without.
+    #[serde(default)]
+    pub eve: Option<Time>,
 }
 
 impl WatchWindows {
@@ -369,6 +373,7 @@ mod tests {
                 end: time(17, 30, 0, 0),
                 trains_from: None,
             },
+            eve: None,
         }
     }
 

@@ -9,12 +9,14 @@
 //!
 //! Planned disruptions (works, adapted timetables over several days) would
 //! keep a line "disrupted" all day: they are announced once a day instead.
+//! The evening before an office day, what will disrupt the next day's windows
+//! is announced too, each record once.
 
 use jiff::civil::{Date, DateTime};
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 
-use crate::calendar::Direction;
+use crate::calendar::{Direction, WatchWindows};
 use crate::disruptions::{Cause, Disruption, Severity};
 use crate::relevance::{Bearing, Leg, Route, Scope, affects, bearing, scope};
 use crate::trains::{Train, Why};
@@ -52,6 +54,11 @@ pub enum Notification {
     Planned {
         disruptions: Vec<Disruption>,
     },
+    /// The evening before an office day, `date`: what will disrupt its windows.
+    Tomorrow {
+        date: Date,
+        disruptions: Vec<Disruption>,
+    },
     /// No complete check for a while: no news no longer means good news.
     Outage,
     /// Checks work again, after an outage was notified.
@@ -85,6 +92,12 @@ pub struct State {
     lines: Vec<(String, Severity)>,
     planned_day: Option<Date>,
     planned_titles: Vec<String>,
+    /// The office day announced the evening before, last.
+    #[serde(default)]
+    eve_day: Option<Date>,
+    /// The records announced the evening before, by title, while still in the feed.
+    #[serde(default)]
+    eve_titles: Vec<String>,
 }
 
 impl State {
@@ -99,6 +112,11 @@ impl State {
     /// The lines disrupted in the current window, as last notified.
     pub fn lines(&self) -> &[(String, Severity)] {
         &self.lines
+    }
+
+    /// The office day whose trouble was announced the evening before, last.
+    pub fn eve(&self) -> Option<Date> {
+        self.eve_day
     }
 
     /// The planned disruptions announced on `today`.
@@ -215,6 +233,56 @@ pub fn decide(
     notifications
 }
 
+/// The evening before `tomorrow`, an office day: the records more than
+/// information that touch a leg during one of its windows, each once.
+pub fn eve(
+    state: &mut State,
+    tomorrow: Date,
+    windows: &WatchWindows,
+    commute: &Commute,
+    disruptions: &[Disruption],
+) -> Vec<Notification> {
+    state.eve_day = Some(tomorrow);
+    state.eve_titles.retain(|title| {
+        disruptions
+            .iter()
+            .any(|disruption| disruption.title == *title)
+    });
+    let mut announced: Vec<Disruption> = vec![];
+    for (window, legs) in [
+        (windows.outbound, &commute.outbound),
+        (windows.inbound, &commute.inbound),
+    ] {
+        let (start, end) = (
+            tomorrow.to_datetime(window.start),
+            tomorrow.to_datetime(window.end),
+        );
+        for disruption in disruptions {
+            let during = disruption
+                .periods
+                .iter()
+                .any(|period| period.begin < end && start < period.end);
+            if during
+                && disruption.severity != Severity::Information
+                && !state.eve_titles.contains(&disruption.title)
+                && legs
+                    .iter()
+                    .any(|watched| affects(disruption, &watched.leg, &watched.routes))
+            {
+                state.eve_titles.push(disruption.title.clone());
+                announced.push(disruption.clone());
+            }
+        }
+    }
+    if announced.is_empty() {
+        return vec![];
+    }
+    vec![Notification::Tomorrow {
+        date: tomorrow,
+        disruptions: announced,
+    }]
+}
+
 /// The record a line's notification shows, of those behind its `severity`:
 /// the first as bad, or else the first.
 pub fn shown(severity: Severity, disruptions: &[Disruption]) -> Option<&Disruption> {
@@ -269,9 +337,10 @@ fn level(severity: Severity) -> Severity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calendar::Window;
     use crate::disruptions::{Period, Place, Section};
     use crate::relevance::RouteStop;
-    use jiff::civil::date;
+    use jiff::civil::{date, time};
 
     const TRAIN: &str = "C01740";
     const METRO: &str = "C02000";
@@ -635,6 +704,94 @@ mod tests {
         assert_eq!(poll(&mut restored, at(3, 7, 32), MORNING, &current), []);
     }
 
+    fn windows() -> WatchWindows {
+        let window = |start, end| Window {
+            start,
+            end,
+            trains_from: None,
+        };
+        WatchWindows {
+            outbound: window(time(6, 45, 0, 0), time(8, 15, 0, 0)),
+            inbound: window(time(16, 0, 0, 0), time(17, 30, 0, 0)),
+            eve: Some(time(20, 0, 0, 0)),
+        }
+    }
+
+    fn eve(state: &mut State, tomorrow: i8, disruptions: &[Disruption]) -> Vec<Notification> {
+        super::eve(
+            state,
+            date(2026, 11, tomorrow),
+            &windows(),
+            &commute(),
+            disruptions,
+        )
+    }
+
+    #[test]
+    fn the_evening_before_what_touches_the_next_days_windows_is_announced() {
+        let mut state = State::default();
+        let works = planned("w", Cause::Works, at(3, 5, 0), at(3, 12, 0));
+        let strike = Disruption {
+            title: "Grève".into(),
+            ..disruption("s", METRO, Severity::Blocking, at(3, 0, 0), at(4, 0, 0))
+        };
+        // At night, between the windows, today, on another line, or information only: not.
+        let night = planned("n", Cause::Works, at(3, 22, 0), at(4, 5, 0));
+        let midday = planned("m", Cause::Works, at(3, 9, 0), at(3, 15, 0));
+        let today = planned("t", Cause::Works, at(2, 6, 0), at(2, 18, 0));
+        let elsewhere = Disruption {
+            lines: vec![OTHER.into()],
+            ..planned("o", Cause::Works, at(3, 5, 0), at(3, 23, 0))
+        };
+        let notice = Disruption {
+            severity: Severity::Information,
+            ..planned("i", Cause::Works, at(3, 5, 0), at(3, 23, 0))
+        };
+        // The way home only: still the day's trouble.
+        let evening = planned("e", Cause::Works, at(3, 17, 0), at(3, 19, 0));
+        let feed = [
+            works.clone(),
+            night,
+            strike.clone(),
+            midday,
+            today,
+            elsewhere,
+            notice,
+            evening.clone(),
+        ];
+        assert_eq!(
+            eve(&mut state, 3, &feed),
+            [Notification::Tomorrow {
+                date: date(2026, 11, 3),
+                disruptions: vec![works, strike, evening],
+            }]
+        );
+        assert_eq!(state.eve(), Some(date(2026, 11, 3)));
+    }
+
+    #[test]
+    fn each_record_is_announced_the_evening_before_once() {
+        let mut state = State::default();
+        let week = planned("w", Cause::Works, at(3, 5, 0), at(7, 5, 0));
+        assert_eq!(eve(&mut state, 3, std::slice::from_ref(&week)).len(), 1);
+        // The next evening, only what is new.
+        let strike = Disruption {
+            title: "Grève".into(),
+            ..disruption("s", METRO, Severity::Blocking, at(4, 0, 0), at(5, 0, 0))
+        };
+        assert_eq!(
+            eve(&mut state, 4, &[week.clone(), strike.clone()]),
+            [Notification::Tomorrow {
+                date: date(2026, 11, 4),
+                disruptions: vec![strike],
+            }]
+        );
+        // A record gone from the feed is forgotten: back later, it is news again.
+        assert_eq!(eve(&mut state, 5, &[]), []);
+        assert_eq!(state.eve(), Some(date(2026, 11, 5)));
+        assert_eq!(eve(&mut state, 6, std::slice::from_ref(&week)).len(), 1);
+    }
+
     #[test]
     fn a_state_saved_by_the_previous_version_is_read() {
         // The service on fly.io keeps its state across deploys: the shape must not change.
@@ -642,6 +799,7 @@ mod tests {
         let state: State = serde_json::from_str(saved).unwrap();
         assert_eq!(state.severity(TRAIN), Some(Severity::Blocking));
         assert_eq!(state.planned(date(2026, 11, 3)), ["Prévu w"]);
+        assert_eq!(state.eve(), None);
     }
 
     #[test]
