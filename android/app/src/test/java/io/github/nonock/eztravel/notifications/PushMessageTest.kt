@@ -10,6 +10,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.File
 import java.time.Instant
+import java.time.LocalDate
 
 class PushMessageTest {
     /** The window end in the fixtures: 8:15 in Paris on Tuesday 3 November 2026. */
@@ -95,6 +96,20 @@ class PushMessageTest {
             PushMessage.Planned(2, "Ligne L : offre adaptée\nMétro X : station fermée"),
             PushMessage.parse(fixture("planned")),
         )
+    }
+
+    @Test
+    fun readsTheNextDaysTrouble() {
+        val tomorrow = PushMessage.parse(fixture("tomorrow"))
+        assertEquals(
+            PushMessage.Tomorrow(LocalDate.of(2026, 11, 4), 2, "Ligne L : travaux\nMétro X : grève", until = windowEnd),
+            tomorrow,
+        )
+        // Its lines are listed on the Alerts page, folded; one notice for the next day at a time.
+        assertEquals(Opening(null, null, null), tomorrow!!.opening)
+        assertEquals("tomorrow", tomorrow.tag)
+        assertNull(PushMessage.parse(fixture("tomorrow") + ("date" to "demain")))
+        for (missing in listOf("date", "count", "titles")) assertNull(missing, PushMessage.parse(fixture("tomorrow") - missing))
     }
 
     @Test

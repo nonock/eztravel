@@ -35,6 +35,15 @@ fun PushMessage.text(resources: Resources, zone: ZoneId = ZoneId.systemDefault()
     )
     is PushMessage.Ended -> NotificationText(resources.getString(R.string.notification_ended, line.label(resources)), "")
     is PushMessage.Planned -> NotificationText(resources.getQuantityString(R.plurals.notification_planned, count, count), titles)
+    is PushMessage.Tomorrow -> NotificationText(
+        resources.getQuantityString(
+            R.plurals.notification_tomorrow,
+            count,
+            count,
+            DateTimeFormatter.ofPattern("EEEE d MMMM", resources.configuration.locales[0]).format(date),
+        ),
+        titles,
+    )
     PushMessage.Outage -> NotificationText(resources.getString(R.string.notification_outage), resources.getString(R.string.notification_outage_text))
     PushMessage.Recovered -> NotificationText(resources.getString(R.string.notification_recovered), resources.getString(R.string.notification_recovered_text))
     is PushMessage.TrainCancelled -> NotificationText(

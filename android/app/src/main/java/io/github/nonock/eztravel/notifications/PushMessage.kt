@@ -1,6 +1,7 @@
 package io.github.nonock.eztravel.notifications
 
 import java.time.Instant
+import java.time.LocalDate
 
 /**
  * A push message from the backend. Its format is fixed by `fixtures/push/` in
@@ -52,6 +53,9 @@ sealed interface PushMessage {
     data class Ended(val line: Line, override val until: Instant? = null) : PushMessage
 
     data class Planned(val count: Int, val titles: String) : PushMessage
+
+    /** The evening before an office day, [date]: what will disrupt the way, [count] records by their [titles]. */
+    data class Tomorrow(val date: LocalDate, val count: Int, val titles: String, override val until: Instant?) : PushMessage
 
     /** The backend has not managed to check for a while: no notification no longer means no disruption. */
     data object Outage : PushMessage
@@ -113,7 +117,7 @@ sealed interface PushMessage {
             is Changed -> Opening(line.name, id, title)
             is Ended -> Opening(line.name, null, null)
             // Planned works may be on several lines.
-            is Planned -> Opening(null, null, null)
+            is Planned, is Tomorrow -> Opening(null, null, null)
             else -> null
         }
 
@@ -124,6 +128,7 @@ sealed interface PushMessage {
             is Changed -> "line-${line.name}"
             is Ended -> "line-${line.name}"
             is Planned -> "planned"
+            is Tomorrow -> "tomorrow"
             Outage, Recovered -> "watch"
             // A train's own: neither its line's state nor another train.
             is TrainCancelled -> "train-${train.line.name}-${train.aimed}"
@@ -162,6 +167,12 @@ sealed interface PushMessage {
                 "planned" -> Planned(
                     data["count"]?.toIntOrNull() ?: return null,
                     data["titles"] ?: return null,
+                )
+                "tomorrow" -> Tomorrow(
+                    data["date"]?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return null,
+                    data["count"]?.toIntOrNull() ?: return null,
+                    data["titles"] ?: return null,
+                    until,
                 )
                 "outage" -> Outage
                 "recovered" -> Recovered

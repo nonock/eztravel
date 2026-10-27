@@ -15,6 +15,7 @@ import io.github.nonock.eztravel.MainActivity
 import io.github.nonock.eztravel.R
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 
 object Notifier {
     const val CHANNEL = "disruptions"
@@ -59,11 +60,6 @@ object Notifier {
     fun show(context: Context, message: PushMessage, now: Instant = Instant.now()) {
         val left = message.until?.let { Duration.between(now, it).toMillis() }
         if (left != null && left <= 0) return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
         createChannel(context)
         val text = message.text(context.resources)
         // Each line's own record: one pending intent per tag.
@@ -86,6 +82,51 @@ object Notifier {
             .setAutoCancel(true)
         // Nothing stale on screen once the watch window is over.
         if (left != null) builder.setTimeoutAfter(left)
-        NotificationManagerCompat.from(context).notify(message.tag, ID, builder.build())
+        if (message is PushMessage.Tomorrow) builder.addAction(remote(context, message.date))
+        post(context, message.tag, builder)
+    }
+
+    /**
+     * In place of the evening notice: [date] worked from home, as [set], or
+     * not changed, with its button again to try once more.
+     */
+    fun tomorrowSet(context: Context, date: LocalDate, set: Boolean) {
+        createChannel(context)
+        val (title, text) = if (set) {
+            R.string.notification_tomorrow_remote to R.string.notification_tomorrow_remote_text
+        } else {
+            R.string.notification_tomorrow_unchanged to R.string.notification_tomorrow_unchanged_text
+        }
+        val builder = NotificationCompat.Builder(context, CHANNEL)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(ContextCompat.getColor(context, R.color.brand_amber))
+            .setContentTitle(context.getString(title))
+            .setContentText(context.getString(text))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(context.getString(text)))
+            .setContentIntent(PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
+            .setAutoCancel(true)
+        if (!set) builder.addAction(remote(context, date))
+        post(context, "tomorrow", builder)
+    }
+
+    /** "Remote work tomorrow": sets [date] from the notification, without opening the app. */
+    private fun remote(context: Context, date: LocalDate): NotificationCompat.Action {
+        val set = PendingIntent.getBroadcast(
+            context,
+            "tomorrow".hashCode(),
+            TomorrowReceiver.intent(context, date),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return NotificationCompat.Action(0, context.getString(R.string.notification_remote_tomorrow), set)
+    }
+
+    /** Under [tag], replacing what was there, when the user lets the app notify. */
+    private fun post(context: Context, tag: String, builder: NotificationCompat.Builder) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        NotificationManagerCompat.from(context).notify(tag, ID, builder.build())
     }
 }

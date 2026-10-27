@@ -40,5 +40,8 @@ class HistoryLookTest {
         assertEquals(Look(Mark.WatchDown, Tone.BAD), sent(PushMessage.Outage))
         assertEquals(Look(Mark.WatchUp, Tone.GOOD), sent(PushMessage.Recovered))
         assertEquals(Look(Mark.Planned, Tone.INFO), sent(PushMessage.Planned(2, "Ligne L : travaux")))
+        // The next day's trouble is a warning: it may change the day.
+        val tomorrow = PushMessage.Tomorrow(java.time.LocalDate.of(2026, 11, 4), 1, "Ligne L : travaux", null)
+        assertEquals(Look(Mark.Planned, Tone.WARN), sent(tomorrow))
     }
 }
