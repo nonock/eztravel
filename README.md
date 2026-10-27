@@ -24,7 +24,7 @@ Existing apps cover the whole network, for everyone. eztravel does the opposite:
 - when it is back to normal, if its start was notified;
 - once a day, the planned disruptions (works, adapted service) that affect the commute;
 - the evening before an office day, from a set time (`eve`, for example 20:00), what will disrupt the commute during the next day's windows (works, strikes, adapted service), each record once;
-- when a train due to leave during the window is cancelled: it left its station's list before its time and stayed out for four checks in a row, or the operator says so; then again if it runs after all. Only train lines are followed this way: a metro platform lists its next four trains, without their timetable;
+- when a train due to leave during the window is cancelled: it left its station's list before its time and stayed out for four checks in a row, or, due by the timetable, it never showed in that list while later trains did, or the operator says so; then again if it runs after all. Only train lines are followed this way: a metro platform lists its next four trains, without their timetable;
 - a few minutes before it is time to leave: for the train picked in the app that day, or else the way's usual train, set in the app (the first train from its time that can be caught, leaving at most half an hour after it was time to), with its platform and how it runs as far as PRIM knows; then again if that train runs three minutes late or more. A picked train that is cancelled gives way to the next one;
 - when no check has succeeded for ten minutes ("watching interrupted"), then when checks work again.
 

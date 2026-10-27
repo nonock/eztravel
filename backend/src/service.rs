@@ -30,7 +30,7 @@ use crate::profile::{Profile, Store};
 use crate::push::{self, PushError, Sender};
 use crate::relevance::{Leg, Route};
 use crate::school::{SCHOOL_URL, SchoolHolidays};
-use crate::trains::{Seen, Trains, follow};
+use crate::trains::{Scheduled, Seen, Trains, follow, plan};
 use crate::watch::{Cause, Health, LineStatus, Snapshot};
 
 const STATE_FILE: &str = "state.json";
@@ -316,6 +316,7 @@ impl Service {
         let mut leaving = self.leaving.clone();
         if let Ok(seen) = &seen {
             let key = (local.date(), direction);
+            self.read_timetable(&mut trains, key).await;
             let window = self.window_bounds(local, direction);
             notifications.extend(follow(&mut trains, key, window, now, seen, true));
             notifications.extend(self.reminders(&mut leaving, key, now, local, seen, profile));
@@ -355,6 +356,7 @@ impl Service {
             Ok(seen) => {
                 let mut trains = self.trains.clone();
                 let key = (local.date(), direction);
+                self.read_timetable(&mut trains, key).await;
                 let window = self.window_bounds(local, direction);
                 follow(&mut trains, key, window, now, &seen, false);
                 self.commit_trains(trains);
@@ -420,30 +422,73 @@ impl Service {
         direction: Direction,
         now: Timestamp,
     ) -> Result<Vec<Seen>, PrimError> {
-        let legs = self.config.legs(direction);
         let mut seen = vec![];
-        for leg in legs {
-            let Some((board, alight)) = self
-                .routes
-                .get(&leg.line)
-                .and_then(|routes| leg_stops(leg, routes))
-            else {
-                continue;
-            };
-            let stops = monitoring_ref(&board.stop_point).zip(monitoring_ref(&alight.stop_point));
-            let Some((board_ref, alight_ref)) = stops.filter(|_| !one_way(&board.stop_point))
-            else {
-                continue;
-            };
+        for (leg, from, board_ref, alight_ref) in self.live_legs(direction) {
             seen.push(Seen {
                 line: leg.line.clone(),
-                from: board.name.clone(),
+                from,
                 board: self.departures.read(&board_ref, now).await?,
                 arriving: self.departures.read(&alight_ref, now).await?,
                 alight: alight_ref,
             });
         }
         Ok(seen)
+    }
+
+    /// The legs of `direction` whose trains are read live, with the board
+    /// stop's name and the `MonitoringRef`s of both stops.
+    fn live_legs(&self, direction: Direction) -> Vec<(&Leg, String, String, String)> {
+        self.config
+            .legs(direction)
+            .iter()
+            .filter_map(|leg| {
+                let (board, alight) = self
+                    .routes
+                    .get(&leg.line)
+                    .and_then(|routes| leg_stops(leg, routes))?;
+                let stops =
+                    monitoring_ref(&board.stop_point).zip(monitoring_ref(&alight.stop_point));
+                let (board_ref, alight_ref) = stops.filter(|_| !one_way(&board.stop_point))?;
+                Some((leg, board.name.clone(), board_ref, alight_ref))
+            })
+            .collect()
+    }
+
+    /// Once a window, its timetable for the legs read live: tried again at
+    /// the next poll when it cannot be read.
+    async fn read_timetable(&self, trains: &mut Trains, key: (Date, Direction)) {
+        if !trains.needs_timetable(key) {
+            return;
+        }
+        let (day, direction) = key;
+        let window = self.config.windows.of(direction);
+        let span = (day.to_datetime(window.start), day.to_datetime(window.end));
+        let mut scheduled = vec![];
+        for (leg, from, _, _) in self.live_legs(direction) {
+            let read = self
+                .prim
+                .timetable(&leg.line, &leg.board, &leg.alight, span)
+                .await;
+            let Ok(timetable) = read.inspect_err(|error| {
+                eprintln!("the timetable cannot be read, tried again at the next poll: {error:?}");
+            }) else {
+                return;
+            };
+            scheduled.extend(timetable.into_iter().map(|train| {
+                Scheduled {
+                    line: leg.line.clone(),
+                    from: from.clone(),
+                    aimed: train
+                        .aimed
+                        .to_zoned(self.config.time_zone())
+                        .expect("a day's local time is within range")
+                        .timestamp(),
+                    mission: train.mission,
+                    destination: train.destination,
+                }
+            }));
+        }
+        plan(trains, key, &scheduled);
     }
 
     /// The reminder to leave, for the train picked in the app today, or else
@@ -1617,6 +1662,70 @@ mod tests {
         assert_eq!(service.poll(tuesday("05:45")).await, Poll::Sent(1));
         // Remembered across a restart: not said again.
         assert_eq!(setup.service().poll(tuesday("05:47")).await, Poll::Sent(0));
+    }
+
+    /// The timetable of line L at Les Aubépines, by Navitia: `trains` leave at those times, in Paris.
+    async fn timetable_answers(setup: &Setup, trains: &[(&str, &str)], times: u64) {
+        let departures: Vec<_> = trains
+            .iter()
+            .map(|(journey, time)| serde_json::json!({
+                "display_informations": { "headsign": "PALO", "direction": "Gare Centrale (Paris)" },
+                "stop_date_time": { "departure_date_time": format!("20261103T{time}00") },
+                "links": [{ "type": "vehicle_journey", "id": journey }]
+            }))
+            .collect();
+        let arrivals: Vec<_> = trains
+            .iter()
+            .map(|(journey, _)| {
+                serde_json::json!({
+                    "stop_date_time": { "arrival_date_time": "20261103T235900" },
+                    "links": [{ "type": "vehicle_journey", "id": journey }]
+                })
+            })
+            .collect();
+        Mock::given(path(
+            "/v2/navitia/stop_areas/stop_area%3AIDFM%3A71100/lines/line%3AIDFM%3AC01740/departures",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "departures": departures })),
+        )
+        .expect(times)
+        .mount(&setup.server)
+        .await;
+        Mock::given(path(
+            "/v2/navitia/stop_areas/stop_area%3AIDFM%3A71370/lines/line%3AIDFM%3AC01740/arrivals",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "arrivals": arrivals })),
+        )
+        .expect(times)
+        .mount(&setup.server)
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_train_of_the_timetable_never_listed_is_notified_when_the_window_opens() {
+        let setup = Setup::with(train_routes_server().await).await;
+        setup.prim_answers(200, false, 1).await;
+        // 7:52 and 8:02 in Paris; only the 8:02 is ever listed. The timetable is read once.
+        timetable_answers(&setup, &[("vj:1", "0752"), ("vj:2", "0802")], 1).await;
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(timed_list(200, &[("j2", "07:02")])),
+            )
+            .mount(&setup.server)
+            .await;
+        setup.firebase_answers_to("train_cancelled", 200, 1).await;
+        let mut service = setup.service();
+        for time in ["04:40", "04:42", "04:44", "04:46"] {
+            assert_eq!(service.poll(tuesday(time)).await, Poll::Observing);
+        }
+        // 6:45 in Paris: the window opens, and the 7:52 that never showed is said cancelled.
+        assert_eq!(service.poll(tuesday("05:45")).await, Poll::Sent(1));
+        let entry = history(&service).remove(0);
+        assert_eq!(entry.data["aimed"], "2026-11-03T06:52:00Z");
+        assert_eq!(entry.data["reason"], "missing");
     }
 
     #[tokio::test]

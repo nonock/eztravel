@@ -11,6 +11,10 @@
 //! `trains_from`: those cancelled early are notified when the window opens.
 //! Each train ends half an hour after its time, or with its window: how it
 //! went is then kept for the statistics.
+//!
+//! A train cancelled well ahead may never be listed at all. The timetable of
+//! the window is read once, so that a train it gives is missing too when
+//! later trains are listed but never it.
 
 use jiff::civil::Date;
 use jiff::{SignedDuration, Timestamp};
@@ -86,10 +90,24 @@ pub struct Seen {
     pub arriving: Vec<Visit>,
 }
 
+/// A train of the timetable, due to leave during the window on a train leg.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Scheduled {
+    pub line: String,
+    /// The stop it leaves from, by name, as the live list names it.
+    pub from: String,
+    pub aimed: Timestamp,
+    pub mission: Option<String>,
+    pub destination: String,
+}
+
 /// The trains followed in the current window. Kept between polls, and across restarts.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Trains {
     window: Option<(Date, Direction)>,
+    /// The window whose timetable was read.
+    #[serde(default)]
+    timetable: Option<(Date, Direction)>,
     followed: Vec<Followed>,
     /// The trains that ended since this was last taken: whoever keeps them takes them.
     #[serde(skip)]
@@ -106,10 +124,71 @@ struct Followed {
     notified: bool,
     #[serde(default)]
     came_back: bool,
+    /// Listed live at least once; else only in the timetable.
+    #[serde(default = "listed")]
+    listed: bool,
 }
 
+fn listed() -> bool {
+    true
+}
+
+impl Trains {
+    /// Whether the timetable of the window `key` is still to be read.
+    pub fn needs_timetable(&self, key: (Date, Direction)) -> bool {
+        self.timetable != Some(key)
+    }
+
+    /// The window `key` begins: the trains of the one before end.
+    fn open(&mut self, key: (Date, Direction)) {
+        if self.window == Some(key) {
+            return;
+        }
+        if let Some(previous) = self.window {
+            let ended: Vec<Ended> = self
+                .followed
+                .drain(..)
+                .filter_map(|followed| followed.end(previous))
+                .collect();
+            self.ended.extend(ended);
+        }
+        self.window = Some(key);
+    }
+}
+
+/// The timetable of the window `key`: each train waits to be listed live.
+pub fn plan(trains: &mut Trains, key: (Date, Direction), scheduled: &[Scheduled]) {
+    trains.open(key);
+    trains.timetable = Some(key);
+    for train in scheduled {
+        trains.followed.push(Followed {
+            journey: format!("timetable:{}:{}", train.line, train.aimed),
+            train: Train {
+                line: train.line.clone(),
+                mission: train.mission.clone(),
+                destination: train.destination.clone(),
+                from: train.from.clone(),
+                aimed: train.aimed,
+                expected: train.aimed,
+            },
+            missing: 0,
+            said_cancelled: false,
+            notified: false,
+            came_back: false,
+            listed: false,
+        });
+    }
+}
+
+/// A live train and one of the timetable are the same within this.
+const SAME_TIME: SignedDuration = SignedDuration::from_secs(90);
+
 impl Followed {
-    fn end(self, (day, direction): (Date, Direction)) -> Ended {
+    /// How it went; nothing for a train of the timetable never listed nor confirmed missing.
+    fn end(self, (day, direction): (Date, Direction)) -> Option<Ended> {
+        if !self.listed && !self.notified && self.missing < CONFIRM {
+            return None;
+        }
         let outcome = if self.said_cancelled {
             Outcome::Announced
         } else if self.notified || self.missing >= CONFIRM {
@@ -117,13 +196,13 @@ impl Followed {
         } else {
             Outcome::Ran
         };
-        Ended {
+        Some(Ended {
             day,
             direction,
             train: self.train,
             outcome,
             came_back: self.came_back,
-        }
+        })
     }
 }
 
@@ -137,16 +216,7 @@ pub fn follow(
     seen: &[Seen],
     notify: bool,
 ) -> Vec<Notification> {
-    if trains.window != Some(key) {
-        if let Some(previous) = trains.window {
-            let ended = trains
-                .followed
-                .drain(..)
-                .map(|followed| followed.end(previous));
-            trains.ended.extend(ended.collect::<Vec<_>>());
-        }
-        trains.window = Some(key);
-    }
+    trains.open(key);
     let mut notifications = vec![];
     let mut listed: Vec<&str> = vec![];
     for leg in seen {
@@ -157,11 +227,29 @@ pub fn follow(
             };
             listed.push(&visit.journey);
             let said_cancelled = visit.status == CallStatus::Cancelled;
-            if let Some(followed) = trains
+            let aimed = visit.aimed_departure.unwrap_or(expected);
+            // Followed already, or waiting in the timetable: the nearest in time.
+            let known = trains
                 .followed
-                .iter_mut()
-                .find(|followed| followed.journey == visit.journey)
-            {
+                .iter()
+                .position(|followed| followed.journey == visit.journey)
+                .or_else(|| {
+                    trains
+                        .followed
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, followed)| !followed.listed && followed.train.line == leg.line)
+                        .map(|(index, followed)| {
+                            (index, followed.train.aimed.duration_since(aimed).abs())
+                        })
+                        .filter(|(_, apart)| *apart <= SAME_TIME)
+                        .min_by_key(|(_, apart)| *apart)
+                        .map(|(index, _)| index)
+                });
+            if let Some(followed) = known.map(|index| &mut trains.followed[index]) {
+                followed.journey = visit.journey.clone();
+                followed.listed = true;
+                followed.train.aimed = aimed;
                 // A train being changed may come back under another mission.
                 followed.train.mission = visit.mission.clone();
                 followed.train.destination = visit.destination.clone();
@@ -177,7 +265,6 @@ pub fn follow(
                 }
                 continue;
             }
-            let aimed = visit.aimed_departure.unwrap_or(expected);
             let in_window = window.0 <= aimed && aimed < window.1;
             // Long gone, though still listed: it ended already.
             let gone = now.duration_since(expected) >= FORGET_AFTER;
@@ -199,11 +286,25 @@ pub fn follow(
                 said_cancelled,
                 notified: false,
                 came_back: false,
+                listed: true,
             });
         }
     }
+    // A train of the timetable is missing only once later ones of its line are listed.
+    let last_listed = |line: &str| {
+        seen.iter()
+            .filter(|leg| leg.line == line)
+            .flat_map(|leg| &leg.board)
+            .filter(|visit| visit.line == line)
+            .filter_map(|visit| visit.aimed_departure)
+            .max()
+    };
     for followed in &mut trains.followed {
-        if !listed.contains(&followed.journey.as_str())
+        let due = followed.listed
+            || last_listed(&followed.train.line)
+                .is_some_and(|last| last > followed.train.aimed + SAME_TIME);
+        if due
+            && !listed.contains(&followed.journey.as_str())
             && followed.train.expected.duration_since(now) > LEAVING
         {
             followed.missing += 1;
@@ -229,9 +330,11 @@ pub fn follow(
         .partition(|followed| now.duration_since(followed.train.expected) < FORGET_AFTER);
     trains.followed = kept;
     let forgotten: Vec<Followed> = forgotten;
-    trains
-        .ended
-        .extend(forgotten.into_iter().map(|followed| followed.end(key)));
+    trains.ended.extend(
+        forgotten
+            .into_iter()
+            .filter_map(|followed| followed.end(key)),
+    );
     notifications
 }
 
@@ -328,6 +431,118 @@ mod tests {
                 follow(trains, KEY, window(), now, &seen(board()), notify)
             })
             .collect()
+    }
+
+    /// A train of line L in the timetable, due to leave the board stop at `aimed`.
+    fn scheduled(aimed: &str) -> Scheduled {
+        Scheduled {
+            line: "C01740".into(),
+            from: "Les Aubépines".into(),
+            aimed: at(aimed),
+            mission: Some("PALO".into()),
+            destination: "Gare Centrale".into(),
+        }
+    }
+
+    #[test]
+    fn a_train_of_the_timetable_never_listed_is_cancelled_once_later_ones_are() {
+        let mut trains = Trains::default();
+        assert!(trains.needs_timetable(KEY));
+        plan(&mut trains, KEY, &[scheduled("06:52"), scheduled("07:02")]);
+        assert!(!trains.needs_timetable(KEY));
+        assert!(trains.needs_timetable((TUESDAY, Direction::Inbound)));
+        // Only the 7:02 shows: the 6:52 never does, though it would come first.
+        let later = || vec![visit("j2", "07:02", "07:02", "onTime", 200)];
+        assert_eq!(polls(&mut trains, "05:50", 3, true, later), []);
+        assert_eq!(
+            polls(&mut trains, "05:56", 1, true, later),
+            cancelled(Why::Missing)
+        );
+        assert_eq!(polls(&mut trains, "05:58", 1, true, later), []);
+        // Kept as missing once forgotten; the 7:02 ran.
+        polls(&mut trains, "07:40", 1, true, Vec::new);
+        let ended: Vec<_> = trains
+            .ended
+            .iter()
+            .map(|ended| (ended.train.aimed, ended.outcome))
+            .collect();
+        assert_eq!(
+            ended,
+            [(at("06:52"), Outcome::Missing), (at("07:02"), Outcome::Ran)]
+        );
+    }
+
+    #[test]
+    fn a_listed_train_takes_its_place_in_the_timetable() {
+        let mut trains = Trains::default();
+        plan(&mut trains, KEY, &[scheduled("06:52")]);
+        assert_eq!(
+            polls(&mut trains, "05:50", 1, true, || vec![j1("onTime")]),
+            []
+        );
+        // One train, not two.
+        assert_eq!(trains.followed.len(), 1);
+        assert_eq!(trains.followed[0].journey, "j1");
+        // Then gone from the list: missing the usual way.
+        assert_eq!(polls(&mut trains, "05:52", 3, true, Vec::new), []);
+        assert_eq!(
+            polls(&mut trains, "05:58", 1, true, Vec::new),
+            cancelled(Why::Missing)
+        );
+    }
+
+    #[test]
+    fn a_train_of_the_timetable_beyond_the_list_is_not_missing() {
+        let mut trains = Trains::default();
+        plan(&mut trains, KEY, &[scheduled("07:10")]);
+        // The list does not reach it yet.
+        assert_eq!(
+            polls(&mut trains, "05:50", 6, true, || vec![j1("onTime")]),
+            []
+        );
+        // A minute and a half apart, under another mission, it is the same train.
+        let renamed = || {
+            let mut later = visit("j9", "07:11", "07:11", "onTime", 200);
+            later["MonitoredVehicleJourney"]["JourneyNote"] = json!([{ "value": "PILO" }]);
+            vec![j1("onTime"), later]
+        };
+        assert_eq!(polls(&mut trains, "06:02", 6, true, renamed), []);
+        let journeys: Vec<&str> = trains
+            .followed
+            .iter()
+            .map(|followed| followed.journey.as_str())
+            .collect();
+        assert_eq!(journeys, ["j9", "j1"]);
+    }
+
+    #[test]
+    fn a_train_of_the_timetable_never_confirmed_is_not_kept() {
+        let mut trains = Trains::default();
+        plan(&mut trains, KEY, &[scheduled("07:10")]);
+        polls(&mut trains, "05:50", 1, true, || vec![j1("onTime")]);
+        // The next window ends this one: of the 7:10, nothing is known.
+        follow(
+            &mut trains,
+            (TUESDAY, Direction::Inbound),
+            window(),
+            at("15:00"),
+            &[],
+            false,
+        );
+        let ended: Vec<_> = trains.ended.iter().map(|ended| ended.train.aimed).collect();
+        assert_eq!(ended, [at("06:52")]);
+    }
+
+    #[test]
+    fn a_train_saved_by_the_previous_version_was_listed() {
+        let saved = r#"{"window":["2026-11-03","outbound"],"followed":[{"journey":"j1","train":{"line":"C01740","mission":"PALO","destination":"Gare Centrale","from":"Les Aubépines","aimed":"2026-11-03T06:52:00Z","expected":"2026-11-03T06:52:00Z"},"missing":0,"said_cancelled":false,"notified":false}]}"#;
+        let mut trains: Trains = serde_json::from_str(saved).unwrap();
+        assert!(trains.needs_timetable(KEY));
+        assert_eq!(polls(&mut trains, "05:50", 3, true, Vec::new), []);
+        assert_eq!(
+            polls(&mut trains, "05:56", 1, true, Vec::new),
+            cancelled(Why::Missing)
+        );
     }
 
     #[test]

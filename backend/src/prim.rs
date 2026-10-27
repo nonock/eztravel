@@ -6,7 +6,7 @@ use jiff::civil::DateTime;
 use serde::Deserialize;
 
 use crate::departures::{self, Visit};
-use crate::disruptions::{Disruption, parse};
+use crate::disruptions::{Disruption, local_time, parse};
 use crate::http;
 use crate::relevance::{Route, parse_route};
 
@@ -83,6 +83,55 @@ impl Prim {
         Ok(routes)
     }
 
+    /// The trains of `line` due to leave `board` during `window`, local time, by
+    /// the timetable (Navitia's base schedule), that call at `alight` after it.
+    pub async fn timetable(
+        &self,
+        line: &str,
+        board: &str,
+        alight: &str,
+        window: (DateTime, DateTime),
+    ) -> Result<Vec<Timetabled>, PrimError> {
+        let (from, until) = window;
+        let line = encode(&format!("line:IDFM:{line}"));
+        let query = |kind: &str, area: &str| {
+            format!(
+                "/v2/navitia/stop_areas/{}/lines/{line}/{kind}?from_datetime={}&count=200&depth=1&data_freshness=base_schedule",
+                encode(area),
+                from.strftime("%Y%m%dT%H%M%S")
+            )
+        };
+        let leaving: Calls = serde_json::from_slice(&self.get(&query("departures", board)).await?)
+            .map_err(PrimError::Format)?;
+        let arriving: Calls = serde_json::from_slice(&self.get(&query("arrivals", alight)).await?)
+            .map_err(PrimError::Format)?;
+        Ok(leaving
+            .departures
+            .into_iter()
+            // Navitia gives more than the window: what is beyond is left out.
+            .filter(|call| from <= call.time.departure && call.time.departure < until)
+            .filter(|call| {
+                arriving.arrivals.iter().any(|arrival| {
+                    arrival.journey() == call.journey()
+                        && arrival.time.arrival > call.time.departure
+                })
+            })
+            .map(|call| {
+                // "Gare Centrale (Paris)": its town is left out, as live lists do.
+                let destination = call.informations.direction;
+                let destination = match destination.rsplit_once(" (") {
+                    Some((name, town)) if town.ends_with(')') => name.to_string(),
+                    _ => destination,
+                };
+                Timetabled {
+                    aimed: call.time.departure,
+                    mission: call.informations.headsign,
+                    destination,
+                }
+            })
+            .collect())
+    }
+
     async fn get(&self, path: &str) -> Result<Vec<u8>, PrimError> {
         Ok(self.counted_get(path).await?.0)
     }
@@ -112,6 +161,76 @@ impl Prim {
             .unwrap_or_default();
         Ok((body, remaining))
     }
+}
+
+/// A train of the timetable, at the stop it leaves from: local time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Timetabled {
+    pub aimed: DateTime,
+    pub mission: Option<String>,
+    pub destination: String,
+}
+
+/// Navitia's departures or arrivals of a stop.
+#[derive(Deserialize)]
+struct Calls {
+    #[serde(default)]
+    departures: Vec<Call>,
+    #[serde(default)]
+    arrivals: Vec<Call>,
+}
+
+#[derive(Deserialize)]
+struct Call {
+    #[serde(rename = "display_informations", default)]
+    informations: Informations,
+    #[serde(rename = "stop_date_time")]
+    time: CallTime,
+    links: Vec<CallLink>,
+}
+
+impl Call {
+    fn journey(&self) -> Option<&str> {
+        self.links
+            .iter()
+            .find(|link| link.kind == "vehicle_journey")
+            .map(|link| link.id.as_str())
+    }
+}
+
+#[derive(Default, Deserialize)]
+struct Informations {
+    headsign: Option<String>,
+    #[serde(default)]
+    direction: String,
+}
+
+#[derive(Deserialize)]
+struct CallTime {
+    #[serde(
+        rename = "departure_date_time",
+        deserialize_with = "local_time",
+        default = "never"
+    )]
+    departure: DateTime,
+    #[serde(
+        rename = "arrival_date_time",
+        deserialize_with = "local_time",
+        default = "never"
+    )]
+    arrival: DateTime,
+}
+
+/// A departure without its time, or an arrival without its own: never in a window.
+fn never() -> DateTime {
+    DateTime::MIN
+}
+
+#[derive(Deserialize)]
+struct CallLink {
+    #[serde(rename = "type")]
+    kind: String,
+    id: String,
 }
 
 /// Navitia ids hold colons, encoded in paths.
@@ -336,6 +455,150 @@ mod tests {
                 .await;
         }
         server
+    }
+
+    fn board(trains: &[(&str, &str, &str, &str)]) -> serde_json::Value {
+        let departures: Vec<_> = trains
+            .iter()
+            .map(|(journey, time, mission, direction)| serde_json::json!({
+                "display_informations": { "headsign": mission, "direction": direction },
+                "stop_date_time": { "departure_date_time": time },
+                "links": [{ "type": "route", "id": "route:A" }, { "type": "vehicle_journey", "id": journey }]
+            }))
+            .collect();
+        serde_json::json!({ "departures": departures })
+    }
+
+    fn arriving(trains: &[(&str, &str)]) -> serde_json::Value {
+        let arrivals: Vec<_> = trains
+            .iter()
+            .map(|(journey, time)| {
+                serde_json::json!({
+                    "display_informations": { "headsign": "X", "direction": "Y" },
+                    "stop_date_time": { "arrival_date_time": time },
+                    "links": [{ "type": "vehicle_journey", "id": journey }]
+                })
+            })
+            .collect();
+        serde_json::json!({ "arrivals": arrivals })
+    }
+
+    #[tokio::test]
+    async fn the_timetable_keeps_the_trains_that_call_at_the_alight_stop_after() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v2/navitia/stop_areas/stop_area%3AIDFM%3A71100/lines/line%3AIDFM%3AC01740/departures"))
+            .and(query_param("data_freshness", "base_schedule"))
+            .and(query_param("from_datetime", "20261103T064500"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(board(&[
+                ("vj:a", "20261103T075240", "PALO", "Gare Centrale (Paris)"),
+                // Another branch: it never reaches the alight stop.
+                ("vj:b", "20261103T080000", "POLA", "Les Tilleuls"),
+                // Named without its town already.
+                ("vj:c", "20261103T081000", "PILO", "Gare Centrale"),
+                // After the window: Navitia gives more than asked.
+                ("vj:d", "20261103T082000", "PALO", "Gare Centrale (Paris)"),
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v2/navitia/stop_areas/stop_area%3AIDFM%3A71370/lines/line%3AIDFM%3AC01740/arrivals"))
+            .and(query_param("data_freshness", "base_schedule"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(arriving(&[
+                ("vj:a", "20261103T080400"),
+                ("vj:c", "20261103T082200"),
+                ("vj:d", "20261103T083200"),
+                // The other way: it passes the alight stop first.
+                ("vj:b", "20261103T074000"),
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let prim = Prim::new(&server.uri(), KEY);
+        let window = (
+            date(2026, 11, 3).at(6, 45, 0, 0),
+            date(2026, 11, 3).at(8, 15, 0, 0),
+        );
+        let trains = prim
+            .timetable(
+                "C01740",
+                "stop_area:IDFM:71100",
+                "stop_area:IDFM:71370",
+                window,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            trains,
+            [
+                Timetabled {
+                    aimed: date(2026, 11, 3).at(7, 52, 40, 0),
+                    mission: Some("PALO".into()),
+                    destination: "Gare Centrale".into(),
+                },
+                Timetabled {
+                    aimed: date(2026, 11, 3).at(8, 10, 0, 0),
+                    mission: Some("PILO".into()),
+                    destination: "Gare Centrale".into(),
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_timetable_that_cannot_be_read_is_an_error() {
+        let server = MockServer::start().await;
+        Mock::given(path(
+            "/v2/navitia/stop_areas/stop_area%3AIDFM%3A71100/lines/line%3AIDFM%3AC01740/departures",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_string("{"))
+        .mount(&server)
+        .await;
+        let prim = Prim::new(&server.uri(), KEY);
+        let window = (
+            date(2026, 11, 3).at(6, 45, 0, 0),
+            date(2026, 11, 3).at(8, 15, 0, 0),
+        );
+        let read = prim
+            .timetable(
+                "C01740",
+                "stop_area:IDFM:71100",
+                "stop_area:IDFM:71370",
+                window,
+            )
+            .await;
+        assert_eq!(outcome(read), "format");
+        // The arrivals too: unreadable, or not answered.
+        server.reset().await;
+        Mock::given(path(
+            "/v2/navitia/stop_areas/stop_area%3AIDFM%3A71100/lines/line%3AIDFM%3AC01740/departures",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(board(&[])))
+        .mount(&server)
+        .await;
+        let arrivals =
+            "/v2/navitia/stop_areas/stop_area%3AIDFM%3A71370/lines/line%3AIDFM%3AC01740/arrivals";
+        Mock::given(path(arrivals))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(path(arrivals))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        for expected in ["format", "Status(503)"] {
+            let read = prim
+                .timetable(
+                    "C01740",
+                    "stop_area:IDFM:71100",
+                    "stop_area:IDFM:71370",
+                    window,
+                )
+                .await;
+            assert_eq!(outcome(read), expected);
+        }
     }
 
     #[tokio::test]
