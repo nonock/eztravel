@@ -50,7 +50,11 @@ fun PushMessage.text(resources: Resources, zone: ZoneId = ZoneId.systemDefault()
         resources.getString(R.string.notification_train_cancelled, train.line.label(resources), train.time(resources, zone)),
         train.describe(
             resources,
-            if (reason == PushMessage.Reason.ANNOUNCED) R.string.notification_train_announced else R.string.notification_train_missing,
+            when (reason) {
+                PushMessage.Reason.MISSING -> R.string.notification_train_missing
+                PushMessage.Reason.UNLISTED -> R.string.notification_train_unlisted
+                PushMessage.Reason.ANNOUNCED -> R.string.notification_train_announced
+            },
         ),
     )
     is PushMessage.TrainBack -> NotificationText(

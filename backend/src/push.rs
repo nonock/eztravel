@@ -151,6 +151,7 @@ pub fn data(
                 "reason",
                 match why {
                     Why::Missing => "missing",
+                    Why::Unlisted => "unlisted",
                     Why::Announced => "announced",
                 },
             );
@@ -1127,6 +1128,10 @@ mod tests {
         assert_eq!(
             data(&cancelled(Why::Announced), &labels(), until())["reason"],
             "announced"
+        );
+        assert_eq!(
+            data(&cancelled(Why::Unlisted), &labels(), until())["reason"],
+            "unlisted"
         );
         let back = |mission| Notification::TrainBack {
             train: train(mission),

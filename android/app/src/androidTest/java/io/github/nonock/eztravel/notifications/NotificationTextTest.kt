@@ -102,6 +102,9 @@ class NotificationTextTest {
         val announced = PushMessage.TrainCancelled(palo, PushMessage.Reason.ANNOUNCED, null)
         assertEquals("PALO vers Gare Centrale, depuis Les Aubépines : annoncé supprimé.", announced.text(french, paris).body)
         assertEquals("PALO to Gare Centrale, from Les Aubépines: announced as cancelled.", announced.text(english, paris).body)
+        val unlisted = PushMessage.TrainCancelled(palo, PushMessage.Reason.UNLISTED, null)
+        assertEquals("PALO vers Gare Centrale, depuis Les Aubépines : prévu à l’horaire, il n’est pas annoncé.", unlisted.text(french, paris).body)
+        assertEquals("PALO to Gare Centrale, from Les Aubépines: in the timetable, not announced.", unlisted.text(english, paris).body)
     }
 
     private fun clock(instant: Instant, locale: Locale) =

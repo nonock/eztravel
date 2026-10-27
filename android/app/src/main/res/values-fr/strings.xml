@@ -39,6 +39,7 @@
     <string name="notification_train_cancelled">%1$s : train de %2$s supprimé</string>
     <string name="notification_train_back">%1$s : train de %2$s finalement maintenu</string>
     <string name="notification_train_missing">%1$s vers %2$s, depuis %3$s : il n’est plus annoncé.</string>
+    <string name="notification_train_unlisted">%1$s vers %2$s, depuis %3$s : prévu à l’horaire, il n’est pas annoncé.</string>
     <string name="notification_train_announced">%1$s vers %2$s, depuis %3$s : annoncé supprimé.</string>
     <string name="notification_train_route">%1$s vers %2$s, depuis %3$s.</string>
     <string name="notification_train_unnamed">Train</string>
