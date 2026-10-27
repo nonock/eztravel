@@ -38,6 +38,8 @@ fun HistoryEntry.look(): Look = when (this) {
         PushMessage.Outage -> Look(Mark.WatchDown, Tone.BAD)
         PushMessage.Recovered -> Look(Mark.WatchUp, Tone.GOOD)
         is PushMessage.Planned -> Look(Mark.Planned, Tone.INFO)
+        // It may change the day.
+        is PushMessage.Tomorrow -> Look(Mark.Planned, Tone.WARN)
     }
 }
 

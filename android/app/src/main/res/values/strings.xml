@@ -21,6 +21,15 @@
         <item quantity="one">%d planned disruption on your lines today</item>
         <item quantity="other">%d planned disruptions on your lines today</item>
     </plurals>
+    <plurals name="notification_tomorrow">
+        <item quantity="one">Tomorrow, %2$s: %1$d disruption on your way</item>
+        <item quantity="other">Tomorrow, %2$s: %1$d disruptions on your way</item>
+    </plurals>
+    <string name="notification_remote_tomorrow">Remote work tomorrow</string>
+    <string name="notification_tomorrow_remote">Tomorrow: remote work</string>
+    <string name="notification_tomorrow_remote_text">Set in the calendar: no alert that day.</string>
+    <string name="notification_tomorrow_unchanged">Tomorrow not changed</string>
+    <string name="notification_tomorrow_unchanged_text">The server could not set it. Try again, or set the day in the calendar.</string>
     <string name="notification_outage">Watching interrupted</string>
     <string name="notification_outage_text">No successful check for 10 minutes: no notification no longer means no disruption. Check the traffic elsewhere.</string>
     <string name="notification_recovered">Watching restored</string>

@@ -22,6 +22,16 @@
         <item quantity="many">%d perturbations prévues sur vos lignes aujourd’hui</item>
         <item quantity="other">%d perturbations prévues sur vos lignes aujourd’hui</item>
     </plurals>
+    <plurals name="notification_tomorrow">
+        <item quantity="one">Demain %2$s : %1$d perturbation sur votre trajet</item>
+        <item quantity="many">Demain %2$s : %1$d perturbations sur votre trajet</item>
+        <item quantity="other">Demain %2$s : %1$d perturbations sur votre trajet</item>
+    </plurals>
+    <string name="notification_remote_tomorrow">Télétravail demain</string>
+    <string name="notification_tomorrow_remote">Demain : télétravail</string>
+    <string name="notification_tomorrow_remote_text">C’est noté dans le calendrier : pas d’alerte ce jour-là.</string>
+    <string name="notification_tomorrow_unchanged">Demain n’a pas été changé</string>
+    <string name="notification_tomorrow_unchanged_text">Le serveur n’a pas pu le noter. Réessayez, ou changez le jour dans le calendrier.</string>
     <string name="notification_outage">Surveillance interrompue</string>
     <string name="notification_outage_text">Aucun relevé réussi depuis 10 minutes : sans notification, rien ne garantit que le trafic est normal. Vérifiez-le ailleurs.</string>
     <string name="notification_recovered">Surveillance rétablie</string>

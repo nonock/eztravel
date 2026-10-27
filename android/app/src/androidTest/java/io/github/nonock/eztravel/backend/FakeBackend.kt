@@ -107,6 +107,7 @@ class FakeBackend(
 
     override suspend fun setDays(first: LocalDate, last: LocalDate, kind: CalendarDay.Kind?): DayRefusal? {
         if (failing) throw IOException("unreachable")
+        if (garbled) throw JSONException("not JSON")
         daysSet += Triple(first, last, kind)
         if (dayRefusal != null) return dayRefusal
         for (date in generateSequence(first) { it.plusDays(1) }.takeWhile { it <= last }) {

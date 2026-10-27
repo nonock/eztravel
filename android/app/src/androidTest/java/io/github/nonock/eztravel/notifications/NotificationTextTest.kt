@@ -172,6 +172,16 @@ class NotificationTextTest {
     }
 
     @Test
+    fun theNextDaysTroubleIsDatedCountedAndListed() {
+        val one = PushMessage.Tomorrow(java.time.LocalDate.of(2026, 11, 4), 1, "Ligne L : travaux", null)
+        assertEquals(NotificationText("Tomorrow, Wednesday 4 November: 1 disruption on your way", "Ligne L : travaux"), one.text(english))
+        assertEquals("Demain mercredi 4 novembre : 1 perturbation sur votre trajet", one.text(french).title)
+        val two = one.copy(count = 2, titles = "Ligne L : travaux\nMétro X : grève")
+        assertEquals("Tomorrow, Wednesday 4 November: 2 disruptions on your way", two.text(english).title)
+        assertEquals("Demain mercredi 4 novembre : 2 perturbations sur votre trajet", two.text(french).title)
+    }
+
+    @Test
     fun anOutageSaysThatSilenceMeansNothing() {
         assertEquals(
             NotificationText(
