@@ -4,7 +4,12 @@ import io.github.nonock.eztravel.ScreenTesting
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -372,6 +377,27 @@ class NextDeparturesTest : ScreenTesting() {
         waitFor(hero(R.string.departures_hero_usual) and hasText(at("07:07:00").clock()))
         waitFor(hasText(at("07:07:00").clock()) and hasContentDescription(text(R.string.departures_arrival, at("07:23:00").clock())) and hasText(text(R.string.departures_usual)))
         compose.onNode(hero(R.string.departures_hero_next)).assertDoesNotExist()
+    }
+
+    @Test
+    fun atTwiceTheFontSizeACountdownStaysOnOneLine() {
+        // Late, from its platform, the usual train: a row full of details.
+        val trains = morning.legs[0].departures!!.map { if (it.journey == "j3") it.copy(usual = true) else it }
+        val backend = FakeBackend(departures = morning.copy(legs = listOf(morning.legs[0].copy(departures = trains), morning.legs[1])))
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale = 2f)) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { NextDepartures(backend, now = { now }) }
+            }
+        }
+        val countdown = hasText(text(R.string.departures_leave_in, 9))
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(countdown, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        for (node in compose.onAllNodes(countdown, useUnmergedTree = true).fetchSemanticsNodes()) {
+            val layouts = mutableListOf<TextLayoutResult>()
+            node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts)
+            assertEquals("lines of \"${layouts.single().layoutInput.text}\"", 1, layouts.single().lineCount)
+        }
     }
 
     @Test
