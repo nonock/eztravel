@@ -48,6 +48,8 @@ pub struct Alert {
     pub title: String,
     /// The operator's whole text, as plain text.
     pub text: String,
+    /// Its web links, on the characters of `text` they cover.
+    pub links: Vec<push::Link>,
     /// Under way now; otherwise to come.
     pub active: bool,
     /// The current period, or else the next one: works can list dozens.
@@ -179,6 +181,7 @@ impl LineAlerts {
                             .iter()
                             .filter(|leg| leg.line == label.code)
                             .any(|leg| affects(disruption, leg, line_routes));
+                        let (text, links) = push::text_with_links(&disruption.message);
                         Some((
                             rank,
                             Alert {
@@ -186,7 +189,8 @@ impl LineAlerts {
                                 severity,
                                 cause: cause_name(disruption.cause),
                                 title: disruption.title.clone(),
-                                text: push::plain_text(&disruption.message),
+                                text,
+                                links,
                                 active,
                                 begin: self.instant(period.begin),
                                 end: self.instant(period.end),
@@ -325,7 +329,7 @@ mod tests {
                 Severity::Information,
                 Cause::Works,
                 "Ligne L : travaux à Les Peupliers",
-                "Les week-ends de novembre, les trains ne desservent pas Les Peupliers après 22h.",
+                "Les week-ends de novembre, les trains ne desservent pas Les Peupliers après 22h. Détails sur le <a href=\"https://example.org/travaux-l\">site de la ligne</a>.",
             )
         };
         let slow = Disruption {
