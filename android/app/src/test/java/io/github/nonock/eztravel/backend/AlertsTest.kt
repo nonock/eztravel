@@ -2,6 +2,7 @@ package io.github.nonock.eztravel.backend
 
 import io.github.nonock.eztravel.backend.Alerts.Alert
 import io.github.nonock.eztravel.backend.Alerts.Cause
+import io.github.nonock.eztravel.backend.Alerts.Link
 import io.github.nonock.eztravel.backend.Alerts.Severity
 import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
@@ -42,8 +43,34 @@ class AlertsTest {
         assertEquals(listOf(Cause.INCIDENT, Cause.WORKS), train.alerts.map { it.cause })
         assertEquals(listOf(true, false), train.alerts.map { it.active })
         assertEquals(listOf(true, false), train.alerts.map { it.onWay })
+        assertEquals(listOf(Link(96, 112, "https://example.org/travaux-l")), train.alerts[1].links)
+        assertEquals("site de la ligne", train.alerts[1].text.substring(96, 112))
         assertEquals(Line("X", Mode.METRO), metro.line)
         assertEquals(Severity.DISRUPTED to Cause.UNKNOWN, metro.alerts[0].severity to metro.alerts[0].cause)
+    }
+
+    @Test
+    fun linksAreReadAsIndicesOfTheTextAndOnlyThoseSafeToOpen() {
+        val json = JSONObject(fixture("alerts"))
+        val first = json.getJSONArray("lines").getJSONObject(0).getJSONArray("alerts").getJSONObject(0)
+        // The backend counts code points: the train is one, but two chars in Kotlin.
+        first.put("text", "\uD83D\uDE86 Détails ici, là, ou ailleurs.")
+        val link = { start: Int, end: Int, url: String -> JSONObject().put("start", start).put("end", end).put("url", url) }
+        first.put(
+            "links",
+            org.json.JSONArray()
+                .put(link(10, 13, "https://example.org/ici"))
+                .put(link(15, 17, "http://example.org/la"))
+                .put(link(22, 99, "https://example.org/ailleurs"))
+                .put(link(13, 13, "https://example.org/vide"))
+                .put(link(-1, 2, "https://example.org/avant")),
+        )
+        val alert = Alerts.parse(json.toString()).lines!![0].alerts[0]
+        assertEquals(listOf(Link(11, 14, "https://example.org/ici")), alert.links)
+        assertEquals("ici", alert.text.substring(11, 14))
+        // From a backend without links.
+        first.remove("links")
+        assertEquals(emptyList<Link>(), Alerts.parse(json.toString()).lines!![0].alerts[0].links)
     }
 
     @Test
