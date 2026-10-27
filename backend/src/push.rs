@@ -13,7 +13,7 @@ use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use jiff::{SignedDuration, Timestamp};
 use serde::de::Error as _;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::alerts::{Notification, shown};
 use crate::disruptions::{Disruption, Severity};
@@ -271,35 +271,178 @@ pub fn message(device: &str, data: &BTreeMap<String, String>) -> serde_json::Val
     })
 }
 
+/// A web link of an operator's message, on the words of its text it covers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Link {
+    /// Its first character and the one after its last, counted in Unicode
+    /// characters (code points) from the start of the text.
+    pub start: usize,
+    pub end: usize,
+    /// Always a secure web address: `https://` and a domain name.
+    pub url: String,
+}
+
 /// Operator messages are HTML: keep the text, one line per paragraph.
 pub fn plain_text(html: &str) -> String {
-    let mut text = String::new();
+    text_with_links(html).0
+}
+
+/// The text of an operator's message, as [`plain_text`], and its links: its
+/// anchors to secure web addresses, and such addresses written out in the
+/// text. Any other link stays text only.
+pub fn text_with_links(html: &str) -> (String, Vec<Link>) {
+    // Each character, with the link it is in.
+    let mut marked: Vec<(char, Option<usize>)> = Vec::new();
+    let mut urls: Vec<String> = Vec::new();
+    let mut link: Option<usize> = None;
+    let mut words = String::new();
     let mut tag: Option<String> = None;
     for character in html.chars() {
         match (&mut tag, character) {
-            (None, '<') => tag = Some(String::new()),
+            (None, '<') => {
+                // No entity holds a tag: the words before it are decoded.
+                marked.extend(decode_entities(&words).chars().map(|c| (c, link)));
+                words.clear();
+                tag = Some(String::new());
+            }
             (Some(name), '>') => {
-                let name = name.trim().to_lowercase();
+                let name = name.trim();
+                let lower = name.to_lowercase();
                 if ["br", "/p", "/li", "/div"]
                     .iter()
-                    .any(|prefix| name.starts_with(prefix))
+                    .any(|prefix| lower.starts_with(prefix))
                 {
-                    text.push('\n');
+                    marked.push(('\n', None));
+                }
+                match lower.split(char::is_whitespace).next() {
+                    Some("a") => {
+                        link = href(name).and_then(web_address).map(|url| {
+                            urls.push(url);
+                            urls.len() - 1
+                        });
+                    }
+                    Some("/a") => link = None,
+                    _ => {}
                 }
                 tag = None;
             }
             (Some(name), _) => name.push(character),
             // In HTML a line break in the source is just a space.
-            (None, '\n' | '\r' | '\t') => text.push(' '),
-            (None, _) => text.push(character),
+            (None, '\n' | '\r' | '\t') => words.push(' '),
+            (None, _) => words.push(character),
         }
     }
-    decode_entities(&text)
-        .lines()
-        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
+    marked.extend(decode_entities(&words).chars().map(|c| (c, link)));
+    let marked = lines(&marked);
+    let text = marked.iter().map(|&(character, _)| character).collect();
+    let mut links = Vec::new();
+    let mut at = 0;
+    while at < marked.len() {
+        let found = match marked[at].1 {
+            Some(link) => {
+                let end = marked[at..]
+                    .iter()
+                    .position(|&(_, other)| other != Some(link))
+                    .map_or(marked.len(), |length| at + length);
+                Some((end, urls[link].clone()))
+            }
+            None => written_address(&marked, at),
+        };
+        match found {
+            Some((end, url)) => {
+                links.push(Link {
+                    start: at,
+                    end,
+                    url,
+                });
+                at = end;
+            }
+            None => at += 1,
+        }
+    }
+    (text, links)
+}
+
+/// One line per paragraph, without empty ones, and each run of spaces as one:
+/// in a link only when between two of its words.
+fn lines(marked: &[(char, Option<usize>)]) -> Vec<(char, Option<usize>)> {
+    let mut kept = Vec::new();
+    for line in marked.split(|&(character, _)| character == '\n') {
+        let mut words: Vec<(char, Option<usize>)> = Vec::new();
+        let mut space = false;
+        for &(character, link) in line {
+            if character.is_whitespace() {
+                space = true;
+                continue;
+            }
+            if let Some(&(_, before)) = words.last()
+                && space
+            {
+                words.push((' ', if before == link { link } else { None }));
+            }
+            space = false;
+            words.push((character, link));
+        }
+        if words.is_empty() {
+            continue;
+        }
+        if !kept.is_empty() {
+            kept.push(('\n', None));
+        }
+        kept.extend(words);
+    }
+    kept
+}
+
+/// The address an anchor points to, quoted or not: `a href="…"`.
+fn href(tag: &str) -> Option<String> {
+    // The same bytes as the tag: ASCII only changes case.
+    let lower = tag.to_ascii_lowercase();
+    let (at, _) = lower
+        .match_indices("href")
+        .find(|&(at, _)| lower[..at].ends_with(char::is_whitespace))?;
+    let value = tag[at + 4..].trim_start().strip_prefix('=')?.trim_start();
+    let value = match value.chars().next()? {
+        quote @ ('"' | '\'') => value[1..].split(quote).next().unwrap_or_default(),
+        _ => value.split(char::is_whitespace).next().unwrap_or_default(),
+    };
+    Some(decode_entities(value.trim()))
+}
+
+/// Only a secure web address with a domain name makes a link: `http`,
+/// `javascript:` or broken addresses stay text.
+fn web_address(address: String) -> Option<String> {
+    let host = address
+        .strip_prefix("https://")?
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
+    let whole = !address.chars().any(|c| c.is_whitespace() || c.is_control());
+    (host.contains('.') && whole).then_some(address)
+}
+
+/// A secure web address written out in the text from `start`, outside any
+/// link: where it ends, and itself, without the sentence's punctuation after it.
+fn written_address(marked: &[(char, Option<usize>)], start: usize) -> Option<(usize, String)> {
+    let rest = &marked[start..];
+    let begins = rest
+        .iter()
+        .map(|&(character, _)| character)
+        .take(8)
+        .eq("https://".chars());
+    if !begins || start > 0 && marked[start - 1].0.is_alphanumeric() {
+        return None;
+    }
+    let mut address: String = rest
+        .iter()
+        .take_while(|&&(character, link)| !character.is_whitespace() && link.is_none())
+        .map(|&(character, _)| character)
+        .collect();
+    while address.ends_with(|c: char| ".,;:!?)]}»\"'’…".contains(c)) {
+        address.pop();
+    }
+    let end = start + address.chars().count();
+    web_address(address).map(|url| (end, url))
 }
 
 fn decode_entities(text: &str) -> String {
@@ -774,6 +917,112 @@ mod tests {
             "sans balise 'ici'"
         );
         assert_eq!(plain_text("<p></p>"), "");
+    }
+
+    fn link(start: usize, end: usize, url: &str) -> Link {
+        Link {
+            start,
+            end,
+            url: url.into(),
+        }
+    }
+
+    #[test]
+    fn a_message_keeps_its_web_links_on_their_words() {
+        let (text, links) = text_with_links(
+            "<p>Suivez le <a href=\"https://example.org/ligne-l\">fil de la ligne L</a> et le <a target=\"_blank\" HREF='https://example.org/blog?a=1&amp;b=2'>blog</a>.</p>",
+        );
+        assert_eq!(text, "Suivez le fil de la ligne L et le blog.");
+        assert_eq!(
+            links,
+            [
+                link(10, 27, "https://example.org/ligne-l"),
+                link(34, 38, "https://example.org/blog?a=1&b=2"),
+            ]
+        );
+        // The text is the same as without links.
+        assert_eq!(
+            plain_text("<a href=\"https://example.org/\">blog</a>"),
+            "blog"
+        );
+        // An address need not be quoted.
+        let (_, links) = text_with_links("<a href=https://example.org/c target=_blank>c</a>");
+        assert_eq!(links, [link(0, 1, "https://example.org/c")]);
+    }
+
+    #[test]
+    fn a_link_is_placed_by_characters_on_its_own_word() {
+        // "➡️" is two characters; the first "ici" is not the link.
+        let (text, links) = text_with_links(
+            "&#x27A1;&#xFE0F; D&#233;tails <a href=\"https://example.org/d\">ici</a>, pas ici.",
+        );
+        assert_eq!(text, "➡️ Détails ici, pas ici.");
+        assert_eq!(links, [link(11, 14, "https://example.org/d")]);
+    }
+
+    #[test]
+    fn only_secure_web_addresses_become_links() {
+        let (text, links) = text_with_links(concat!(
+            "<a href=\"http://example.org/\">site</a> <a href=\"http://iOS\">iOS</a> ",
+            "<a href=\"https://Google Store\">Google Store</a> <a href=\"javascript:alert(1)\">x</a> ",
+            "<a href=\"https://localhost/\">local</a> <a name=\"haut\">haut</a> <a href=>vide</a> <a href>nu</a>",
+        ));
+        assert_eq!(text, "site iOS Google Store x local haut vide nu");
+        assert_eq!(links, []);
+    }
+
+    #[test]
+    fn addresses_written_in_the_text_become_links() {
+        let (text, links) = text_with_links(
+            "Infos : https://example.org/a. Et (https://example.org/b), pas http://example.org/c ni https://localhost/x.",
+        );
+        assert_eq!(
+            links,
+            [
+                link(8, 29, "https://example.org/a"),
+                link(35, 56, "https://example.org/b"),
+            ]
+        );
+        assert_eq!(text.chars().count(), 107);
+    }
+
+    #[test]
+    fn a_link_holds_its_words_only_once() {
+        // Written as its own address: one link, not two.
+        let (text, links) = text_with_links(
+            "Voir <a href=\"https://example.org/\">https://example.org/</a> ou le <a href=\"https://example.org/b\"> blog </a> .",
+        );
+        assert_eq!(text, "Voir https://example.org/ ou le blog .");
+        assert_eq!(
+            links,
+            [
+                link(5, 25, "https://example.org/"),
+                link(32, 36, "https://example.org/b"),
+            ]
+        );
+        // A space is the link's only between two of its words.
+        let (text, links) = text_with_links(
+            "voir<a href=\"https://example.org/i\"> ici </a>et <a href=\"https://example.org/j\">là</a> <a href=\"https://example.org/k\">ou là</a>",
+        );
+        assert_eq!(text, "voir ici et là ou là");
+        assert_eq!(
+            links,
+            [
+                link(5, 8, "https://example.org/i"),
+                link(12, 14, "https://example.org/j"),
+                link(15, 20, "https://example.org/k"),
+            ]
+        );
+        // Over a line break: one link on each line.
+        let (text, links) = text_with_links("<a href=\"https://example.org/x\">un<br>deux</a>");
+        assert_eq!(text, "un\ndeux");
+        assert_eq!(
+            links,
+            [
+                link(0, 2, "https://example.org/x"),
+                link(3, 7, "https://example.org/x"),
+            ]
+        );
     }
 
     #[test]
