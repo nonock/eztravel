@@ -97,9 +97,11 @@ class AlertsPageTest : ScreenTesting() {
         compose.onNode(header(line)).performClick()
     }
 
-    private fun summary(underWay: Int, toCome: Int) = listOf(
+    /** A line's summary: how it runs, in words, when trouble is under way, then how many alerts. */
+    private fun summary(underWay: Int, toCome: Int, state: Int? = null) = listOfNotNull(
+        state?.let { text(it) },
         context.resources.getQuantityString(R.plurals.alerts_under_way, underWay, underWay),
-        context.resources.getQuantityString(R.plurals.alerts_to_come, toCome, toCome),
+        context.resources.getQuantityString(R.plurals.alerts_to_come, toCome, toCome).takeIf { toCome > 0 },
     ).joinToString(", ")
 
     @Test
@@ -112,8 +114,9 @@ class AlertsPageTest : ScreenTesting() {
         )
         show(FakeBackend(alerts = alerts))
         val l = text(R.string.line_train, "L")
-        waitFor(header(l) and hasText(summary(1, 1)) and tapLabel(R.string.alerts_show_line))
-        waitFor(header(text(R.string.line_metro, "X")) and hasText(context.resources.getQuantityString(R.plurals.alerts_under_way, 1, 1)))
+        // How bad, in words: the icon alone tells it by its color only.
+        waitFor(header(l) and hasText(summary(1, 1, R.string.status_state_blocking)) and tapLabel(R.string.alerts_show_line))
+        waitFor(header(text(R.string.line_metro, "X")) and hasText(summary(1, 0, R.string.status_state_disrupted)))
         compose.onNodeWithText(stopped.title).assertDoesNotExist()
         compose.onNode(header(l)).performClick()
         waitFor(hasText(stopped.title))
@@ -140,8 +143,13 @@ class AlertsPageTest : ScreenTesting() {
         unfold(text(R.string.line_metro, "X"))
         waitFor(
             hasText(stopped.title) and hasText(text(R.string.alerts_now)) and hasText(text(R.string.alerts_on_way)) and
+                hasText(text(R.string.status_state_blocking)) and
                 hasText(text(R.string.alerts_until, stopped.end.shown(today))) and hasText(stopped.text),
         )
+        waitFor(hasText(slowed.title) and hasText(text(R.string.status_state_disrupted)))
+        // Information is told by its own icon.
+        compose.onNode(hasText(works.title) and hasText(text(R.string.status_state_disrupted))).assertDoesNotExist()
+        compose.onNode(hasText(works.title) and hasText(text(R.string.status_state_blocking))).assertDoesNotExist()
         waitFor(
             hasText(works.title) and hasText(text(R.string.alerts_coming)) and
                 hasText(text(R.string.alerts_from, works.begin.shown(today))) and
