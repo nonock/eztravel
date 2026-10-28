@@ -94,7 +94,7 @@ pub fn check_pick(
     if !calendar.is_office_day(local.date()) {
         return Err(Refusal::NotOfficeDay);
     }
-    let window = windows.of(direction);
+    let window = windows.on(local.date()).of(direction);
     if local.time() < window.start || local.time() >= window.end {
         return Err(Refusal::OutsideWindow);
     }
@@ -497,6 +497,29 @@ mod tests {
         assert_eq!(
             check(now, "2026-11-03T15:20:00Z", &away),
             Err(Refusal::NotOfficeDay)
+        );
+        // A late way home, every other Tuesday from 3 November at 18:00 in
+        // Paris: until 19:00.
+        let mut late = config.windows.clone();
+        late.late = vec![crate::calendar::LateRule {
+            first: date(2026, 11, 3),
+            every_weeks: std::num::NonZeroU8::new(2).unwrap(),
+            leave: jiff::civil::time(18, 0, 0, 0),
+        }];
+        let late_check = |leave: &str| {
+            check_pick(
+                now.parse().unwrap(),
+                leave.parse().unwrap(),
+                Direction::Inbound,
+                &config.time_zone(),
+                calendar,
+                &late,
+            )
+        };
+        assert_eq!(late_check("2026-11-03T17:59:00Z"), Ok(()));
+        assert_eq!(
+            late_check("2026-11-03T18:00:00Z"),
+            Err(Refusal::OutsideWindow)
         );
         // In the morning, the morning's window.
         assert_eq!(

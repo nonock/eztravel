@@ -17,7 +17,7 @@ Existing apps cover the whole network, for everyone. eztravel does the opposite:
 
 ## What it does
 
-**The backend** reads PRIM's disruptions every two minutes during the watch windows (for example 6:45–8:15 and 16:00–17:30), on office days only. It keeps the disruptions that touch a leg of the commute and notifies:
+**The backend** reads PRIM's disruptions every two minutes during the watch windows (for example 6:45–8:15 and 16:00–17:30), on office days only. Some days the way home is later, by a rule of the configuration (every other Wednesday, for example): the evening is then watched until an hour after leaving, and the way's usual train is not reminded. It keeps the disruptions that touch a leg of the commute and notifies:
 
 - when a line becomes disrupted, or is already disrupted when a window opens;
 - when its severity changes (disrupted ↔ interrupted);

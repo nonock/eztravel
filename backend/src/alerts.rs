@@ -714,6 +714,7 @@ mod tests {
             outbound: window(time(6, 45, 0, 0), time(8, 15, 0, 0)),
             inbound: window(time(16, 0, 0, 0), time(17, 30, 0, 0)),
             eve: Some(time(20, 0, 0, 0)),
+            late: vec![],
         }
     }
 

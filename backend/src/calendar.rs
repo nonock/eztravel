@@ -5,10 +5,11 @@
 //! time, so the caller passes the current instant and the time zone.
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU8;
 
 use jiff::civil::{Date, Time, Weekday};
 use jiff::tz::TimeZone;
-use jiff::{Timestamp, ToSpan};
+use jiff::{SignedDuration, Timestamp, ToSpan};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -125,9 +126,52 @@ pub struct WatchWindows {
     /// next day's windows is announced; never without.
     #[serde(default)]
     pub eve: Option<Time>,
+    /// The days the way home is later than usual.
+    #[serde(default)]
+    pub late: Vec<LateRule>,
 }
 
+/// A way home later than usual every `every_weeks` weeks from `first`,
+/// leaving around `leave`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LateRule {
+    pub first: Date,
+    pub every_weeks: NonZeroU8,
+    pub leave: Time,
+}
+
+/// A late way home is watched until this long after it leaves.
+pub const AFTER_LATE: SignedDuration = SignedDuration::from_hours(1);
+
 impl WatchWindows {
+    /// When the way home leaves on `day` by the rules, if it is late.
+    pub fn late_on(&self, day: Date) -> Option<Time> {
+        self.late
+            .iter()
+            .find(|rule| {
+                let days = i64::from((day - rule.first).get_days());
+                days >= 0 && days % (7 * i64::from(rule.every_weeks.get())) == 0
+            })
+            .map(|rule| rule.leave)
+    }
+
+    /// The windows of a day whose way home leaves at `late`: watched until an
+    /// hour after, within the day, and never less than usual.
+    pub fn with_late(&self, late: Option<Time>) -> WatchWindows {
+        let mut windows = self.clone();
+        if let Some(late) = late {
+            let end = late.checked_add(AFTER_LATE).unwrap_or(Time::MAX);
+            windows.inbound.end = windows.inbound.end.max(end);
+        }
+        windows
+    }
+
+    /// The windows of `day`, by the rules.
+    pub fn on(&self, day: Date) -> WatchWindows {
+        self.with_late(self.late_on(day))
+    }
+
     pub fn of(&self, direction: Direction) -> Window {
         match direction {
             Direction::Outbound => self.outbound,
@@ -374,6 +418,7 @@ mod tests {
                 trains_from: None,
             },
             eve: None,
+            late: vec![],
         }
     }
 
@@ -611,6 +656,47 @@ mod tests {
             phase(at("2026-11-02T04:30:00Z"), &tz, &calendar, &windows),
             None
         );
+    }
+
+    #[test]
+    fn a_late_way_home_comes_back_every_so_many_weeks_and_ends_the_evening_later() {
+        let windows: WatchWindows = toml::from_str(
+            r#"
+            outbound = { start = "06:45", end = "08:15" }
+            inbound = { start = "16:00", end = "17:30" }
+            late = [{ first = "2026-10-28", every_weeks = 2, leave = "20:00" }]
+            "#,
+        )
+        .unwrap();
+        let late = |month, day| windows.late_on(date(2026, month, day));
+        assert_eq!(late(10, 28), Some(time(20, 0, 0, 0)));
+        assert_eq!(late(11, 4), None);
+        assert_eq!(late(11, 11), Some(time(20, 0, 0, 0)));
+        assert_eq!(late(11, 12), None);
+        assert_eq!(late(10, 14), None);
+        // The way home is watched until an hour after leaving, never less than usual.
+        let end = |late| windows.with_late(late).inbound.end;
+        assert_eq!(end(Some(time(20, 0, 0, 0))), time(21, 0, 0, 0));
+        assert_eq!(end(Some(time(16, 0, 0, 0))), time(17, 30, 0, 0));
+        assert_eq!(end(Some(time(23, 30, 0, 0))), Time::MAX);
+        assert_eq!(windows.with_late(None), windows);
+        assert_eq!(
+            windows.with_late(Some(time(20, 0, 0, 0))).outbound,
+            windows.outbound
+        );
+        // The day's windows, by the rules.
+        assert_eq!(
+            windows.on(date(2026, 11, 11)).inbound.end,
+            time(21, 0, 0, 0)
+        );
+        assert_eq!(windows.on(date(2026, 11, 4)), windows);
+        // Every so many weeks, never none.
+        let never = r#"
+            outbound = { start = "06:45", end = "08:15" }
+            inbound = { start = "16:00", end = "17:30" }
+            late = [{ first = "2026-10-28", every_weeks = 0, leave = "20:00" }]
+            "#;
+        assert!(toml::from_str::<WatchWindows>(never).is_err());
     }
 
     #[test]

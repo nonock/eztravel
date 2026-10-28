@@ -26,6 +26,10 @@ inbound = { start = "16:00", end = "17:30" }
 # Optional: from then, the evening before an office day, what will disrupt the
 # commute during the next day's windows is announced, each record once.
 eve = "20:00"
+# Optional: days the way home is later than usual, each rule every so many
+# weeks from its first day. The evening is then watched until an hour after
+# `leave`, and the usual train of the way home is not reminded.
+# late = [{ first = "2026-11-04", every_weeks = 2, leave = "20:00" }]
 
 # How each line is named in notifications, and its color on the home screen
 # (optional, "#RRGGBB": Navitia gives it as the line's `color`).
