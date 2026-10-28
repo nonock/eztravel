@@ -17,7 +17,7 @@ Existing apps cover the whole network, for everyone. eztravel does the opposite:
 
 ## What it does
 
-**The backend** reads PRIM's disruptions every two minutes during the watch windows (for example 6:45–8:15 and 16:00–17:30), on office days only. Some days the way home is later, by a rule of the configuration (every other Wednesday, for example): the evening is then watched until an hour after leaving, and the way's usual train is not reminded. It keeps the disruptions that touch a leg of the commute and notifies:
+**The backend** reads PRIM's disruptions every two minutes during the watch windows (for example 6:45–8:15 and 16:00–17:30), on office days only. Some days the way home is later, by a rule of the configuration (every other Wednesday, for example) or set from the app for the day: the evening is then watched until an hour after leaving, and the way's usual train is not reminded. It keeps the disruptions that touch a leg of the commute and notifies:
 
 - when a line becomes disrupted, or is already disrupted when a window opens;
 - when its severity changes (disrupted ↔ interrupted);
@@ -108,6 +108,7 @@ All requests carry `Authorization: Bearer <APP_KEY>`.
 | `POST /devices` `{"token": "…"}` | Registers the phone's Firebase token |
 | `GET /settings` | The usual trains: [fixtures/api/README.md](fixtures/api/README.md) |
 | `PUT /usual-train` `{"direction": "outbound", "time": "08:07"}` | Sets the usual train of a way, or `null` for none: [fixtures/api/README.md](fixtures/api/README.md) |
+| `PUT /late` `{"leave": "22:00"}` | Sets today's way home later than usual, or `null` as usual: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /calendar?month=2026-11` | Each day of the month, what it is and why: [fixtures/api/README.md](fixtures/api/README.md) |
 | `PUT /calendar` `{"date": "2026-11-05", "kind": "remote"}` | Sets a day, or every day `through` another, or `null` to put them back as planned: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /status` | What the backend sees: [fixtures/api/README.md](fixtures/api/README.md) |

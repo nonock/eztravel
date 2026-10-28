@@ -656,6 +656,7 @@ impl NextDepartures {
         journey: &str,
         now: Timestamp,
         calendar: &Calendar,
+        windows: &WatchWindows,
     ) -> Result<Pick, Refusal> {
         let (direction, legs) = self.shown(now);
         let (leg, reach) = reminded_leg(legs).ok_or(Refusal::Unknown)?;
@@ -675,14 +676,7 @@ impl NextDepartures {
             .find(|departure| departure.journey == journey && departure.status != "cancelled")
             .ok_or(Refusal::Unknown)?;
         let leave = departure.expected - SignedDuration::from_mins(i64::from(reach));
-        check_pick(
-            now,
-            leave,
-            direction,
-            &self.time_zone,
-            calendar,
-            &self.windows,
-        )?;
+        check_pick(now, leave, direction, &self.time_zone, calendar, windows)?;
         Ok(Pick {
             day: leave.to_zoned(self.time_zone.clone()).date(),
             direction,
@@ -1148,7 +1142,7 @@ mod tests {
         let parsed = Config::parse(config).unwrap();
         let calendar = calendar.unwrap_or(&parsed.calendar);
         next_departures(&server, config)
-            .pick(journey, at("06:50:00"), calendar)
+            .pick(journey, at("06:50:00"), calendar, &parsed.windows)
             .await
     }
 
@@ -1213,13 +1207,15 @@ mod tests {
         let calendar = Config::parse(EXAMPLE).unwrap().calendar;
         assert_eq!(
             departures
-                .pick("t10", at("06:50:00"), &calendar)
+                .pick("t10", at("06:50:00"), &calendar, &example_windows())
                 .await
                 .map(|pick| pick.leave),
             Ok(at("06:59:00"))
         );
         assert_eq!(
-            departures.pick("t11", at("06:50:00"), &calendar).await,
+            departures
+                .pick("t11", at("06:50:00"), &calendar, &example_windows())
+                .await,
             Err(Refusal::Unknown)
         );
     }
@@ -1261,6 +1257,11 @@ mod tests {
             without.check_usual(Direction::Outbound, time(7, 52, 0, 0)),
             Err(Refusal::Unknown)
         );
+    }
+
+    /// The example's watch windows.
+    fn example_windows() -> WatchWindows {
+        Config::parse(EXAMPLE).unwrap().windows
     }
 
     #[tokio::test]
@@ -1489,7 +1490,7 @@ mod tests {
         let departures = next_departures(&server, EXAMPLE);
         assert_eq!(
             departures
-                .pick("j2", at("06:50:00"), &config.calendar)
+                .pick("j2", at("06:50:00"), &config.calendar, &config.windows)
                 .await,
             Err(Refusal::Unavailable)
         );
@@ -1497,7 +1498,7 @@ mod tests {
         departures.set_routes(BTreeMap::new());
         assert_eq!(
             departures
-                .pick("j2", at("06:50:00"), &config.calendar)
+                .pick("j2", at("06:50:00"), &config.calendar, &config.windows)
                 .await,
             Err(Refusal::Unavailable)
         );
@@ -1517,7 +1518,7 @@ outbound = \"07:30\"
         let config = Config::parse(&none).unwrap();
         assert_eq!(
             next_departures(&server, &none)
-                .pick("j2", at("06:50:00"), &config.calendar)
+                .pick("j2", at("06:50:00"), &config.calendar, &config.windows)
                 .await,
             Err(Refusal::Unknown)
         );

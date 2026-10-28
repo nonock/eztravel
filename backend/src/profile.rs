@@ -11,7 +11,7 @@ use jiff::civil::{Date, Time};
 use jiff::{Timestamp, ToSpan};
 use serde::{Deserialize, Serialize};
 
-use crate::calendar::{Calendar, Day, Direction, LOOKAHEAD_DAYS};
+use crate::calendar::{Calendar, Day, Direction, LOOKAHEAD_DAYS, WatchWindows};
 use crate::service::{load, save};
 
 /// Tokens change when the app is reinstalled: keep the latest few only.
@@ -30,6 +30,27 @@ pub struct Profile {
     /// Days set otherwise than planned, from today on.
     #[serde(default)]
     pub days: BTreeMap<Date, Day>,
+    /// The way home of a day, set from the app: it wins over the rules.
+    #[serde(default)]
+    pub late: Option<LateDay>,
+}
+
+/// The way home of `day`, set from the app: late, leaving at `leave`, or as
+/// usual with none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LateDay {
+    pub day: Date,
+    pub leave: Option<Time>,
+}
+
+/// A late way home, in the shape `GET /status` gives it: when it leaves and
+/// until when it is watched, local, and whether it was set from the app
+/// rather than by the rules.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct LateView {
+    pub leave: Time,
+    pub until: Time,
+    pub set: bool,
 }
 
 /// Why a day cannot be set, in the shape fixed by `fixtures/api/day-refused.json`.
@@ -91,6 +112,39 @@ impl Profile {
 
     pub fn forget(&mut self, token: &str) {
         self.devices.retain(|known| known != token);
+    }
+
+    /// When the way home leaves on `day`, if it is late: as set from the app
+    /// for that day, or else by the rules.
+    pub fn late_on(&self, day: Date, configured: &WatchWindows) -> Option<Time> {
+        match self.late {
+            Some(late) if late.day == day => late.leave,
+            _ => configured.late_on(day),
+        }
+    }
+
+    /// The watch windows of `day`, with its way home.
+    pub fn windows(&self, configured: &WatchWindows, day: Date) -> WatchWindows {
+        configured.with_late(self.late_on(day, configured))
+    }
+
+    /// The way home of `day`, if it is late.
+    pub fn late(&self, day: Date, configured: &WatchWindows) -> Option<LateView> {
+        let leave = self.late_on(day, configured)?;
+        Some(LateView {
+            leave,
+            until: configured.with_late(Some(leave)).inbound.end,
+            set: self.late.is_some_and(|late| late.day == day),
+        })
+    }
+
+    /// The usual trains of `day`: none home when it is late.
+    pub fn usual_on(&self, day: Date, configured: &WatchWindows) -> UsualTrains {
+        let mut usual = self.usual;
+        if self.late_on(day, configured).is_some() {
+            usual.inbound = None;
+        }
+        usual
     }
 
     /// The configured calendar, with the days set from the app.
@@ -179,6 +233,80 @@ mod tests {
     use jiff::ToSpan;
     use jiff::civil::{date, time};
 
+    #[test]
+    fn a_way_home_set_for_its_day_wins_over_the_rules() {
+        let configured: crate::calendar::WatchWindows = toml::from_str(
+            r#"
+            outbound = { start = "06:45", end = "08:15" }
+            inbound = { start = "16:00", end = "17:30" }
+            late = [{ first = "2026-11-04", every_weeks = 2, leave = "20:00" }]
+            "#,
+        )
+        .unwrap();
+        let wednesday = date(2026, 11, 4);
+        let mut profile = Profile::default();
+        assert_eq!(
+            profile.late_on(wednesday, &configured),
+            Some(time(20, 0, 0, 0))
+        );
+        assert_eq!(
+            profile.late(wednesday, &configured),
+            Some(LateView {
+                leave: time(20, 0, 0, 0),
+                until: time(21, 0, 0, 0),
+                set: false
+            })
+        );
+        // Later than the rule says, that day.
+        profile.late = Some(LateDay {
+            day: wednesday,
+            leave: Some(time(22, 0, 0, 0)),
+        });
+        assert_eq!(
+            profile.windows(&configured, wednesday).inbound.end,
+            time(23, 0, 0, 0)
+        );
+        assert_eq!(
+            profile.late(wednesday, &configured),
+            Some(LateView {
+                leave: time(22, 0, 0, 0),
+                until: time(23, 0, 0, 0),
+                set: true
+            })
+        );
+        // The usual train home is not that day's.
+        profile
+            .usual
+            .set(Direction::Outbound, Some(time(8, 0, 0, 0)));
+        profile
+            .usual
+            .set(Direction::Inbound, Some(time(17, 0, 0, 0)));
+        assert_eq!(
+            profile.usual_on(wednesday, &configured),
+            UsualTrains {
+                outbound: Some(time(8, 0, 0, 0)),
+                inbound: None
+            }
+        );
+        assert_eq!(
+            profile.usual_on(date(2026, 11, 5), &configured),
+            profile.usual
+        );
+        // As usual that day, whatever the rule.
+        profile.late = Some(LateDay {
+            day: wednesday,
+            leave: None,
+        });
+        assert_eq!(profile.late_on(wednesday, &configured), None);
+        assert_eq!(profile.late(wednesday, &configured), None);
+        assert_eq!(profile.windows(&configured, wednesday), configured);
+        // Only that day: two weeks on, the rule again.
+        assert_eq!(
+            profile.late_on(date(2026, 11, 18), &configured),
+            Some(time(20, 0, 0, 0))
+        );
+    }
+
     /// The example's calendar: Tuesday and Thursday the week of 2 November 2026,
     /// Monday, Wednesday and Friday the next.
     fn configured() -> Calendar {
@@ -237,11 +365,16 @@ mod tests {
             inbound: None,
         };
         let days = BTreeMap::from([(date(2026, 12, 23), Day::Remote)]);
+        let late = LateDay {
+            day: date(2026, 12, 23),
+            leave: Some(time(21, 0, 0, 0)),
+        };
         store.update(|profile| {
             profile.register("phone");
             profile.pick = Some(pick.clone());
             profile.usual = usual;
             profile.days = days.clone();
+            profile.late = Some(late);
         });
         // The seed only applies when nothing was saved.
         let reopened = Store::open(&path, &["other seed".into()]);
@@ -252,6 +385,7 @@ mod tests {
                 pick: Some(pick),
                 usual,
                 days,
+                late: Some(late),
             }
         );
     }

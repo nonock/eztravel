@@ -149,6 +149,8 @@ pub struct View {
     pub school_holiday: Option<String>,
     pub school_holiday_first: Option<Date>,
     pub school_holiday_last: Option<Date>,
+    /// Today's way home when it is late: the API sets it, from the profile.
+    pub late: Option<crate::profile::LateView>,
 }
 
 impl Snapshot {
@@ -178,6 +180,7 @@ impl Snapshot {
             school_holiday_first: school_holiday.as_ref().map(|holiday| holiday.first),
             school_holiday_last: school_holiday.as_ref().map(|holiday| holiday.last),
             school_holiday: school_holiday.map(|holiday| holiday.name),
+            late: None,
         }
     }
 }
