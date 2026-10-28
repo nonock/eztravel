@@ -158,6 +158,14 @@
     <string name="usual_clear_outbound">Retirer le train habituel de l’aller</string>
     <string name="usual_clear_inbound">Retirer le train habituel du retour</string>
     <string name="usual_pick_title">Heure du train</string>
+    <string name="late_button">Je rentre plus tard</string>
+    <string name="late_set">Retour à %1$s : suivi jusqu’à %2$s.</string>
+    <string name="late_change">Changer</string>
+    <string name="late_as_usual">Comme d’habitude</string>
+    <string name="late_pick_title">Heure de départ</string>
+    <string name="late_refused_not_office_day">Aujourd’hui n’est pas un jour de bureau : rien n’est suivi.</string>
+    <string name="late_refused_outside_window">Choisissez une heure après le début du suivi du retour.</string>
+    <string name="late_failed">Le retour n’a pas pu être enregistré.</string>
     <string name="usual_refused">Pas de rappel possible pour ce train.</string>
     <string name="usual_unreachable">Les trains habituels ne peuvent pas être lus pour l’instant.</string>
     <string name="calendar_previous">Mois précédent</string>

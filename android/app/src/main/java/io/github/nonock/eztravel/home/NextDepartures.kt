@@ -56,6 +56,7 @@ import io.github.nonock.eztravel.backend.Departures.Departure
 import io.github.nonock.eztravel.backend.Departures.State
 import io.github.nonock.eztravel.backend.Position
 import io.github.nonock.eztravel.backend.Refusal
+import io.github.nonock.eztravel.backend.Status
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.IOException
@@ -72,8 +73,10 @@ private const val TICK_MS = 15_000L
  * The next departures on each leg of the way shown, read when the screen
  * shows and every minute while it does, the train to catch first and in big.
  * A train of the first leg with a time to its platform can be picked for the
- * reminder to leave. The countdowns move every [tickMs]. Read again when
- * [refresh] changes; [onRead] follows each read, readable or not.
+ * reminder to leave. On the way home, it can be set later than usual: [late]
+ * as the backend has it, [onLateSaved] after each change. The countdowns move
+ * every [tickMs]. Read again when [refresh] changes; [onRead] follows each
+ * read, readable or not.
  */
 @Composable
 fun NextDepartures(
@@ -84,6 +87,8 @@ fun NextDepartures(
     refresh: Int = 0,
     onRead: () -> Unit = {},
     where: suspend () -> Position? = phoneWhere(),
+    late: Status.Late? = null,
+    onLateSaved: () -> Unit = {},
 ) {
     // The commute tab already says that this build has no server.
     if (!backend.configured) return
@@ -120,10 +125,12 @@ fun NextDepartures(
         val current = read.value
         val featured = (current as? Reading.Known)?.value?.featured(clock)
         featured?.let { NextTrain(it, clock) }
+        val home = (current as? Reading.Known)?.value?.direction == Status.Direction.INBOUND
+        if (home) LateWayHome(backend, late, Modifier.padding(top = if (featured == null) 0.dp else 16.dp), onSaved = onLateSaved)
         Text(
             stringResource(R.string.departures_title),
             style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(top = if (featured == null) 0.dp else 24.dp),
+            modifier = Modifier.padding(top = if (featured == null && !home) 0.dp else 24.dp),
         )
         when (current) {
             Reading.Failed -> Text(stringResource(R.string.departures_unavailable), color = MaterialTheme.colorScheme.error)

@@ -91,6 +91,19 @@ class HttpBackendTest {
     }
 
     @Test
+    fun setsTodaysWayHomeLateOrAsUsual() = runBlocking {
+        assertNull(backend.setLate(LocalTime.of(22, 0)))
+        assertNull(backend.setLate(null))
+        assertEquals(listOf("PUT /late"), received.map { "${it.method} ${it.path}" }.distinct())
+        val (later, usual) = received.map { JSONObject(it.body) }
+        assertEquals("22:00", later.getString("leave"))
+        assertTrue(usual.isNull("leave"))
+        status = 422
+        answer = """{"refused":"not_office_day"}"""
+        assertEquals(Refusal.NOT_OFFICE_DAY, backend.setLate(LocalTime.of(22, 0)))
+    }
+
+    @Test
     fun readsTheStatus() = runBlocking {
         status = 200
         answer = File("../../fixtures/api/status-watching.json").readText()

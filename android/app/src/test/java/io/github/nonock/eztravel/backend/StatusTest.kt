@@ -14,6 +14,7 @@ import org.junit.Test
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 
 class StatusTest {
     /** The answers the backend gives, shared with its own tests. */
@@ -87,8 +88,17 @@ class StatusTest {
     }
 
     @Test
+    fun readsALateWayHome() {
+        assertEquals(
+            Status.Late(LocalTime.of(22, 0), LocalTime.of(23, 0), set = true),
+            Status.parse(fixture("status-late")).late,
+        )
+    }
+
+    @Test
     fun readsTheStatusOutsideTheWindows() {
         val status = Status.parse(fixture("status-idle"))
+        assertNull(status.late)
         assertNull(status.watching)
         assertEquals(at("2026-11-03T07:14:00Z"), status.checkedAt)
         assertEquals(at("2026-11-03T15:00:00Z"), status.next)

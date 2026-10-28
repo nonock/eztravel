@@ -1,6 +1,7 @@
 package io.github.nonock.eztravel.settings
 
 import android.text.format.DateFormat
+import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -95,7 +96,8 @@ fun UsualTrainSetting(backend: Backend, modifier: Modifier = Modifier, onSaved: 
                 }
                 refused?.let { Text(stringResource(it.usualMessage()), color = MaterialTheme.colorScheme.error) }
                 choosing?.let { direction ->
-                    TrainTime(
+                    TimeDialog(
+                        title = R.string.usual_pick_title,
                         initial = current.trains.of(direction) ?: if (direction == Direction.OUTBOUND) MORNING else EVENING,
                         onPick = { time ->
                             choosing = null
@@ -160,16 +162,16 @@ private fun Way(direction: Direction, time: LocalTime?, onChoose: () -> Unit, on
     }
 }
 
-/** The train's time, typed: exact minutes are quicker to type than to set on a dial. */
+/** A time, typed: exact minutes are quicker to type than to set on a dial. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TrainTime(initial: LocalTime, onPick: (LocalTime) -> Unit, onDismiss: () -> Unit) {
+internal fun TimeDialog(@StringRes title: Int, initial: LocalTime, onPick: (LocalTime) -> Unit, onDismiss: () -> Unit) {
     val state = rememberTimePickerState(initial.hour, initial.minute, is24Hour = DateFormat.is24HourFormat(LocalContext.current))
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = { onPick(LocalTime.of(state.hour, state.minute)) }) { Text(stringResource(R.string.ok)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
-        title = { Text(stringResource(R.string.usual_pick_title)) },
+        title = { Text(stringResource(title)) },
         text = { TimeInput(state) },
     )
 }

@@ -24,6 +24,12 @@ interface Backend {
     /** Sets the usual train of [direction], or none: null once saved, or why the backend refuses it. */
     suspend fun setUsualTrain(direction: Status.Direction, time: LocalTime?): Refusal?
 
+    /**
+     * Sets today's way home later than usual, leaving at [leave], or as usual
+     * with null: null once saved, or why the backend refuses it.
+     */
+    suspend fun setLate(leave: LocalTime?): Refusal?
+
     /** Each day of [month], what it is and why. */
     suspend fun month(month: YearMonth): List<CalendarDay>
 
@@ -71,6 +77,10 @@ class HttpBackend(private val baseUrl: String, private val key: String) : Backen
     override suspend fun setUsualTrain(direction: Status.Direction, time: LocalTime?): Refusal? = withContext(Dispatchers.IO) {
         val usual = JSONObject().put("direction", direction.name.lowercase()).put("time", time?.toString() ?: JSONObject.NULL)
         refusable("PUT", "/usual-train", usual, Refusal::parse)
+    }
+
+    override suspend fun setLate(leave: LocalTime?): Refusal? = withContext(Dispatchers.IO) {
+        refusable("PUT", "/late", JSONObject().put("leave", leave?.toString() ?: JSONObject.NULL), Refusal::parse)
     }
 
     override suspend fun month(month: YearMonth): List<CalendarDay> = withContext(Dispatchers.IO) {
