@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::backups::{self, Backup};
 use crate::calendar::{Calendar, Direction, WatchWindows};
 use crate::config::Config;
-use crate::leaving::{Refusal, check_pick, reminded_leg};
+use crate::leaving::{LATEST, Refusal, check_pick, reminded_leg};
 use crate::line_alerts::LineAlerts;
 use crate::prim::{Prim, PrimError};
 use crate::profile::{Pick, UsualTrains};
@@ -269,7 +269,8 @@ pub struct Departure {
     pub status: &'static str,
     /// Picked in the app for the reminder to leave.
     pub picked: bool,
-    /// The way's usual train, when none is picked today: the first from its time.
+    /// The way's usual train, when none is picked today: the first from its
+    /// time, up to half an hour after, as for the reminder to leave.
     pub usual: bool,
 }
 
@@ -494,7 +495,7 @@ impl NextDepartures {
 
     /// `pick`, the train picked in the app, is marked when it is of this day and
     /// way; or else, on the ride reminded, the first train from the way's usual
-    /// time. When the way has backups, the lines' disruptions, shared with the
+    /// time, up to half an hour after. When the way has backups, the lines' disruptions, shared with the
     /// Alertes page, say which are needed.
     pub async fn view(
         &self,
@@ -557,7 +558,9 @@ impl NextDepartures {
                 usual_from.filter(|_| reminded.is_some_and(|ride| std::ptr::eq(ride, leg)))
             {
                 let usual = departures.iter_mut().flatten().find(|departure| {
-                    departure.status != "cancelled" && departure.expected >= from
+                    departure.status != "cancelled"
+                        && departure.expected >= from
+                        && departure.expected <= from + LATEST
                 });
                 if let Some(usual) = usual {
                     usual.usual = true;
@@ -1287,6 +1290,16 @@ mod tests {
         // From 8:12: the 8:22 is cancelled, and none other is listed.
         let view = departures
             .view(at("06:50:00"), None, &usual(8, 12), &quiet())
+            .await;
+        assert_eq!(marked(&view), Vec::<String>::new());
+        // Up to half an hour after the usual time, as the reminder: the 7:52
+        // is the usual train from 7:22, not from 7:21.
+        let view = departures
+            .view(at("06:50:00"), None, &usual(7, 22), &quiet())
+            .await;
+        assert_eq!(marked(&view), ["j1"]);
+        let view = departures
+            .view(at("06:50:00"), None, &usual(7, 21), &quiet())
             .await;
         assert_eq!(marked(&view), Vec::<String>::new());
         // The train picked today is the one reminded.
