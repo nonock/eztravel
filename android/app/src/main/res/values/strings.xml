@@ -156,6 +156,14 @@
     <string name="usual_clear_outbound">Remove the usual train to work</string>
     <string name="usual_clear_inbound">Remove the usual train home</string>
     <string name="usual_pick_title">Time of the train</string>
+    <string name="late_button">Going home later</string>
+    <string name="late_set">Going home at %1$s: watched until %2$s.</string>
+    <string name="late_change">Change</string>
+    <string name="late_as_usual">As usual</string>
+    <string name="late_pick_title">Leaving at</string>
+    <string name="late_refused_not_office_day">Today is not an office day: nothing is watched.</string>
+    <string name="late_refused_outside_window">Pick a time after the way home starts being watched.</string>
+    <string name="late_failed">The way home could not be saved.</string>
     <string name="usual_refused">No reminder can be given for this train.</string>
     <string name="usual_unreachable">The usual trains cannot be read just now.</string>
     <string name="calendar_previous">Previous month</string>

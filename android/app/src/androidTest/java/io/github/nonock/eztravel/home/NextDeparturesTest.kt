@@ -409,6 +409,24 @@ class NextDeparturesTest : ScreenTesting() {
     }
 
     @Test
+    fun onlyTheWayHomeCanBeSetLater() {
+        val backend = FakeBackend(departures = morning)
+        val refresh = androidx.compose.runtime.mutableIntStateOf(0)
+        val late = io.github.nonock.eztravel.backend.Status.Late(java.time.LocalTime.of(22, 0), java.time.LocalTime.of(23, 0), set = true)
+        compose.setContent {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                NextDepartures(backend, now = { now }, refresh = refresh.intValue, late = late)
+            }
+        }
+        waitFor(leg("Gare Centrale", "Mairie"))
+        compose.onNode(hasText(text(R.string.late_change))).assertDoesNotExist()
+        // In the evening, the way home.
+        backend.departures = morning.copy(direction = Direction.INBOUND)
+        compose.runOnIdle { refresh.intValue++ }
+        waitFor(text(R.string.late_change))
+    }
+
+    @Test
     fun aLegWithoutDeparturesSaysWhy() {
         val evening = Departures(
             Direction.INBOUND,

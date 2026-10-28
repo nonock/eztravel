@@ -35,6 +35,8 @@ class FakeBackend(
     var monthGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null,
     /** While set, the status is read once it completes. */
     var statusGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null,
+    /** Why today's way home is refused, if it is. */
+    var lateRefusal: Refusal? = null,
 ) : Backend {
     /** Days set otherwise than planned, as the backend keeps them. */
     val set = java.util.concurrent.ConcurrentHashMap<LocalDate, CalendarDay>()
@@ -45,6 +47,8 @@ class FakeBackend(
     val registered = CopyOnWriteArrayList<String>()
     val picks = CopyOnWriteArrayList<String?>()
     val usualSaved = CopyOnWriteArrayList<Pair<Status.Direction, LocalTime?>>()
+    /** Each way home set for today: when it leaves, or null as usual. */
+    val lateSaved = CopyOnWriteArrayList<LocalTime?>()
     val statusReads = AtomicInteger()
     /** Status reads given up before their answer, as when the look is stopped. */
     val statusDropped = AtomicInteger()
@@ -95,6 +99,12 @@ class FakeBackend(
         usualSaved += direction to time
         if (usualRefusal == null) usual = usual.with(direction, time)
         return usualRefusal
+    }
+
+    override suspend fun setLate(leave: LocalTime?): Refusal? {
+        if (failing) throw IOException("unreachable")
+        lateSaved += leave
+        return lateRefusal
     }
 
     override suspend fun month(month: YearMonth): List<CalendarDay> {

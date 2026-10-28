@@ -63,6 +63,7 @@ import io.github.nonock.eztravel.home.StatusIcon
 import io.github.nonock.eztravel.home.polled
 import io.github.nonock.eztravel.home.NextDepartures
 import io.github.nonock.eztravel.home.NotificationHistory
+import io.github.nonock.eztravel.home.Reading
 import io.github.nonock.eztravel.notifications.Notifier
 import io.github.nonock.eztravel.notifications.Opening
 import io.github.nonock.eztravel.notifications.PushToken
@@ -220,7 +221,14 @@ fun App(opening: Opening? = null) {
                             StatusBanner(it, now, Modifier.padding(top = 8.dp)) { statusOpen = true }
                             SchoolHoliday(it, Modifier.padding(top = 8.dp))
                         }
-                        NextDepartures(backend, Modifier.padding(top = 8.dp), refresh = refresh, onRead = read)
+                        NextDepartures(
+                            backend,
+                            Modifier.padding(top = 8.dp),
+                            refresh = refresh,
+                            onRead = read,
+                            late = (status as? Reading.Known)?.value?.late,
+                            onLateSaved = { refresh++ },
+                        )
                     }
                     else -> AlertsPage(backend, refresh = refresh, onRead = read, opening = shown)
                 }

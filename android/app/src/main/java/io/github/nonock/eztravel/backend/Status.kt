@@ -5,6 +5,7 @@ import org.json.JSONObject
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 
 /**
  * What the backend sees, for the home screen. Its format is fixed by
@@ -27,6 +28,8 @@ data class Status(
     /** Their first and last days, from a backend that gives them. */
     val schoolHolidayFirst: LocalDate? = null,
     val schoolHolidayLast: LocalDate? = null,
+    /** Today's way home, when later than usual. */
+    val late: Late? = null,
 ) {
     enum class Direction { OUTBOUND, INBOUND }
 
@@ -34,6 +37,12 @@ data class Status(
 
     /** No check has been complete since `since`. */
     data class Outage(val since: Instant, val cause: Cause)
+
+    /**
+     * A way home later than usual: when it leaves and until when it is
+     * watched, local; [set] from the app, or else by the backend's rules.
+     */
+    data class Late(val leave: LocalTime, val until: LocalTime, val set: Boolean)
 
     /** `severity` is null when the line runs normally; `color` (ARGB) when the backend has one. */
     data class LineState(val line: PushMessage.Line, val severity: PushMessage.Severity?, val color: Int? = null)
@@ -98,6 +107,9 @@ data class Status(
                 schoolHoliday = status.stringOrNull("school_holiday"),
                 schoolHolidayFirst = status.stringOrNull("school_holiday_first")?.let(LocalDate::parse),
                 schoolHolidayLast = status.stringOrNull("school_holiday_last")?.let(LocalDate::parse),
+                late = status.optJSONObject("late")?.let {
+                    Late(LocalTime.parse(it.getString("leave")), LocalTime.parse(it.getString("until")), it.getBoolean("set"))
+                },
             )
         }
 
