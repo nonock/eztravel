@@ -213,7 +213,7 @@ impl Service {
             now,
             &time_zone,
             &profile.calendar(&self.config.calendar),
-            &self.config.windows.on(today),
+            &profile.windows(&self.config.windows, today),
         );
         format!(
             "local time {}, watching {direction:?}, {} day(s) set, {} device(s)",
@@ -229,7 +229,7 @@ impl Service {
         let time_zone = self.config.time_zone();
         let local = now.to_zoned(time_zone.clone()).datetime();
         let calendar = profile.calendar(&self.config.calendar);
-        let windows = self.config.windows.on(local.date());
+        let windows = profile.windows(&self.config.windows, local.date());
         let followed = phase(now, &time_zone, &calendar, &windows);
         let direction = match followed {
             Some((direction, Phase::Watching)) => Some(direction),
@@ -403,7 +403,7 @@ impl Service {
         let notifications = eve(
             &mut next,
             tomorrow,
-            &self.config.windows.on(tomorrow),
+            &profile.windows(&self.config.windows, tomorrow),
             &self.commute(),
             &disruptions,
         );
@@ -463,7 +463,11 @@ impl Service {
             return;
         }
         let (day, direction) = key;
-        let window = self.config.windows.on(day).of(direction);
+        let window = self
+            .store
+            .profile()
+            .windows(&self.config.windows, day)
+            .of(direction);
         let span = (day.to_datetime(window.start), day.to_datetime(window.end));
         let mut scheduled = vec![];
         for (leg, from, _, _) in self.live_legs(direction) {
@@ -517,9 +521,7 @@ impl Service {
         };
         let reach = SignedDuration::from_mins(i64::from(reach));
         let pick = profile.pick.as_ref();
-        // A late way home leaves later than its usual train.
-        let late = key.1 == Direction::Inbound && self.config.windows.late_on(key.0).is_some();
-        let usual = profile.usual.of(key.1).filter(|_| !late);
+        let usual = profile.usual_on(key.0, &self.config.windows).of(key.1);
         let aim = match (pick.filter(|pick| (pick.day, pick.direction) == key), usual) {
             (Some(pick), _) => Aim::Picked {
                 journey: &pick.journey,
@@ -547,7 +549,11 @@ impl Service {
 
     /// When the window of `direction` opens and ends on the day of `local`.
     fn window_bounds(&self, local: DateTime, direction: Direction) -> (Timestamp, Timestamp) {
-        let window = self.config.windows.on(local.date()).of(direction);
+        let window = self
+            .store
+            .profile()
+            .windows(&self.config.windows, local.date())
+            .of(direction);
         let at = |time| {
             local
                 .date()
@@ -1893,6 +1899,32 @@ mod tests {
         // Watched until 19:00 in Paris rather than 17:30.
         assert_eq!(service.poll(tuesday("17:58")).await, Poll::Sent(0));
         assert_eq!(service.poll(tuesday("18:00")).await, Poll::Idle);
+    }
+
+    #[tokio::test]
+    async fn a_way_home_set_late_for_the_day_is_watched_later_without_the_usual_reminder() {
+        let setup = Setup::with(train_routes_server().await).await;
+        setup.prim_answers(200, false, 2).await;
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(timed_list(100, &[("j1", "15:45")])),
+            )
+            .mount(&setup.server)
+            .await;
+        setup.firebase_answers_to("leave", 200, 0).await;
+        usual(&setup, Direction::Inbound, 16, 45);
+        // Leaving at 18:30 in Paris on Tuesday, set from the app.
+        setup.store.update(|profile| {
+            profile.late = Some(crate::profile::LateDay {
+                day: jiff::civil::date(2026, 11, 3),
+                leave: Some(jiff::civil::time(18, 30, 0, 0)),
+            });
+        });
+        let mut service = setup.service();
+        assert_eq!(service.poll(tuesday("15:16")).await, Poll::Sent(0));
+        // Watched until 19:30 in Paris.
+        assert_eq!(service.poll(tuesday("18:28")).await, Poll::Sent(0));
+        assert_eq!(service.poll(tuesday("18:30")).await, Poll::Idle);
     }
 
     #[tokio::test]

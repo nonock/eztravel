@@ -27,7 +27,7 @@ use crate::history::History;
 use crate::journal::Journal;
 use crate::leaving::Refusal;
 use crate::line_alerts::{self, LineAlerts};
-use crate::profile::{Store, UsualTrains};
+use crate::profile::{LateDay, Store, UsualTrains};
 use crate::school::SchoolHolidays;
 use crate::watch::{Snapshot, View};
 use jiff::ToSpan;
@@ -48,6 +48,14 @@ struct SettingsView {
 enum Way {
     Outbound,
     Inbound,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Late {
+    /// When the way home leaves today. Required, but null puts it as usual.
+    #[serde(deserialize_with = "Option::deserialize")]
+    leave: Option<Time>,
 }
 
 #[derive(Deserialize)]
@@ -205,6 +213,7 @@ pub fn router(sources: Sources, key: String) -> Router {
         .route("/departures", get(next_departures))
         .route("/departure", put(pick_departure))
         .route("/usual-train", put(set_usual_train))
+        .route("/late", put(set_late))
         .route("/alerts", get(alerts))
         .route("/trains", get(ended_trains))
         .route("/calendar", get(month).put(put_day))
@@ -258,15 +267,17 @@ async fn status_now(
     State(school): State<Arc<SchoolHolidays>>,
 ) -> Json<View> {
     let now = Timestamp::now();
+    let today = schedule.today(now);
     // From the days as set now, not as of the last poll: the app reads this right after a change.
-    let next = schedule.next_window(now, &store.profile());
-    let school_holiday = school.during(schedule.today(now));
-    Json(
-        status
-            .lock()
-            .expect("no thread panics while holding the status")
-            .view(now, next, school_holiday),
-    )
+    let profile = store.profile();
+    let next = schedule.next_window(now, &profile);
+    let school_holiday = school.during(today);
+    let mut view = status
+        .lock()
+        .expect("no thread panics while holding the status")
+        .view(now, next, school_holiday);
+    view.late = profile.late(today, &schedule.windows);
+    Json(view)
 }
 
 /// How many entries `GET /history` gives, newest first.
@@ -316,15 +327,17 @@ async fn ended_trains(State(journal): State<Arc<Journal>>) -> Json<EndedTrains> 
 async fn next_departures(
     State(departures): State<Arc<NextDepartures>>,
     State(store): State<Arc<Store>>,
+    State(schedule): State<Arc<Schedule>>,
     State(line_alerts): State<Arc<LineAlerts>>,
 ) -> Json<departures::View> {
+    let now = Timestamp::now();
     let profile = store.profile();
     Json(
         departures
             .view(
-                Timestamp::now(),
+                now,
                 profile.pick.as_ref(),
-                &profile.usual,
+                &profile.usual_on(schedule.today(now), &schedule.windows),
                 &line_alerts,
             )
             .await,
@@ -365,11 +378,13 @@ async fn pick(
         store.update(|profile| profile.pick = None);
         return StatusCode::NO_CONTENT.into_response();
     };
-    let calendar = store.profile().calendar(&schedule.calendar);
+    let profile = store.profile();
+    let calendar = profile.calendar(&schedule.calendar);
+    let windows = profile.windows(&schedule.windows, schedule.today(now));
     let picked = if journey.is_empty() || journey.len() > MAX_JOURNEY_LENGTH {
         Err(Refusal::Unknown)
     } else {
-        departures.pick(&journey, now, &calendar).await
+        departures.pick(&journey, now, &calendar, &windows).await
     };
     match picked {
         Ok(pick) => {
@@ -380,6 +395,40 @@ async fn pick(
             (StatusCode::UNPROCESSABLE_ENTITY, Json(Refused { refused })).into_response()
         }
     }
+}
+
+/// Sets today's way home, an office day: late, leaving at a time from the
+/// start of its window, or as usual with none, whatever the rules.
+async fn set_late(
+    State(store): State<Arc<Store>>,
+    State(schedule): State<Arc<Schedule>>,
+    Json(late): Json<Late>,
+) -> Response {
+    let today = schedule.today(Timestamp::now());
+    let refused = if !store
+        .profile()
+        .calendar(&schedule.calendar)
+        .is_office_day(today)
+    {
+        Some(Refusal::NotOfficeDay)
+    } else if late
+        .leave
+        .is_some_and(|leave| leave < schedule.windows.inbound.start)
+    {
+        Some(Refusal::OutsideWindow)
+    } else {
+        None
+    };
+    if let Some(refused) = refused {
+        return (StatusCode::UNPROCESSABLE_ENTITY, Json(Refused { refused })).into_response();
+    }
+    store.update(|profile| {
+        profile.late = Some(LateDay {
+            day: today,
+            leave: late.leave,
+        });
+    });
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// Keeps the usual train of a way, if it can be reminded of; none clears it.
@@ -588,6 +637,7 @@ mod tests {
                 "/usual-train",
                 Some(r#"{"direction":"outbound","time":null}"#),
             ),
+            (Method::PUT, "/late", Some(r#"{"leave":null}"#)),
         ] {
             for authorization in [
                 None,
@@ -772,7 +822,7 @@ mod tests {
         assert_eq!(
             body,
             format!(
-                r#"{{"watching":null,"checked_at":null,"next":"{next}","outage":null,"lines":[],"planned":[],"school_holiday":null,"school_holiday_first":null,"school_holiday_last":null}}"#
+                r#"{{"watching":null,"checked_at":null,"next":"{next}","outage":null,"lines":[],"planned":[],"school_holiday":null,"school_holiday_first":null,"school_holiday_last":null,"late":null}}"#
             )
         );
         // A poll loop silent for an hour has stopped.
@@ -782,6 +832,72 @@ mod tests {
         let status: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(status["outage"]["cause"], "server");
         assert_eq!(status["outage"]["since"], an_hour_ago.to_string());
+    }
+
+    #[tokio::test]
+    async fn a_late_way_home_is_set_for_today_and_shown_in_the_status() {
+        let api = Api::new();
+        let today = Config::parse(include_str!("../config.example.toml"))
+            .unwrap()
+            .schedule()
+            .today(Timestamp::now());
+        api.store.update(|profile| {
+            profile.days.insert(today, Day::Office);
+        });
+        let set = |body: &'static str| api.authorized(Method::PUT, "/late", Some(body));
+        let late = || async {
+            let (_, body) = api.authorized(Method::GET, "/status", None).await;
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()["late"].clone()
+        };
+        assert_eq!(late().await, serde_json::Value::Null);
+        assert_eq!(set(r#"{"leave":"22:00"}"#).await.0, StatusCode::NO_CONTENT);
+        let path = format!(
+            "{}/../fixtures/api/status-late.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(late().await, fixture["late"]);
+        // As usual, whatever the rules.
+        assert_eq!(set(r#"{"leave":null}"#).await.0, StatusCode::NO_CONTENT);
+        assert_eq!(late().await, serde_json::Value::Null);
+        assert_eq!(
+            api.store.profile().late,
+            Some(crate::profile::LateDay {
+                day: today,
+                leave: None
+            })
+        );
+        // Before the way home is watched: not later.
+        assert_eq!(
+            set(r#"{"leave":"15:00"}"#).await,
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                r#"{"refused":"outside_window"}"#.into()
+            )
+        );
+        for body in [
+            r#"{}"#,
+            r#"{"leave":"25:00"}"#,
+            r#"{"leave":null,"other":1}"#,
+        ] {
+            assert_eq!(
+                set(body).await.0,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{body}"
+            );
+        }
+        // Nothing is watched on a day off.
+        api.store.update(|profile| {
+            profile.days.insert(today, Day::Away);
+        });
+        assert_eq!(
+            set(r#"{"leave":"22:00"}"#).await,
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                r#"{"refused":"not_office_day"}"#.into()
+            )
+        );
     }
 
     #[tokio::test]

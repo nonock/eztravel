@@ -94,7 +94,7 @@ pub fn check_pick(
     if !calendar.is_office_day(local.date()) {
         return Err(Refusal::NotOfficeDay);
     }
-    let window = windows.on(local.date()).of(direction);
+    let window = windows.of(direction);
     if local.time() < window.start || local.time() >= window.end {
         return Err(Refusal::OutsideWindow);
     }
@@ -513,7 +513,7 @@ mod tests {
                 Direction::Inbound,
                 &config.time_zone(),
                 calendar,
-                &late,
+                &late.on(date(2026, 11, 3)),
             )
         };
         assert_eq!(late_check("2026-11-03T17:59:00Z"), Ok(()));

@@ -1,0 +1,16 @@
+{
+  "watching": null,
+  "checked_at": "2026-11-03T07:14:00Z",
+  "next": "2026-11-03T15:00:00Z",
+  "outage": null,
+  "lines": [],
+  "planned": [],
+  "school_holiday": null,
+  "school_holiday_first": null,
+  "school_holiday_last": null,
+  "late": {
+    "leave": "22:00:00",
+    "until": "23:00:00",
+    "set": true
+  }
+}

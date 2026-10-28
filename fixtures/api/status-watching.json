@@ -10,5 +10,6 @@
   "planned": ["Ligne L : travaux entre Nanterre et Cergy"],
   "school_holiday": "Vacances d'automne",
   "school_holiday_first": "2026-10-31",
-  "school_holiday_last": "2026-11-08"
+  "school_holiday_last": "2026-11-08",
+  "late": null
 }
