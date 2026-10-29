@@ -110,24 +110,28 @@ impl Prim {
             .into_iter()
             // Navitia gives more than the window: what is beyond is left out.
             .filter(|call| from <= call.time.departure && call.time.departure < until)
-            .filter(|call| {
-                arriving.arrivals.iter().any(|arrival| {
-                    arrival.journey() == call.journey()
-                        && arrival.time.arrival > call.time.departure
-                })
-            })
-            .map(|call| {
+            .filter_map(|call| {
+                let arrival = arriving
+                    .arrivals
+                    .iter()
+                    .find(|arrival| {
+                        arrival.journey() == call.journey()
+                            && arrival.time.arrival > call.time.departure
+                    })?
+                    .time
+                    .arrival;
                 // "Gare Centrale (Paris)": its town is left out, as live lists do.
                 let destination = call.informations.direction;
                 let destination = match destination.rsplit_once(" (") {
                     Some((name, town)) if town.ends_with(')') => name.to_string(),
                     _ => destination,
                 };
-                Timetabled {
+                Some(Timetabled {
                     aimed: call.time.departure,
+                    arrival,
                     mission: call.informations.headsign,
                     destination,
-                }
+                })
             })
             .collect())
     }
@@ -163,10 +167,12 @@ impl Prim {
     }
 }
 
-/// A train of the timetable, at the stop it leaves from: local time.
+/// A train of the timetable, at the stop it leaves from, and its arrival at
+/// the alight stop: local times.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Timetabled {
     pub aimed: DateTime,
+    pub arrival: DateTime,
     pub mission: Option<String>,
     pub destination: String,
 }
@@ -251,6 +257,7 @@ struct RouteId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{timetable_arrivals, timetable_departures};
     use jiff::civil::date;
     use wiremock::matchers::{header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -457,32 +464,6 @@ mod tests {
         server
     }
 
-    fn board(trains: &[(&str, &str, &str, &str)]) -> serde_json::Value {
-        let departures: Vec<_> = trains
-            .iter()
-            .map(|(journey, time, mission, direction)| serde_json::json!({
-                "display_informations": { "headsign": mission, "direction": direction },
-                "stop_date_time": { "departure_date_time": time },
-                "links": [{ "type": "route", "id": "route:A" }, { "type": "vehicle_journey", "id": journey }]
-            }))
-            .collect();
-        serde_json::json!({ "departures": departures })
-    }
-
-    fn arriving(trains: &[(&str, &str)]) -> serde_json::Value {
-        let arrivals: Vec<_> = trains
-            .iter()
-            .map(|(journey, time)| {
-                serde_json::json!({
-                    "display_informations": { "headsign": "X", "direction": "Y" },
-                    "stop_date_time": { "arrival_date_time": time },
-                    "links": [{ "type": "vehicle_journey", "id": journey }]
-                })
-            })
-            .collect();
-        serde_json::json!({ "arrivals": arrivals })
-    }
-
     #[tokio::test]
     async fn the_timetable_keeps_the_trains_that_call_at_the_alight_stop_after() {
         let server = MockServer::start().await;
@@ -490,7 +471,7 @@ mod tests {
             .and(path("/v2/navitia/stop_areas/stop_area%3AIDFM%3A71100/lines/line%3AIDFM%3AC01740/departures"))
             .and(query_param("data_freshness", "base_schedule"))
             .and(query_param("from_datetime", "20261103T064500"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(board(&[
+            .respond_with(ResponseTemplate::new(200).set_body_json(timetable_departures(&[
                 ("vj:a", "20261103T075240", "PALO", "Gare Centrale (Paris)"),
                 // Another branch: it never reaches the alight stop.
                 ("vj:b", "20261103T080000", "POLA", "Les Tilleuls"),
@@ -505,7 +486,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/v2/navitia/stop_areas/stop_area%3AIDFM%3A71370/lines/line%3AIDFM%3AC01740/arrivals"))
             .and(query_param("data_freshness", "base_schedule"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(arriving(&[
+            .respond_with(ResponseTemplate::new(200).set_body_json(timetable_arrivals(&[
                 ("vj:a", "20261103T080400"),
                 ("vj:c", "20261103T082200"),
                 ("vj:d", "20261103T083200"),
@@ -534,11 +515,13 @@ mod tests {
             [
                 Timetabled {
                     aimed: date(2026, 11, 3).at(7, 52, 40, 0),
+                    arrival: date(2026, 11, 3).at(8, 4, 0, 0),
                     mission: Some("PALO".into()),
                     destination: "Gare Centrale".into(),
                 },
                 Timetabled {
                     aimed: date(2026, 11, 3).at(8, 10, 0, 0),
+                    arrival: date(2026, 11, 3).at(8, 22, 0, 0),
                     mission: Some("PILO".into()),
                     destination: "Gare Centrale".into(),
                 },
@@ -574,7 +557,7 @@ mod tests {
         Mock::given(path(
             "/v2/navitia/stop_areas/stop_area%3AIDFM%3A71100/lines/line%3AIDFM%3AC01740/departures",
         ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(board(&[])))
+        .respond_with(ResponseTemplate::new(200).set_body_json(timetable_departures(&[])))
         .mount(&server)
         .await;
         let arrivals =

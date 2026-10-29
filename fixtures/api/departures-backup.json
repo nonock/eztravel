@@ -9,6 +9,7 @@
       "to": "Gare Centrale",
       "from_position": { "lat": 48.947, "lon": 2.248 },
       "reach": 12,
+      "timetable": false,
       "departures": [
         {
           "journey": "j1",
@@ -56,6 +57,7 @@
       "to": "Mairie",
       "from_position": { "lat": 48.875, "lon": 2.326 },
       "reach": null,
+      "timetable": false,
       "departures": [
         {
           "journey": "m1",
@@ -103,6 +105,7 @@
           "to": "Mairie",
           "from_position": { "lat": 48.874, "lon": 2.327 },
           "reach": null,
+          "timetable": false,
           "departures": [
             {
               "journey": "y1",

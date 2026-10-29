@@ -1,0 +1,59 @@
+{
+  "direction": "outbound",
+  "legs": [
+    {
+      "line": "L",
+      "mode": "train",
+      "color": "#7B61C9",
+      "from": "Les Aubépines",
+      "to": "Gare Centrale",
+      "from_position": {
+        "lat": 48.947,
+        "lon": 2.248
+      },
+      "reach": 12,
+      "departures": [
+        {
+          "journey": "timetable:C01740:2026-11-03T06:52:40Z",
+          "aimed": "2026-11-03T06:52:40Z",
+          "expected": "2026-11-03T06:52:40Z",
+          "arrival": "2026-11-03T07:04:00Z",
+          "mission": "PALO",
+          "destination": "Gare Centrale",
+          "platform": null,
+          "status": "scheduled",
+          "picked": false,
+          "usual": false
+        },
+        {
+          "journey": "timetable:C01740:2026-11-03T07:10:00Z",
+          "aimed": "2026-11-03T07:10:00Z",
+          "expected": "2026-11-03T07:10:00Z",
+          "arrival": "2026-11-03T07:22:00Z",
+          "mission": "PILO",
+          "destination": "Gare Centrale",
+          "platform": null,
+          "status": "scheduled",
+          "picked": false,
+          "usual": false
+        }
+      ],
+      "timetable": true
+    },
+    {
+      "line": "X",
+      "mode": "metro",
+      "color": "#E07A1F",
+      "from": "Gare Centrale",
+      "to": "Mairie",
+      "from_position": {
+        "lat": 48.875,
+        "lon": 2.326
+      },
+      "reach": null,
+      "departures": null,
+      "timetable": false
+    }
+  ],
+  "backups": []
+}

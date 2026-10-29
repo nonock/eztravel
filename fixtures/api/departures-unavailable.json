@@ -9,6 +9,7 @@
       "to": null,
       "from_position": null,
       "reach": null,
+      "timetable": false,
       "departures": null
     },
     {
@@ -19,6 +20,7 @@
       "to": "Les Aubépines",
       "from_position": { "lat": 48.876, "lon": 2.325 },
       "reach": 25,
+      "timetable": false,
       "departures": []
     }
   ],
