@@ -6,7 +6,7 @@
 //! since an empty answer would read as "the disruption is over". Failures
 //! are counted in `watch`, which tells the phone when they last.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -15,11 +15,12 @@ use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::alerts::{Commute, Notification, State, WatchedLeg, decide, eve};
+use crate::alerts::{Commute, Notification, State, WatchedLeg, decide, doubtful, eve};
 use crate::api;
 use crate::calendar::{Calendar, Direction, Phase, phase, watched_direction};
 use crate::config::Config;
 use crate::departures::{NextDepartures, leg_stops, monitoring_ref, one_way};
+use crate::disruptions::Disruption;
 use crate::history::{self, Entry, History};
 use crate::journal::Journal;
 use crate::leaving::{Aim, Leaving, remind, reminded_leg};
@@ -61,6 +62,8 @@ pub struct Service {
     line_alerts: Arc<LineAlerts>,
     routes: BTreeMap<String, Vec<Route>>,
     routes_day: Option<Date>,
+    /// The records noted as doubtful, with how they bear: each once.
+    doubtful: BTreeSet<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -116,6 +119,7 @@ impl Service {
             line_alerts: Arc::new(line_alerts),
             routes,
             routes_day: None,
+            doubtful: BTreeSet::new(),
             config,
             prim,
             sender,
@@ -312,6 +316,7 @@ impl Service {
             &self.commute(),
             &disruptions,
         );
+        self.note_doubtful(direction, local, &disruptions);
         // Missing trains must not hold back what the lines say.
         let seen = self.read_trains(direction, now).await;
         let mut trains = self.trains.clone();
@@ -540,6 +545,26 @@ impl Service {
             (None, None) => return vec![],
         };
         remind(leaving, key, now, seen, reach, aim)
+    }
+
+    /// Logs once each current record of the way's lines that no leg is sure
+    /// of, to tell later why an alert came, or none.
+    fn note_doubtful(&mut self, direction: Direction, local: DateTime, disruptions: &[Disruption]) {
+        for (record, bearing) in doubtful(direction, &self.commute(), disruptions, local) {
+            if self.doubtful.insert(format!("{} {bearing:?}", record.id)) {
+                let sections: Vec<String> = record
+                    .sections
+                    .iter()
+                    .map(|section| format!("{} -> {}", section.from.name, section.to.name))
+                    .collect();
+                eprintln!(
+                    "record {} judged {bearing:?} for the way {direction:?}: {} [{}]",
+                    record.id,
+                    record.title,
+                    sections.join(", ")
+                );
+            }
+        }
     }
 
     /// When the window of `direction` ends on the day of `local`.
@@ -2042,6 +2067,29 @@ mod tests {
         let view = setup.service().line_alerts().view(at(MORNING)).await;
         let lines = view.lines.unwrap();
         assert!(!lines[0].alerts[0].on_way, "{lines:?}");
+    }
+
+    #[tokio::test]
+    async fn a_record_off_the_way_is_noted_once() {
+        let setup = Setup::with(routes_server(500, 1).await).await;
+        let saved = r#"{"C01740":[{"stops":[{"stop_point":"sp:1","stop_area":"stop_area:IDFM:71100","name":"1"},{"stop_point":"sp:2","stop_area":"stop_area:IDFM:71370","name":"2"},{"stop_point":"sp:3","stop_area":"stop_area:IDFM:71390","name":"3"}]}]}"#;
+        std::fs::write(setup.dir.path().join("routes.json"), saved).unwrap();
+        let mut beyond = feed(true);
+        beyond["disruptions"][0]["impactedSections"] = serde_json::json!([{
+            "lineId": "line:IDFM:C01740",
+            "from": { "type": "stop_area", "id": "stop_area:IDFM:71390", "name": "3" },
+            "to": { "type": "stop_area", "id": "stop_area:IDFM:71395", "name": "4" }
+        }]);
+        Mock::given(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(beyond))
+            .expect(2)
+            .mount(&setup.server)
+            .await;
+        let mut service = setup.service();
+        // Off the way: no alert, but noted, once.
+        assert_eq!(service.poll(at(MORNING)).await, Poll::Sent(0));
+        assert_eq!(service.poll(at(TWO_MINUTES_LATER)).await, Poll::Sent(0));
+        assert_eq!(service.doubtful.iter().collect::<Vec<_>>(), ["d1 Off"]);
     }
 
     #[tokio::test]
