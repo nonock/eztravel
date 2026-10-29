@@ -83,6 +83,8 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>, val 
         val severity: PushMessage.Severity? = null,
         /** Where [from] is, once the backend knows. */
         val fromPosition: Position? = null,
+        /** Its departures are its timetable's: its stops cannot be read live. */
+        val timetable: Boolean = false,
     ) {
         /** When to leave for [departure], from its expected time; null without a time to the platform. */
         fun leaveAt(departure: Departure): Instant? = reach?.let { departure.expected.minus(it) }
@@ -169,6 +171,7 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>, val 
             if (json.isNull("reach")) null else Duration.ofMinutes(json.getLong("reach")),
             Status.severity(json),
             json.optJSONObject("from_position")?.let { Position(it.getDouble("lat"), it.getDouble("lon")) },
+            json.optBoolean("timetable"),
         )
 
         private fun departure(json: JSONObject) = Departure(
