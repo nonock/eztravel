@@ -233,6 +233,35 @@ pub fn decide(
     notifications
 }
 
+/// The current records of the way's lines that no leg of the way is sure of,
+/// with how they bear on it at most: off it, at its edge, or on a way that may
+/// not be its own. Logged, to tell later why an alert came, or none.
+pub fn doubtful<'a>(
+    direction: Direction,
+    commute: &Commute,
+    disruptions: &'a [Disruption],
+    now: DateTime,
+) -> Vec<(&'a Disruption, Bearing)> {
+    let legs = match direction {
+        Direction::Outbound => &commute.outbound,
+        Direction::Inbound => &commute.inbound,
+    };
+    disruptions
+        .iter()
+        .filter(|disruption| {
+            disruption.is_active(now) && disruption.severity != Severity::Information
+        })
+        .filter_map(|disruption| {
+            let most = legs
+                .iter()
+                .filter(|watched| disruption.lines.contains(&watched.leg.line))
+                .map(|watched| bearing(disruption, &watched.leg, &watched.routes))
+                .max()?;
+            (most != Bearing::On).then_some((disruption, most))
+        })
+        .collect()
+}
+
 /// The evening before `tomorrow`, an office day: the records more than
 /// information that touch a leg during one of its windows, each once.
 pub fn eve(
@@ -418,6 +447,85 @@ mod tests {
     }
 
     const MORNING: Option<Direction> = Some(Direction::Outbound);
+
+    #[test]
+    fn the_records_no_leg_of_the_way_is_sure_of_are_doubtful() {
+        let stop = |area: &str| RouteStop {
+            stop_point: format!("sp:{area}"),
+            stop_area: area.into(),
+            name: area.into(),
+            coord: None,
+        };
+        // The train leg rides from A to B, on a route going on to C.
+        let placed = WatchedLeg {
+            routes: vec![Route {
+                stops: vec![stop("sa:A"), stop("sa:B"), stop("sa:C")],
+            }],
+            ..leg(TRAIN)
+        };
+        let commute = Commute {
+            outbound: vec![placed, leg(METRO)],
+            inbound: vec![],
+        };
+        let section = |from: &str, to: &str| Section {
+            line: TRAIN.into(),
+            from: Place {
+                id: from.into(),
+                name: from.into(),
+            },
+            to: Place {
+                id: to.into(),
+                name: to.into(),
+            },
+        };
+        let on = Disruption {
+            sections: vec![section("sa:A", "sa:B")],
+            ..incident("on", Severity::Disrupted)
+        };
+        let beyond = Disruption {
+            sections: vec![section("sa:C", "sa:D")],
+            ..incident("beyond", Severity::Disrupted)
+        };
+        let edge = Disruption {
+            sections: vec![section("sa:B", "sa:C")],
+            ..incident("edge", Severity::Disrupted)
+        };
+        let information = Disruption {
+            sections: vec![section("sa:C", "sa:D")],
+            ..incident("information", Severity::Information)
+        };
+        // Unplaced, the metro's records are on the way.
+        let metro = disruption(
+            "metro",
+            METRO,
+            Severity::Disrupted,
+            at(3, 7, 0),
+            at(3, 10, 0),
+        );
+        let other = disruption(
+            "other",
+            OTHER,
+            Severity::Disrupted,
+            at(3, 7, 0),
+            at(3, 10, 0),
+        );
+        let over = Disruption {
+            sections: vec![section("sa:C", "sa:D")],
+            ..disruption("over", TRAIN, Severity::Disrupted, at(3, 5, 0), at(3, 6, 0))
+        };
+        let records = [on, beyond, edge, information, metro, other, over];
+        let found: Vec<(&str, Bearing)> =
+            doubtful(Direction::Outbound, &commute, &records, at(3, 7, 30))
+                .into_iter()
+                .map(|(record, bearing)| (record.id.as_str(), bearing))
+                .collect();
+        assert_eq!(found, [("beyond", Bearing::Off), ("edge", Bearing::Edge)]);
+        // No leg the other way.
+        assert_eq!(
+            doubtful(Direction::Inbound, &commute, &records, at(3, 7, 30)),
+            []
+        );
+    }
     const EVENING: Option<Direction> = Some(Direction::Inbound);
 
     fn started(line: &str, severity: Severity, disruptions: &[Disruption]) -> Notification {
