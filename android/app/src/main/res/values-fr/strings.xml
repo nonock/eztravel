@@ -117,6 +117,8 @@
     <string name="departures_refused_unknown">Ce train ne peut plus être choisi.</string>
     <string name="departures_refused_unavailable">Les départs ne peuvent pas être lus pour l’instant : réessayez dans un moment.</string>
     <string name="departures_pick_failed">Le rappel n’a pas pu être enregistré.</string>
+    <string name="departures_timetable">Horaire théorique : le temps réel ne répond pas.</string>
+    <string name="departures_timetable_short">Horaire théorique</string>
     <string name="cancel">Annuler</string>
     <string name="back">Retour</string>
     <string name="nav_trip">Trajet</string>

@@ -195,6 +195,16 @@ class NextDeparturesTest : ScreenTesting() {
     }
 
     @Test
+    fun aRideFromItsTimetableSaysSoAndOffersNoPick() {
+        val timetabled = morning.copy(legs = listOf(morning.legs[0].copy(timetable = true), morning.legs[1]))
+        show(FakeBackend(departures = timetabled))
+        waitFor(text(R.string.departures_timetable))
+        // The train to catch says so too.
+        waitFor(hero(R.string.departures_hero_next) and hasText(text(R.string.departures_timetable_short)))
+        compose.onNode(bell("07:07:00")).assertDoesNotExist()
+    }
+
+    @Test
     fun aTrainIsPickedForTheReminderAndDropped() {
         val backend = FakeBackend(departures = morning)
         show(backend)

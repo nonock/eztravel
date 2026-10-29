@@ -50,6 +50,18 @@ class DeparturesTest {
     }
 
     @Test
+    fun readsARideFromItsTimetable() {
+        val (train, metro) = Departures.parse(fixture("departures-timetable")).legs
+        assertEquals(true, train.timetable)
+        assertEquals(listOf(at("06:52:40"), at("07:10:00")), train.departures!!.map { it.expected })
+        assertEquals(Departures.State.ON_TIME, train.departures!![0].state)
+        assertEquals(false, metro.timetable)
+        assertEquals(null, metro.departures)
+        // From a backend that does not say.
+        assertEquals(false, Departures.parse(fixture("departures")).legs[0].timetable)
+    }
+
+    @Test
     fun readsLegsThatCannotBeShown() {
         val departures = Departures.parse(fixture("departures-unavailable"))
         assertEquals(Direction.INBOUND, departures.direction)

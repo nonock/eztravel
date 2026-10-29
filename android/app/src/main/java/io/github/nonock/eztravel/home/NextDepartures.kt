@@ -139,7 +139,8 @@ fun NextDepartures(
                 val reminded = current.value.reminded
                 // The ride nearest the phone first: at the station of the second ride, it comes first.
                 for (leg in current.value.nearestFirst(here)) {
-                    if (leg === reminded) LegDepartures(leg, clock, refused, pick) else LegDepartures(leg, clock)
+                    // A ride from its timetable offers no pick: the reminder follows trains listed live.
+                    if (leg === reminded && !leg.timetable) LegDepartures(leg, clock, refused, pick) else LegDepartures(leg, clock)
                 }
                 for (backup in current.value.backups) BackupRoute(backup, clock)
             }
@@ -184,6 +185,14 @@ private fun NextTrainContent(featured: Departures.Featured, departure: Departure
                 ),
                 style = MaterialTheme.typography.labelLarge,
             )
+            if (featured.leg.timetable) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.departures_timetable_short),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             LineBadge(featured.leg.line, featured.leg.color)
@@ -310,6 +319,9 @@ private fun LegDepartures(leg: Departures.Leg, now: Instant, refused: Int? = nul
                         Text(words, color = color)
                     }
                 }
+            }
+            if (leg.timetable) {
+                Text(stringResource(R.string.departures_timetable), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
             }
             refused?.let {
                 Text(stringResource(it), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))

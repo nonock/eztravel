@@ -114,6 +114,8 @@
     <string name="departures_refused_unknown">This train can no longer be picked.</string>
     <string name="departures_refused_unavailable">The departures cannot be read just now: try again in a moment.</string>
     <string name="departures_pick_failed">The reminder could not be saved.</string>
+    <string name="departures_timetable">From the timetable: real time cannot be read.</string>
+    <string name="departures_timetable_short">Timetable</string>
     <string name="ok" translatable="false">OK</string>
     <string name="cancel">Cancel</string>
     <string name="back">Back</string>
