@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
 
-use jiff::civil::{Date, Time};
+use jiff::civil::{Date, DateTime, Time};
 use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use crate::calendar::{Calendar, Direction, WatchWindows};
 use crate::config::Config;
 use crate::leaving::{LATEST, Refusal, check_pick, reminded_leg};
 use crate::line_alerts::LineAlerts;
-use crate::prim::{Prim, PrimError};
+use crate::prim::{Prim, PrimError, Timetabled};
 use crate::profile::{Pick, UsualTrains};
 use crate::push::{self, LineLabel};
 use crate::relevance::{Coord, Leg, Route, RouteStop};
@@ -31,6 +31,10 @@ pub const SHOWN: usize = 5;
 const MAX_AGE: SignedDuration = SignedDuration::from_secs(60);
 /// A train due this long ago may still be at the platform.
 const GRACE: SignedDuration = SignedDuration::from_secs(60);
+/// A ride's timetable, read when its stops cannot be, is read again after this.
+const TIMETABLE_AGE: SignedDuration = SignedDuration::from_mins(30);
+/// How far ahead a ride's timetable is read.
+const TIMETABLE_SPAN: SignedDuration = SignedDuration::from_hours(4);
 /// Stops are no longer read on demand when fewer requests are left for the day:
 /// an app left open must not use up the daily quota.
 const RESERVE: u32 = 200;
@@ -286,7 +290,7 @@ pub fn select(
     now: Timestamp,
     reach: Option<u32>,
 ) -> Vec<Departure> {
-    let mut shown: Vec<Departure> = board
+    let shown: Vec<Departure> = board
         .iter()
         .filter(|visit| visit.line == line)
         .filter_map(|visit| {
@@ -313,6 +317,12 @@ pub fn select(
             })
         })
         .collect();
+    trim(shown, now, reach)
+}
+
+/// Soonest first; with `reach`, the minutes to the platform, those too soon to
+/// leave for first, then [`SHOWN`] more.
+fn trim(mut shown: Vec<Departure>, now: Timestamp, reach: Option<u32>) -> Vec<Departure> {
     shown.sort_by_key(|departure| departure.expected);
     let too_soon = reach.map_or(0, |reach| {
         let reach = SignedDuration::from_mins(i64::from(reach));
@@ -392,6 +402,8 @@ pub struct LegView {
     pub reach: Option<u32>,
     /// None when they cannot be read.
     pub departures: Option<Vec<Departure>>,
+    /// The departures are the timetable's: the stops could not be read live.
+    pub timetable: bool,
 }
 
 /// A place in decimal degrees.
@@ -428,6 +440,8 @@ pub struct NextDepartures {
 #[derive(Default)]
 struct Cache {
     stops: HashMap<String, (Timestamp, Vec<Visit>)>,
+    /// The timetables of train rides read in vain, by ride, and when read.
+    timetables: HashMap<String, (Timestamp, Vec<Timetabled>)>,
     /// Requests left on the UTC day of the last answer.
     quota: Option<(Date, u32)>,
 }
@@ -618,6 +632,13 @@ impl NextDepartures {
             None => None,
         };
         let (line, mode, color) = push::label(&leg.line, &self.lines);
+        // A train ride read in vain shows its timetable, if that can be read.
+        let timetabled = match (&departures, &stops) {
+            (None, Some(_)) if mode == "train" => self.timetabled(cache, leg, now).await,
+            _ => None,
+        };
+        let timetable = timetabled.is_some();
+        let departures = timetabled.or(departures);
         LegView {
             line,
             mode,
@@ -630,7 +651,74 @@ impl NextDepartures {
             to: stops.map(|(_, alight)| alight.name),
             reach: leg.reach,
             departures,
+            timetable,
         }
+    }
+
+    /// The departures of a train ride by its timetable, when its stops cannot be
+    /// read live: read at most every half hour, for the next few hours. Never
+    /// picked: the reminder follows trains as listed live.
+    async fn timetabled(
+        &self,
+        cache: &mut Cache,
+        leg: &Leg,
+        now: Timestamp,
+    ) -> Option<Vec<Departure>> {
+        let ride = format!("{} {} {}", leg.line, leg.board, leg.alight);
+        let fresh = cache
+            .timetables
+            .get(&ride)
+            .filter(|(read_at, _)| now.duration_since(*read_at) < TIMETABLE_AGE)
+            .map(|(_, trains)| trains.clone());
+        let trains = match fresh {
+            Some(trains) => trains,
+            None => {
+                let local = |at: Timestamp| at.to_zoned(self.time_zone.clone()).datetime();
+                let span = (local(now), local(now + TIMETABLE_SPAN));
+                let trains = self
+                    .prim
+                    .timetable(&leg.line, &leg.board, &leg.alight, span)
+                    .await
+                    .inspect_err(|error| {
+                        eprintln!(
+                            "the timetable of {} cannot be read either: {error:?}",
+                            leg.line
+                        );
+                    })
+                    .ok()?;
+                eprintln!(
+                    "departures of {} from the timetable: its stops cannot be read live",
+                    leg.line
+                );
+                cache.timetables.insert(ride, (now, trains.clone()));
+                trains
+            }
+        };
+        let at = |time: DateTime| {
+            time.to_zoned(self.time_zone.clone())
+                .expect("a day's local time is within range")
+                .timestamp()
+        };
+        let shown = trains
+            .into_iter()
+            .map(|train| {
+                let aimed = at(train.aimed);
+                Departure {
+                    journey: format!("timetable:{}:{aimed}", leg.line),
+                    aimed: Some(aimed),
+                    expected: aimed,
+                    arrival: Some(at(train.arrival)),
+                    mission: train.mission,
+                    destination: train.destination,
+                    platform: None,
+                    status: "scheduled",
+                    picked: false,
+                    usual: false,
+                }
+            })
+            .filter(|departure| departure.expected >= now - GRACE)
+            .collect();
+        Some(trim(shown, now, leg.reach))
     }
 
     /// Whether a usual train leaving at `time` on the way `direction` can be
@@ -1573,6 +1661,73 @@ outbound = \"07:30\"
             [None, None]
         );
         assert_eq!(view.legs[0].from.as_deref(), Some("Les Aubépines"));
+    }
+
+    #[tokio::test]
+    async fn a_train_ride_that_cannot_be_read_shows_its_timetable() {
+        let server = MockServer::start().await;
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        // Read once in half an hour, from 7:50 in Paris.
+        Mock::given(path(
+            "/v2/navitia/stop_areas/stop_area%3AIDFM%3A71100/lines/line%3AIDFM%3AC01740/departures",
+        ))
+        .and(query_param("from_datetime", "20261103T075000"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            crate::testing::timetable_departures(&[
+                ("vj:a", "20261103T075240", "PALO", "Gare Centrale (Paris)"),
+                ("vj:c", "20261103T081000", "PILO", "Gare Centrale"),
+            ]),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+        Mock::given(path(
+            "/v2/navitia/stop_areas/stop_area%3AIDFM%3A71370/lines/line%3AIDFM%3AC01740/arrivals",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(crate::testing::timetable_arrivals(&[
+                ("vj:a", "20261103T080400"),
+                ("vj:c", "20261103T082200"),
+            ])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+        let departures = next_departures(&server, EXAMPLE);
+        let view = departures
+            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
+            .await;
+        // The metro's next trains have no timetable: they stay unknown.
+        assert_eq!(
+            serde_json::to_value(&view).unwrap(),
+            fixture("departures-timetable")
+        );
+        // Twenty minutes on, the same timetable: the 7:52 has left.
+        let view = departures
+            .view(at("07:10:00"), None, &UsualTrains::default(), &quiet())
+            .await;
+        let journeys: Vec<_> = view.legs[0]
+            .departures
+            .iter()
+            .flatten()
+            .map(|departure| departure.journey.as_str())
+            .collect();
+        assert_eq!(journeys, ["timetable:C01740:2026-11-03T07:10:00Z"]);
+        // Never picked: the reminder follows trains as listed live.
+        assert_eq!(
+            departures
+                .pick(
+                    "timetable:C01740:2026-11-03T07:10:00Z",
+                    at("07:10:00"),
+                    &Config::parse(EXAMPLE).unwrap().calendar,
+                    &example_windows()
+                )
+                .await,
+            Err(Refusal::Unavailable)
+        );
     }
 
     #[tokio::test]
