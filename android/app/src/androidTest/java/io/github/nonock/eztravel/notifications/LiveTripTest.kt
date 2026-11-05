@@ -72,8 +72,10 @@ class LiveTripTest {
         assertEquals(leave.leave.toEpochMilli(), trip.`when`)
         assertTrue(trip.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
         assertTrue(trip.extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN))
-        // A Live Update, where Android has them.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) assertTrue(trip.hasPromotableCharacteristics())
+        // A Live Update, where Android has them: from Android 16's first quarterly release.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1) {
+            assertTrue(trip.hasPromotableCharacteristics())
+        }
         // Gone once the train has left.
         assertEquals(Duration.between(now, leave.until).toMillis(), trip.timeoutAfter)
         // In place of the train's own notification, with the time to leave set to go on the way.
