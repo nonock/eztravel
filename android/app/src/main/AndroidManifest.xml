@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- The watchdog's looks on time, once the user allows it in Android's settings: else up to an hour late. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- The trip from the reminder to leave, as a Live Update where Android has them. -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -33,6 +35,10 @@
         <!-- The evening notice's button, from the notification only. -->
         <receiver
             android:name=".notifications.TomorrowReceiver"
+            android:exported="false" />
+        <!-- The alarm at the time to leave, set by the app only. -->
+        <receiver
+            android:name=".notifications.LiveTripReceiver"
             android:exported="false" />
         <receiver
             android:name=".watchdog.WatchdogReceiver"

@@ -168,6 +168,23 @@ class NotificationTextTest {
     }
 
     @Test
+    fun onTheWayTheReminderSaysWhenTheTrainLeaves() {
+        val leave = Instant.parse("2026-11-03T06:40:00Z")
+        val late = PushMessage.Leave(palo.copy(expected = Instant.parse("2026-11-03T06:54:00Z")), leave, "2", live = true, until = null)
+        assertEquals(
+            NotificationText("Ligne L : départ à 07:54", "PALO de 07:52 vers Gare Centrale, voie 2. Annoncé avec 2 min de retard."),
+            late.onTheWay(french, paris),
+        )
+        assertEquals(
+            NotificationText("Line L: train leaves at ${clock(late.train.expected!!, Locale.ENGLISH)}", late.text(english, paris).body),
+            late.onTheWay(english, paris),
+        )
+        // Not followed live: by its timetable.
+        val scheduled = late.copy(train = palo.copy(expected = null))
+        assertEquals("Ligne L : départ à 07:52", scheduled.onTheWay(french, paris).title)
+    }
+
+    @Test
     fun aLateTrainSaysWhenItNowLeaves() {
         val late = PushMessage.TrainLate(palo.copy(expected = Instant.parse("2026-11-03T06:56:00Z")), null)
         assertEquals(
