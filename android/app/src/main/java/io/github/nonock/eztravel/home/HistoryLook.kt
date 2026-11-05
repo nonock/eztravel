@@ -32,6 +32,7 @@ fun HistoryEntry.look(): Look = when (this) {
         is PushMessage.Changed -> Look(Mark.Line(message.line), message.severity.tone())
         is PushMessage.Ended -> Look(Mark.Line(message.line), Tone.GOOD)
         is PushMessage.TrainCancelled -> Look(Mark.Line(message.train.line), Tone.BAD)
+        is PushMessage.TrainsCancelled -> Look(Mark.Line(message.trains[0].line), Tone.BAD)
         is PushMessage.TrainBack -> Look(Mark.Line(message.train.line), Tone.GOOD)
         is PushMessage.TrainLate -> Look(Mark.Line(message.train.line), Tone.WARN)
         is PushMessage.Leave -> Look(Mark.Reminder, Tone.INFO)
