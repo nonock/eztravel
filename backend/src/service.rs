@@ -23,6 +23,7 @@ use crate::departures::{NextDepartures, leg_stops, monitoring_ref, one_way};
 use crate::disruptions::Disruption;
 use crate::history::{self, Entry, History};
 use crate::journal::{Journal, Note};
+use crate::lateness::{AROUND, Lateness, judge};
 use crate::leaving::{Aim, Leaving, remind, reminded_leg};
 use crate::line_alerts::LineAlerts;
 use crate::prim::Prim;
@@ -31,7 +32,7 @@ use crate::profile::{Profile, Store};
 use crate::push::{self, PushError, Sender};
 use crate::relevance::{Leg, Route};
 use crate::school::{SCHOOL_URL, SchoolHolidays};
-use crate::trains::{Ended, Scheduled, Seen, Trains, follow, plan};
+use crate::trains::{Ended, Scheduled, Seen, Train, Trains, follow, plan};
 use crate::watch::{Cause, Health, LineStatus, Snapshot};
 
 const STATE_FILE: &str = "state.json";
@@ -45,6 +46,7 @@ const TRAINS_FILE: &str = "trains.json";
 const LEAVING_FILE: &str = "leaving.json";
 const JOURNAL_FILE: &str = "journal.jsonl";
 const NOTES_FILE: &str = "notes.jsonl";
+const LATENESS_FILE: &str = "lateness.json";
 /// How many notes are read back at start, to note no record twice.
 const NOTES_READ: usize = 1000;
 
@@ -57,6 +59,7 @@ pub struct Service {
     state: State,
     trains: Trains,
     leaving: Leaving,
+    lateness: Lateness,
     health: Health,
     status: Arc<Mutex<Snapshot>>,
     history: Arc<History>,
@@ -116,6 +119,7 @@ impl Service {
             state: load(&data_dir.join(STATE_FILE)).unwrap_or_default(),
             trains: load(&data_dir.join(TRAINS_FILE)).unwrap_or_default(),
             leaving: load(&data_dir.join(LEAVING_FILE)).unwrap_or_default(),
+            lateness: load(&data_dir.join(LATENESS_FILE)).unwrap_or_default(),
             health: load(&data_dir.join(HEALTH_FILE)).unwrap_or_default(),
             status: Arc::default(),
             history: Arc::new(History::open(&data_dir.join(HISTORY_FILE))),
@@ -344,11 +348,18 @@ impl Service {
         let seen = self.read_trains(direction, now).await;
         let mut trains = self.trains.clone();
         let mut leaving = self.leaving.clone();
+        let mut lateness = self.lateness.clone();
         if let Ok(seen) = &seen {
             let key = (local.date(), direction);
             self.read_timetable(&mut trains, key).await;
             let window = self.window_bounds(local, direction);
             notifications.extend(follow(&mut trains, key, window, now, seen, true));
+            let around: Vec<(String, Vec<Train>)> = seen
+                .iter()
+                .map(|seen| (seen.line.clone(), trains.around(&seen.line, now, AROUND)))
+                .collect();
+            let alerted: Vec<String> = next.lines().iter().map(|(line, _)| line.clone()).collect();
+            notifications.extend(judge(&mut lateness, key, &around, &alerted));
             notifications.extend(self.reminders(&mut leaving, key, now, local, seen, profile));
             // Last: when anything before it cannot be sent, the poll is tried again
             // whole, and checks are not back yet anyway.
@@ -366,6 +377,10 @@ impl Service {
         if leaving != self.leaving {
             self.leaving = leaving;
             save(&self.data_dir.join(LEAVING_FILE), &self.leaving);
+        }
+        if lateness != self.lateness {
+            self.lateness = lateness;
+            save(&self.data_dir.join(LATENESS_FILE), &self.lateness);
         }
         match seen {
             Ok(_) => {
@@ -1988,6 +2003,28 @@ mod tests {
         // Watched until 19:30 in Paris.
         assert_eq!(service.poll(tuesday("18:28")).await, Poll::Sent(0));
         assert_eq!(service.poll(tuesday("18:30")).await, Poll::Idle);
+    }
+
+    #[tokio::test]
+    async fn trains_late_with_no_record_are_told() {
+        let setup = Setup::with(train_routes_server().await).await;
+        setup.prim_answers(200, false, 1).await;
+        let mut list = timed_list(200, &[("j1", "05:50"), ("j2", "06:00"), ("j3", "06:10")]);
+        let visits =
+            list["Siri"]["ServiceDelivery"]["StopMonitoringDelivery"][0]["MonitoredStopVisit"]
+                .as_array_mut()
+                .unwrap();
+        for (visit, expected) in visits.iter_mut().zip(["05:57", "06:06", "06:20"]) {
+            let call = &mut visit["MonitoredVehicleJourney"]["MonitoredCall"];
+            call["ExpectedDepartureTime"] = serde_json::json!(format!("2026-11-03T{expected}:00Z"));
+            call["DepartureStatus"] = serde_json::json!("delayed");
+        }
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(list))
+            .mount(&setup.server)
+            .await;
+        setup.firebase_answers_to("line_late", 200, 1).await;
+        assert_eq!(setup.service().poll(tuesday("06:00")).await, Poll::Sent(1));
     }
 
     #[tokio::test]

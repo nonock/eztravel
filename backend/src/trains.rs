@@ -136,6 +136,22 @@ fn listed() -> bool {
 }
 
 impl Trains {
+    /// The trains of `line` listed, and not said cancelled, that leave from
+    /// `around` before `now` to `around` after, soonest first.
+    pub fn around(&self, line: &str, now: Timestamp, around: SignedDuration) -> Vec<Train> {
+        let mut trains: Vec<Train> = self
+            .followed
+            .iter()
+            .filter(|followed| {
+                followed.train.line == line && followed.listed && !followed.said_cancelled
+            })
+            .filter(|followed| followed.train.expected.duration_since(now).abs() <= around)
+            .map(|followed| followed.train.clone())
+            .collect();
+        trains.sort_by_key(|train| train.expected);
+        trains
+    }
+
     /// Whether the timetable of the window `key` is still to be read.
     pub fn needs_timetable(&self, key: (Date, Direction)) -> bool {
         self.timetable != Some(key)
@@ -741,6 +757,30 @@ mod tests {
             polls(&mut back, "06:54", 1, true, || vec![j1("onTime")]),
             []
         );
+    }
+
+    #[test]
+    fn the_trains_around_now_leave_up_to_half_an_hour_before_or_after() {
+        let mut trains = Trains::default();
+        let board = || {
+            vec![
+                visit("j1", "06:00", "06:08", "delayed", 200),
+                // Cancelled: it does not run late.
+                visit("j2", "06:10", "06:10", "cancelled", 200),
+                visit("j3", "06:40", "06:46", "delayed", 200),
+                // Beyond half an hour from now.
+                visit("j4", "07:00", "07:00", "onTime", 200),
+            ]
+        };
+        polls(&mut trains, "05:50", 1, true, board);
+        let half_an_hour = SignedDuration::from_mins(30);
+        let around: Vec<Timestamp> = trains
+            .around("C01740", at("06:20"), half_an_hour)
+            .iter()
+            .map(|train| train.aimed)
+            .collect();
+        assert_eq!(around, [at("06:00"), at("06:40")]);
+        assert_eq!(trains.around("C09999", at("06:20"), half_an_hour), []);
     }
 
     #[test]
