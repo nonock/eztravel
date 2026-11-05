@@ -94,6 +94,7 @@ pub fn records(notification: &Notification) -> Vec<Record> {
         | Notification::Outage
         | Notification::Recovered
         | Notification::TrainCancelled { .. }
+        | Notification::TrainsCancelled { .. }
         | Notification::TrainBack { .. }
         | Notification::Leave { .. }
         | Notification::Late { .. } => vec![],

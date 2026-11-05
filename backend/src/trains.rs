@@ -261,9 +261,12 @@ pub fn follow(
                 if followed.notified && !said_cancelled {
                     followed.notified = false;
                     followed.came_back = true;
-                    notifications.push(Notification::TrainBack {
-                        train: followed.train.clone(),
-                    });
+                    // Once it should have left, too late to tell.
+                    if now < expected {
+                        notifications.push(Notification::TrainBack {
+                            train: followed.train.clone(),
+                        });
+                    }
                 }
                 continue;
             }
@@ -311,7 +314,8 @@ pub fn follow(
         {
             followed.missing += 1;
         }
-        if !notify || followed.notified {
+        // Once it should have left, too late to tell.
+        if !notify || followed.notified || now >= followed.train.expected {
             continue;
         }
         let why = if followed.said_cancelled {
@@ -341,7 +345,34 @@ pub fn follow(
             .into_iter()
             .filter_map(|followed| followed.end(key)),
     );
-    notifications
+    together(&notifications)
+}
+
+/// Several trains of a line cancelled in one poll, as when the window opens
+/// on trains cancelled early, are told in one notification.
+fn together(notifications: &[Notification]) -> Vec<Notification> {
+    let cancelled = |notification: &Notification| match notification {
+        Notification::TrainCancelled { train, .. } => Some(train.clone()),
+        _ => None,
+    };
+    let mut told = vec![];
+    for notification in notifications {
+        let Some(train) = cancelled(notification) else {
+            told.push(notification.clone());
+            continue;
+        };
+        let trains: Vec<Train> = notifications
+            .iter()
+            .filter_map(cancelled)
+            .filter(|other| other.line == train.line)
+            .collect();
+        if trains.len() == 1 {
+            told.push(notification.clone());
+        } else if trains[0] == train {
+            told.push(Notification::TrainsCancelled { trains });
+        }
+    }
+    told
 }
 
 #[cfg(test)]
@@ -663,6 +694,52 @@ mod tests {
                     ..late
                 }
             }]
+        );
+    }
+
+    #[test]
+    fn trains_cancelled_early_are_told_together_when_the_window_opens() {
+        let mut trains = Trains::default();
+        let board = || {
+            vec![
+                visit("j1", "06:52", "06:52", "cancelled", 200),
+                visit("j2", "07:02", "07:02", "cancelled", 200),
+                visit("j3", "07:10", "07:10", "onTime", 200),
+            ]
+        };
+        assert_eq!(polls(&mut trains, "05:30", 1, false, board), []);
+        assert_eq!(
+            polls(&mut trains, "05:45", 1, true, board),
+            [Notification::TrainsCancelled {
+                trains: vec![train("06:52"), train("07:02")]
+            }]
+        );
+        // One alone is told alone.
+        let mut alone = Trains::default();
+        assert_eq!(
+            polls(&mut alone, "05:45", 1, true, || vec![j1("cancelled")]),
+            cancelled(Why::Announced)
+        );
+    }
+
+    #[test]
+    fn a_train_gone_by_its_time_is_said_neither_cancelled_nor_back() {
+        let mut trains = Trains::default();
+        polls(&mut trains, "06:40", 1, true, || vec![j1("onTime")]);
+        // Said cancelled once it should have left: too late to tell.
+        assert_eq!(
+            polls(&mut trains, "06:54", 1, true, || vec![j1("cancelled")]),
+            []
+        );
+        // Said cancelled in time, then running once it should have left.
+        let mut back = Trains::default();
+        assert_eq!(
+            polls(&mut back, "06:40", 1, true, || vec![j1("cancelled")]),
+            cancelled(Why::Announced)
+        );
+        assert_eq!(
+            polls(&mut back, "06:54", 1, true, || vec![j1("onTime")]),
+            []
         );
     }
 

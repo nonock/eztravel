@@ -1,0 +1,9 @@
+{
+  "type": "trains_cancelled",
+  "line": "L",
+  "mode": "train",
+  "station": "Les Aubépines",
+  "count": "2",
+  "trains": "[{\"aimed\":\"2026-11-03T06:52:00Z\",\"expected\":\"2026-11-03T06:52:00Z\",\"mission\":\"PALO\",\"destination\":\"Gare Centrale\"},{\"aimed\":\"2026-11-03T07:02:00Z\",\"expected\":\"2026-11-03T07:02:00Z\",\"mission\":null,\"destination\":\"Gare Centrale\"}]",
+  "until": "2026-11-03T07:12:00Z"
+}
