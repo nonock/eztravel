@@ -21,7 +21,7 @@ object Notifier {
     const val CHANNEL = "disruptions"
 
     /** One notification per tag: a newer message about a line replaces the older one. */
-    private const val ID = 1
+    internal const val ID = 1
 
     private const val EXTRA_OPEN = "open"
     private const val EXTRA_LINE = "line"
@@ -60,6 +60,14 @@ object Notifier {
     fun show(context: Context, message: PushMessage, now: Instant = Instant.now()) {
         val left = message.until?.let { Duration.between(now, it).toMillis() }
         if (left != null && left <= 0) return
+        when (message) {
+            // The trip's own.
+            is PushMessage.Leave -> return LiveTrip.leave(context, message, now)
+            is PushMessage.TrainLate -> return LiveTrip.late(context, message, now)
+            is PushMessage.TrainCancelled -> LiveTrip.cancelled(context, listOf(message.train))
+            is PushMessage.TrainsCancelled -> LiveTrip.cancelled(context, message.trains)
+            else -> {}
+        }
         createChannel(context)
         val text = message.text(context.resources)
         // Each line's own record: one pending intent per tag.
@@ -70,8 +78,17 @@ object Notifier {
                 intent(context, opening),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-        } ?: PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val builder = NotificationCompat.Builder(context, CHANNEL)
+        } ?: commute(context)
+        val builder = builder(context, text, open)
+        // Nothing stale on screen once the watch window is over.
+        if (left != null) builder.setTimeoutAfter(left)
+        if (message is PushMessage.Tomorrow) builder.addAction(remote(context, message.date))
+        post(context, message.tag, builder)
+    }
+
+    /** [text], tapped to [open]: how the app's notifications look. */
+    internal fun builder(context: Context, text: NotificationText, open: PendingIntent): NotificationCompat.Builder =
+        NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setColor(ContextCompat.getColor(context, R.color.brand_amber))
             .setContentTitle(text.title)
@@ -80,11 +97,10 @@ object Notifier {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(open)
             .setAutoCancel(true)
-        // Nothing stale on screen once the watch window is over.
-        if (left != null) builder.setTimeoutAfter(left)
-        if (message is PushMessage.Tomorrow) builder.addAction(remote(context, message.date))
-        post(context, message.tag, builder)
-    }
+
+    /** The app, on the commute. */
+    internal fun commute(context: Context): PendingIntent =
+        PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
 
     /**
      * In place of the evening notice: [date] worked from home, as [set], or
@@ -121,7 +137,7 @@ object Notifier {
     }
 
     /** Under [tag], replacing what was there, when the user lets the app notify. */
-    private fun post(context: Context, tag: String, builder: NotificationCompat.Builder) {
+    internal fun post(context: Context, tag: String, builder: NotificationCompat.Builder) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {

@@ -57,6 +57,7 @@
     <string name="notification_train_route">%1$s to %2$s, from %3$s.</string>
     <string name="notification_train_unnamed">Train</string>
     <string name="notification_leave">%1$s: leave at %2$s</string>
+    <string name="notification_leave_on_the_way">%1$s: train leaves at %2$s</string>
     <string name="notification_leave_train">%1$s at %2$s to %3$s</string>
     <string name="notification_leave_train_platform">%1$s at %2$s to %3$s, platform %4$s</string>
     <string name="notification_sentences">%1$s. %2$s</string>

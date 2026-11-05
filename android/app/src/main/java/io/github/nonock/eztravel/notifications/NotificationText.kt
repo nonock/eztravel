@@ -104,6 +104,12 @@ fun PushMessage.text(resources: Resources, zone: ZoneId = ZoneId.systemDefault()
     )
 }
 
+/** The reminder to leave once it is time: when its train leaves, as last known. */
+fun PushMessage.Leave.onTheWay(resources: Resources, zone: ZoneId = ZoneId.systemDefault()): NotificationText = NotificationText(
+    resources.getString(R.string.notification_leave_on_the_way, train.line.label(resources), (train.expected ?: train.aimed).clock(resources, zone)),
+    text(resources, zone).body,
+)
+
 /** "Between Nanterre and Cergy", "Whole line"... */
 private fun PushMessage.Scope.words(resources: Resources): String = when (this) {
     PushMessage.Scope.WholeLine -> resources.getString(R.string.notification_where_line)
