@@ -333,19 +333,24 @@ fn trim(
     until: Option<Timestamp>,
 ) -> Vec<Departure> {
     shown.sort_by_key(|departure| departure.expected);
-    let reach = reach.map(|reach| SignedDuration::from_mins(i64::from(reach)));
-    let left_for_before = |at: Timestamp| {
-        reach.map_or(0, |reach| {
-            shown
-                .iter()
-                .take_while(|departure| departure.expected - reach < at)
-                .count()
-        })
-    };
-    let too_soon = left_for_before(now);
-    let pickable = until.map_or(0, |until| left_for_before(until).saturating_sub(too_soon));
+    let too_soon = left_for_before(&shown, reach, now);
+    let pickable = until.map_or(0, |until| {
+        left_for_before(&shown, reach, until).saturating_sub(too_soon)
+    });
     shown.truncate(too_soon + SHOWN.max(pickable));
     shown
+}
+
+/// How many of `departures`, soonest first, must be left for before `at`,
+/// `reach` minutes from the platform; none without.
+fn left_for_before(departures: &[Departure], reach: Option<u32>, at: Timestamp) -> usize {
+    reach.map_or(0, |reach| {
+        let reach = SignedDuration::from_mins(i64::from(reach));
+        departures
+            .iter()
+            .take_while(|departure| departure.expected - reach < at)
+            .count()
+    })
 }
 
 /// Whether `visit`, leaving at `departure`, takes the leg to the alight stop
@@ -598,11 +603,20 @@ impl NextDepartures {
                 departure.picked = Some(departure.journey.as_str()) == picked;
             }
             if let Some(from) = usual_from.filter(|_| is_reminded) {
-                let usual = departures.iter_mut().flatten().find(|departure| {
-                    departure.status != "cancelled"
-                        && departure.expected >= from
-                        && departure.expected <= from + LATEST
+                // Among the next ones to catch, as the train to catch: those
+                // further are there to be picked.
+                let next = departures.as_deref().map_or(0, |departures| {
+                    left_for_before(departures, leg.reach, now) + SHOWN
                 });
+                let usual = departures
+                    .iter_mut()
+                    .flatten()
+                    .take(next)
+                    .find(|departure| {
+                        departure.status != "cancelled"
+                            && departure.expected >= from
+                            && departure.expected <= from + LATEST
+                    });
                 if let Some(usual) = usual {
                     usual.usual = true;
                 }
@@ -1377,6 +1391,26 @@ mod tests {
         later.outbound.end = time(8, 30, 0, 0);
         assert_eq!(shown(&later).await, journeys(20));
         assert_eq!(pick("t18", &later).await, Ok(at("07:15:00")));
+        // The usual train is marked among the next ones to catch only, as the
+        // train to catch: those further are there to be picked.
+        let usual = async |minute| {
+            let usual = UsualTrains {
+                outbound: Some(time(8, minute, 0, 0)),
+                inbound: None,
+            };
+            let view = departures
+                .view(at("06:50:00"), None, &usual, &quiet(), &example_windows())
+                .await;
+            view.legs[0]
+                .departures
+                .iter()
+                .flatten()
+                .filter(|departure| departure.usual)
+                .map(|departure| departure.journey.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(usual(11).await, ["t10"]);
+        assert_eq!(usual(13).await, Vec::<String>::new());
     }
 
     #[test]
