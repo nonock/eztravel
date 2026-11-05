@@ -87,7 +87,8 @@ pub fn parse_route(json: &[u8]) -> Result<Route, serde_json::Error> {
 }
 
 /// How a disruption bears on a leg.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Bearing {
     Off,
     /// One of its sections meets the leg at one end only, from beyond:

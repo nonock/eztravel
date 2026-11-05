@@ -22,7 +22,7 @@ use crate::config::Config;
 use crate::departures::{NextDepartures, leg_stops, monitoring_ref, one_way};
 use crate::disruptions::Disruption;
 use crate::history::{self, Entry, History};
-use crate::journal::Journal;
+use crate::journal::{Journal, Note};
 use crate::leaving::{Aim, Leaving, remind, reminded_leg};
 use crate::line_alerts::LineAlerts;
 use crate::prim::Prim;
@@ -31,7 +31,7 @@ use crate::profile::{Profile, Store};
 use crate::push::{self, PushError, Sender};
 use crate::relevance::{Leg, Route};
 use crate::school::{SCHOOL_URL, SchoolHolidays};
-use crate::trains::{Scheduled, Seen, Trains, follow, plan};
+use crate::trains::{Ended, Scheduled, Seen, Trains, follow, plan};
 use crate::watch::{Cause, Health, LineStatus, Snapshot};
 
 const STATE_FILE: &str = "state.json";
@@ -44,6 +44,9 @@ const HISTORY_FILE: &str = "history.json";
 const TRAINS_FILE: &str = "trains.json";
 const LEAVING_FILE: &str = "leaving.json";
 const JOURNAL_FILE: &str = "journal.jsonl";
+const NOTES_FILE: &str = "notes.jsonl";
+/// How many notes are read back at start, to note no record twice.
+const NOTES_READ: usize = 1000;
 
 pub struct Service {
     config: Config,
@@ -57,7 +60,8 @@ pub struct Service {
     health: Health,
     status: Arc<Mutex<Snapshot>>,
     history: Arc<History>,
-    journal: Arc<Journal>,
+    journal: Arc<Journal<Ended>>,
+    notes: Arc<Journal<Note>>,
     departures: Arc<NextDepartures>,
     line_alerts: Arc<LineAlerts>,
     routes: BTreeMap<String, Vec<Route>>,
@@ -107,6 +111,7 @@ impl Service {
             load(&data_dir.join(ROUTES_FILE)).unwrap_or_default();
         let line_alerts = LineAlerts::new(&config, prim.clone());
         line_alerts.set_routes(routes.clone());
+        let notes = Arc::new(Journal::open(&data_dir.join(NOTES_FILE)));
         Self {
             state: load(&data_dir.join(STATE_FILE)).unwrap_or_default(),
             trains: load(&data_dir.join(TRAINS_FILE)).unwrap_or_default(),
@@ -115,11 +120,23 @@ impl Service {
             status: Arc::default(),
             history: Arc::new(History::open(&data_dir.join(HISTORY_FILE))),
             journal: Arc::new(Journal::open(&data_dir.join(JOURNAL_FILE))),
-            departures: Arc::new(NextDepartures::new(&config, prim.clone(), routes.clone())),
+            departures: Arc::new(
+                NextDepartures::new(&config, prim.clone(), routes.clone()).noting(notes.clone()),
+            ),
+            doubtful: notes
+                .latest(NOTES_READ)
+                .iter()
+                .filter_map(|note| match note {
+                    Note::Doubt {
+                        record, bearing, ..
+                    } => Some(format!("{record} {bearing:?}")),
+                    Note::Timetable { .. } => None,
+                })
+                .collect(),
+            notes,
             line_alerts: Arc::new(line_alerts),
             routes,
             routes_day: None,
-            doubtful: BTreeSet::new(),
             config,
             prim,
             sender,
@@ -174,6 +191,7 @@ impl Service {
                     departures: service.departures(),
                     line_alerts: service.line_alerts(),
                     journal: service.journal(),
+                    notes: service.notes(),
                     school: school.clone(),
                 },
                 app_key,
@@ -189,8 +207,13 @@ impl Service {
     }
 
     /// How each train followed went.
-    pub fn journal(&self) -> Arc<Journal> {
+    pub fn journal(&self) -> Arc<Journal<Ended>> {
         self.journal.clone()
+    }
+
+    /// The notes on what the poll loop judged.
+    pub fn notes(&self) -> Arc<Journal<Note>> {
+        self.notes.clone()
     }
 
     /// The next departures, read when the app asks, on the stops of the routes.
@@ -316,7 +339,7 @@ impl Service {
             &self.commute(),
             &disruptions,
         );
-        self.note_doubtful(direction, local, &disruptions);
+        self.note_doubtful(now, direction, local, &disruptions);
         // Missing trains must not hold back what the lines say.
         let seen = self.read_trains(direction, now).await;
         let mut trains = self.trains.clone();
@@ -549,7 +572,13 @@ impl Service {
 
     /// Logs once each current record of the way's lines that no leg is sure
     /// of, to tell later why an alert came, or none.
-    fn note_doubtful(&mut self, direction: Direction, local: DateTime, disruptions: &[Disruption]) {
+    fn note_doubtful(
+        &mut self,
+        now: Timestamp,
+        direction: Direction,
+        local: DateTime,
+        disruptions: &[Disruption],
+    ) {
         for (record, bearing) in doubtful(direction, &self.commute(), disruptions, local) {
             if self.doubtful.insert(format!("{} {bearing:?}", record.id)) {
                 let sections: Vec<String> = record
@@ -557,6 +586,14 @@ impl Service {
                     .iter()
                     .map(|section| format!("{} -> {}", section.from.name, section.to.name))
                     .collect();
+                self.notes.append(&[Note::Doubt {
+                    at: now,
+                    direction,
+                    record: record.id.clone(),
+                    title: record.title.clone(),
+                    sections: sections.clone(),
+                    bearing,
+                }]);
                 eprintln!(
                     "record {} judged {bearing:?} for the way {direction:?}: {} [{}]",
                     record.id,
@@ -775,6 +812,7 @@ pub(crate) fn save<T: Serialize>(path: &Path, value: &T) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::journal::Note;
     use crate::profile::Pick;
     use crate::push::testing::account;
     use crate::trains::Outcome;
@@ -2071,7 +2109,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_record_off_the_way_is_noted_once() {
-        let setup = Setup::with(routes_server(500, 1).await).await;
+        let setup = Setup::with(routes_server(500, 2).await).await;
         let saved = r#"{"C01740":[{"stops":[{"stop_point":"sp:1","stop_area":"stop_area:IDFM:71100","name":"1"},{"stop_point":"sp:2","stop_area":"stop_area:IDFM:71370","name":"2"},{"stop_point":"sp:3","stop_area":"stop_area:IDFM:71390","name":"3"}]}]}"#;
         std::fs::write(setup.dir.path().join("routes.json"), saved).unwrap();
         let mut beyond = feed(true);
@@ -2082,6 +2120,7 @@ mod tests {
         }]);
         Mock::given(path("/disruptions_bulk/disruptions/v2"))
             .respond_with(ResponseTemplate::new(200).set_body_json(beyond))
+            .up_to_n_times(2)
             .expect(2)
             .mount(&setup.server)
             .await;
@@ -2089,7 +2128,37 @@ mod tests {
         // Off the way: no alert, but noted, once.
         assert_eq!(service.poll(at(MORNING)).await, Poll::Sent(0));
         assert_eq!(service.poll(at(TWO_MINUTES_LATER)).await, Poll::Sent(0));
-        assert_eq!(service.doubtful.iter().collect::<Vec<_>>(), ["d1 Off"]);
+        let noted = Note::Doubt {
+            at: at(MORNING),
+            direction: Direction::Outbound,
+            record: "d1".into(),
+            title: "Ligne L : trafic interrompu".into(),
+            sections: vec!["3 -> 4".into()],
+            bearing: crate::relevance::Bearing::Off,
+        };
+        assert_eq!(service.notes().latest(10), std::slice::from_ref(&noted));
+        // Nor again after a restart.
+        Mock::given(path("/disruptions_bulk/disruptions/v2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json({
+                let mut beyond = feed(true);
+                beyond["disruptions"][0]["impactedSections"] = serde_json::json!([{
+                    "lineId": "line:IDFM:C01740",
+                    "from": { "type": "stop_area", "id": "stop_area:IDFM:71390", "name": "3" },
+                    "to": { "type": "stop_area", "id": "stop_area:IDFM:71395", "name": "4" }
+                }]);
+                beyond
+            }))
+            .mount(&setup.server)
+            .await;
+        // Among other notes.
+        let timetable = Note::Timetable {
+            at: at(TWO_MINUTES_LATER),
+            line: "C01740".into(),
+        };
+        service.notes().append(std::slice::from_ref(&timetable));
+        let mut restarted = setup.service();
+        restarted.poll(at("2026-11-03T06:04:00Z")).await;
+        assert_eq!(restarted.notes().latest(10), [timetable, noted]);
     }
 
     #[tokio::test]

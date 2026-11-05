@@ -7,7 +7,7 @@
 //! metro platform (quay) lists one way only, and its next four trains.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use jiff::civil::{Date, DateTime, Time};
 use jiff::tz::TimeZone;
@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::backups::{self, Backup};
 use crate::calendar::{Calendar, Direction, WatchWindows};
 use crate::config::Config;
+use crate::journal::{Journal, Note};
 use crate::leaving::{LATEST, Refusal, check_pick, reminded_leg};
 use crate::line_alerts::LineAlerts;
 use crate::prim::{Prim, PrimError, Timetabled};
@@ -435,6 +436,8 @@ pub struct NextDepartures {
     routes: Mutex<BTreeMap<String, Vec<Route>>>,
     /// Held while a stop is read, so that two requests do not both read it.
     cache: tokio::sync::Mutex<Cache>,
+    /// Where a ride shown by its timetable is noted, if anywhere.
+    notes: Option<Arc<Journal<Note>>>,
 }
 
 #[derive(Default)]
@@ -473,7 +476,14 @@ impl NextDepartures {
             time_zone: config.time_zone(),
             routes: Mutex::new(routes),
             cache: tokio::sync::Mutex::default(),
+            notes: None,
         }
+    }
+
+    /// Notes in `notes` each ride shown by its timetable, as read.
+    pub fn noting(mut self, notes: Arc<Journal<Note>>) -> Self {
+        self.notes = Some(notes);
+        self
     }
 
     /// The routes give the stops of each leg; the poll loop refreshes them daily.
@@ -690,6 +700,12 @@ impl NextDepartures {
                     "departures of {} from the timetable: its stops cannot be read live",
                     leg.line
                 );
+                if let Some(notes) = &self.notes {
+                    notes.append(&[Note::Timetable {
+                        at: now,
+                        line: leg.line.clone(),
+                    }]);
+                }
                 cache.timetables.insert(ride, (now, trains.clone()));
                 trains
             }
@@ -1670,7 +1686,7 @@ outbound = \"07:30\"
             .respond_with(ResponseTemplate::new(503))
             .mount(&server)
             .await;
-        // Read once in half an hour, from 7:50 in Paris.
+        // Read once in half an hour, from 7:50 in Paris, by each.
         Mock::given(path(
             "/v2/navitia/stop_areas/stop_area%3AIDFM%3A71100/lines/line%3AIDFM%3AC01740/departures",
         ))
@@ -1681,7 +1697,7 @@ outbound = \"07:30\"
                 ("vj:c", "20261103T081000", "PILO", "Gare Centrale"),
             ]),
         ))
-        .expect(1)
+        .expect(2)
         .mount(&server)
         .await;
         Mock::given(path(
@@ -1693,10 +1709,12 @@ outbound = \"07:30\"
                 ("vj:c", "20261103T082200"),
             ])),
         )
-        .expect(1)
+        .expect(2)
         .mount(&server)
         .await;
-        let departures = next_departures(&server, EXAMPLE);
+        let dir = tempfile::tempdir().unwrap();
+        let notes = Arc::new(Journal::open(&dir.path().join("notes.jsonl")));
+        let departures = next_departures(&server, EXAMPLE).noting(notes.clone());
         let view = departures
             .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
             .await;
@@ -1716,6 +1734,20 @@ outbound = \"07:30\"
             .map(|departure| departure.journey.as_str())
             .collect();
         assert_eq!(journeys, ["timetable:C01740:2026-11-03T07:10:00Z"]);
+        // Departures that note nowhere read it all the same.
+        let silent = next_departures(&server, EXAMPLE);
+        let view = silent
+            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
+            .await;
+        assert!(view.legs[0].timetable);
+        // Noted once, as it was read.
+        assert_eq!(
+            notes.latest(10),
+            [Note::Timetable {
+                at: at("06:50:00"),
+                line: "C01740".into()
+            }]
+        );
         // Never picked: the reminder follows trains as listed live.
         assert_eq!(
             departures

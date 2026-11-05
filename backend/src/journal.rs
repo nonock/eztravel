@@ -1,32 +1,60 @@
-//! Each train followed, as it ended, kept for the statistics: unlike the
-//! history, nothing is dropped. One JSON object per line, appended to a file of
-//! the data folder, a few kilobytes a day.
+//! What the backend keeps for later, unlike the history, nothing dropped: each
+//! train followed, as it ended, for the statistics, and notes on its own
+//! judgments, to look back at them. One JSON object per line, appended to a
+//! file of the data folder, a few kilobytes a day.
 
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
-use crate::trains::Ended;
+use jiff::Timestamp;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
-pub struct Journal {
+use crate::calendar::Direction;
+use crate::relevance::Bearing;
+
+pub struct Journal<T> {
     path: PathBuf,
+    kept: PhantomData<T>,
 }
 
-impl Journal {
+/// A judgment of the backend's, noted to look back at it: when trains run late
+/// without an alert, or the departures show the timetable.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Note {
+    /// A record of the way's lines that no leg was sure of, when first judged so.
+    Doubt {
+        at: Timestamp,
+        direction: Direction,
+        record: String,
+        title: String,
+        /// Its sections, "from -> to".
+        sections: Vec<String>,
+        bearing: Bearing,
+    },
+    /// A train ride shown by its timetable, its stops not read live.
+    Timetable { at: Timestamp, line: String },
+}
+
+impl<T: Serialize + DeserializeOwned> Journal<T> {
     pub fn open(path: &Path) -> Self {
         Self {
             path: path.to_path_buf(),
+            kept: PhantomData,
         }
     }
 
-    /// Adds `ended` at the end. A failure is logged: it must not stop the alerts.
-    pub fn append(&self, ended: &[Ended]) {
-        if ended.is_empty() {
+    /// Adds `entries` at the end. A failure is logged: it must not stop the alerts.
+    pub fn append(&self, entries: &[T]) {
+        if entries.is_empty() {
             return;
         }
         let mut text = String::new();
-        for train in ended {
-            text.push_str(&serde_json::to_string(train).expect("a train serializes"));
+        for entry in entries {
+            text.push_str(&serde_json::to_string(entry).expect("an entry serializes"));
             text.push('\n');
         }
         let written = OpenOptions::new()
@@ -36,15 +64,15 @@ impl Journal {
             .and_then(|mut file| file.write_all(text.as_bytes()));
         if let Err(error) = written {
             eprintln!(
-                "cannot keep {} ended trains in {}: {error}",
-                ended.len(),
+                "cannot keep {} entries in {}: {error}",
+                entries.len(),
                 self.path.display()
             );
         }
     }
 
-    /// The last `count` trains, the latest first. A line that cannot be read is left out.
-    pub fn latest(&self, count: usize) -> Vec<Ended> {
+    /// The last `count` entries, the latest first. A line that cannot be read is left out.
+    pub fn latest(&self, count: usize) -> Vec<T> {
         let text = std::fs::read_to_string(&self.path).unwrap_or_default();
         text.lines()
             .rev()
@@ -57,8 +85,7 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calendar::Direction;
-    use crate::trains::{Outcome, Train};
+    use crate::trains::{Ended, Outcome, Train};
     use jiff::civil::date;
 
     fn ended(aimed: &str, outcome: Outcome) -> Ended {

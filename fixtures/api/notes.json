@@ -1,0 +1,20 @@
+{
+  "notes": [
+    {
+      "kind": "timetable",
+      "at": "2026-11-03T06:50:00Z",
+      "line": "C01740"
+    },
+    {
+      "kind": "doubt",
+      "at": "2026-11-03T06:00:00Z",
+      "direction": "outbound",
+      "record": "d1",
+      "title": "Ligne L : travaux entre Les Tilleuls et Mairie",
+      "sections": [
+        "Les Tilleuls -> Mairie"
+      ],
+      "bearing": "off"
+    }
+  ]
+}
