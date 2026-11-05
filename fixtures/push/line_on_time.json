@@ -1,0 +1,6 @@
+{
+  "type": "line_on_time",
+  "line": "L",
+  "mode": "train",
+  "until": "2026-11-03T07:15:00Z"
+}

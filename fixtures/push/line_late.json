@@ -1,0 +1,9 @@
+{
+  "type": "line_late",
+  "line": "L",
+  "mode": "train",
+  "count": "3",
+  "least": "6",
+  "most": "12",
+  "until": "2026-11-03T07:15:00Z"
+}

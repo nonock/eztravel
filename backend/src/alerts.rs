@@ -72,6 +72,15 @@ pub enum Notification {
     TrainsCancelled {
         trains: Vec<Train>,
     },
+    /// Trains of `line` run late, with no record to tell why: these.
+    LineLate {
+        line: String,
+        trains: Vec<Train>,
+    },
+    /// The trains of `line`, told late, run on time again.
+    LineOnTime {
+        line: String,
+    },
     /// A train notified as cancelled runs after all.
     TrainBack {
         train: Train,

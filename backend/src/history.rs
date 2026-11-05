@@ -95,6 +95,8 @@ pub fn records(notification: &Notification) -> Vec<Record> {
         | Notification::Recovered
         | Notification::TrainCancelled { .. }
         | Notification::TrainsCancelled { .. }
+        | Notification::LineLate { .. }
+        | Notification::LineOnTime { .. }
         | Notification::TrainBack { .. }
         | Notification::Leave { .. }
         | Notification::Late { .. } => vec![],

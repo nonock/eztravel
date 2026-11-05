@@ -186,6 +186,25 @@ pub fn data(
                 .expect("trains told together are several");
             put("until", &(last + TRAIN_SHOWN_AFTER).to_string());
         }
+        Notification::LineLate { line: code, trains } => {
+            put("type", "line_late");
+            line(code, &mut put);
+            put("count", &trains.len().to_string());
+            let minutes: Vec<i64> = trains
+                .iter()
+                .map(|train| train.expected.duration_since(train.aimed).as_mins())
+                .collect();
+            let least = minutes.iter().min().expect("a line late has late trains");
+            let most = minutes.iter().max().expect("a line late has late trains");
+            put("least", &least.to_string());
+            put("most", &most.to_string());
+            put("until", &until);
+        }
+        Notification::LineOnTime { line: code } => {
+            put("type", "line_on_time");
+            line(code, &mut put);
+            put("until", &until);
+        }
         Notification::TrainBack { train } => {
             put("type", "train_back");
             describe_train(train, labels, &mut put);
@@ -311,6 +330,8 @@ pub fn message(device: &str, data: &BTreeMap<String, String>) -> serde_json::Val
         (Some(line), Some(aimed), _) => format!("train-{line}-{aimed}"),
         // Trains told together: neither the line's state nor a train's own.
         (Some(line), None, Some("trains_cancelled")) => format!("trains-{line}"),
+        // How the line's trains run: its late notice and its end.
+        (Some(line), None, Some("line_late" | "line_on_time")) => format!("late-{line}"),
         (Some(line), None, _) => format!("line-{line}"),
         (None, _, Some("planned")) => "planned".to_string(),
         (None, _, Some("tomorrow")) => "tomorrow".to_string(),
@@ -939,6 +960,42 @@ mod tests {
             ["stops", "Gare Centrale", "2"]
         );
         assert!(!sent.contains_key("section_from"));
+    }
+
+    #[test]
+    fn a_line_late_with_no_record_says_how_late_then_on_time_again() {
+        let train = |aimed: &str, expected: &str| Train {
+            aimed: aimed.parse().unwrap(),
+            expected: expected.parse().unwrap(),
+            ..train(Some("PALO"))
+        };
+        let late = Notification::LineLate {
+            line: "C01740".into(),
+            trains: vec![
+                train("2026-11-03T06:52:00Z", "2026-11-03T06:58:00Z"),
+                train("2026-11-03T07:02:00Z", "2026-11-03T07:14:00Z"),
+                train("2026-11-03T07:10:00Z", "2026-11-03T07:17:00Z"),
+            ],
+        };
+        let data = data(&late, &labels(), until());
+        assert_eq!(data, fixture("line_late"));
+        // Neither the line's state nor a train's own.
+        assert_eq!(
+            message("t", &data)["message"]["android"]["collapse_key"],
+            "late-L"
+        );
+        let on_time = data_of(&Notification::LineOnTime {
+            line: "C01740".into(),
+        });
+        assert_eq!(on_time, fixture("line_on_time"));
+        assert_eq!(
+            message("t", &on_time)["message"]["android"]["collapse_key"],
+            "late-L"
+        );
+    }
+
+    fn data_of(notification: &Notification) -> BTreeMap<String, String> {
+        data(notification, &labels(), until())
     }
 
     #[test]
