@@ -157,6 +157,35 @@ pub fn data(
             );
             describe_train(train, labels, &mut put);
         }
+        Notification::TrainsCancelled { trains } => {
+            put("type", "trains_cancelled");
+            let first = &trains[0];
+            let (name, mode, _) = label(&first.line, labels);
+            put("line", &name);
+            put("mode", mode);
+            // Not `from`, which Firebase keeps for itself.
+            put("station", &first.from);
+            put("count", &trains.len().to_string());
+            let listed: Vec<Listed> = trains
+                .iter()
+                .map(|train| Listed {
+                    aimed: train.aimed,
+                    expected: train.expected,
+                    mission: train.mission.as_deref(),
+                    destination: &train.destination,
+                })
+                .collect();
+            put(
+                "trains",
+                &serde_json::to_string(&listed).expect("trains serialize"),
+            );
+            let last = trains
+                .iter()
+                .map(|train| train.aimed.max(train.expected))
+                .max()
+                .expect("trains told together are several");
+            put("until", &(last + TRAIN_SHOWN_AFTER).to_string());
+        }
         Notification::TrainBack { train } => {
             put("type", "train_back");
             describe_train(train, labels, &mut put);
@@ -207,6 +236,15 @@ fn describe_train(train: &Train, labels: &[LineLabel], put: &mut dyn FnMut(&str,
     put("expected", &train.expected.to_string());
     let until = train.aimed.max(train.expected) + TRAIN_SHOWN_AFTER;
     put("until", &until.to_string());
+}
+
+/// A train of those cancelled together, as `trains_cancelled` lists them.
+#[derive(Serialize)]
+struct Listed<'a> {
+    aimed: Timestamp,
+    expected: Timestamp,
+    mission: Option<&'a str>,
+    destination: &'a str,
 }
 
 /// How the line `code` is named on screen, its mode (`train`, `metro`, or
@@ -271,6 +309,8 @@ pub fn message(device: &str, data: &BTreeMap<String, String>) -> serde_json::Val
     let collapse_key = match (data.get("line"), data.get("aimed"), kind) {
         // A train's own: it must not replace its line's state, nor another train.
         (Some(line), Some(aimed), _) => format!("train-{line}-{aimed}"),
+        // Trains told together: neither the line's state nor a train's own.
+        (Some(line), None, Some("trains_cancelled")) => format!("trains-{line}"),
         (Some(line), None, _) => format!("line-{line}"),
         (None, _, Some("planned")) => "planned".to_string(),
         (None, _, Some("tomorrow")) => "tomorrow".to_string(),
@@ -1113,6 +1153,26 @@ mod tests {
             aimed: "2026-11-03T06:52:00Z".parse().unwrap(),
             expected: "2026-11-03T06:52:00Z".parse().unwrap(),
         }
+    }
+
+    #[test]
+    fn trains_cancelled_together_are_listed_in_one_message() {
+        let later = Train {
+            mission: None,
+            aimed: "2026-11-03T07:02:00Z".parse().unwrap(),
+            expected: "2026-11-03T07:02:00Z".parse().unwrap(),
+            ..train(None)
+        };
+        let together = Notification::TrainsCancelled {
+            trains: vec![train(Some("PALO")), later],
+        };
+        let data = data(&together, &labels(), until());
+        assert_eq!(data, fixture("trains_cancelled"));
+        // Neither the line's state nor a train's own.
+        assert_eq!(
+            message("t", &data)["message"]["android"]["collapse_key"],
+            "trains-L"
+        );
     }
 
     #[test]

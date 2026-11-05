@@ -68,6 +68,10 @@ pub enum Notification {
         train: Train,
         why: Why,
     },
+    /// Several trains of a line will not run, known at once: told together.
+    TrainsCancelled {
+        trains: Vec<Train>,
+    },
     /// A train notified as cancelled runs after all.
     TrainBack {
         train: Train,
