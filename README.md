@@ -4,7 +4,7 @@
 
 An Android app that follows one home-to-work commute in the Paris region and notifies you when its lines are disrupted, only on the days and at the hours you travel. Data comes from [PRIM](https://prim.iledefrance-mobilites.fr), the open data portal of Île-de-France Mobilités.
 
-> **Status: milestone 5 done, milestone 6 under way.** Disruption alerts on office days, next departures, cancelled trains and the reminder to leave; a month calendar with school holidays, and the phone checking the backend; backup routes; short notifications, with the whole record in the app; the evening notice of the next day's trouble, and the trains of the timetable that never show. Next: the timetable standing in when real time is missing, and disruptions placed on the branches more finely.
+> **Status: milestone 6 done.** Disruption alerts on office days, next departures, cancelled trains and the reminder to leave; a month calendar with school holidays, and the phone checking the backend; backup routes; short notifications, with the whole record in the app; the evening notice of the next day's trouble, the trains of the timetable that never show, the timetable standing in when real time is missing, and the trains of a line running late with no record to tell why. Next: the live trip, from the reminder to leave.
 
 ## Why
 
@@ -142,11 +142,13 @@ Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md
    - continuous integration on GitHub: backend and app tests, lint.
 4. **Done.** Preconfigured backup routes: when a line of the way is disrupted, the next departures of its backup on the commute tab.
 5. **Done.** Shorter notifications: one line built from the data (where, until when), and the whole record in the app on tap. The links in operators' texts (the line's X account, its blog) open from the app. Plus an accessibility check of the screens.
-6. **Under way.** Sharper alerts:
-   - done: the evening before, the planned works or strikes of the next day, with a "remote work tomorrow" button;
-   - done: trains that never show up in real time, found against the timetable;
+6. **Done.** Sharper alerts:
+   - the evening before, the planned works or strikes of the next day, with a "remote work tomorrow" button;
+   - trains that never show up in real time, found against the timetable;
    - the timetable standing in when real time is missing;
-   - disruptions placed on the branches more finely.
+   - trains cancelled at once told in one notification, and nothing more told on a train once it should have left;
+   - the trains of a line running late with no record to tell why, then on time again;
+   - disruptions placed on the branches more finely: measured first, every alert was on the right branch, so the rule stays; the records set aside for the way are kept as notes instead, to read back on a day of delays with no alert.
 7. Live trip, from the reminder to leave:
    - an ongoing notification (a Live Update where Android allows it) and a widget, with the train to catch, its countdown, platform and delay;
    - updates pushed by the backend only when something changes;
