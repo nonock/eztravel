@@ -24,11 +24,12 @@ use serde::{Deserialize, Serialize};
 use crate::calendar::{Day, DayPlan, Direction, Schedule};
 use crate::departures::{self, NextDepartures};
 use crate::history::History;
-use crate::journal::Journal;
+use crate::journal::{Journal, Note};
 use crate::leaving::Refusal;
 use crate::line_alerts::{self, LineAlerts};
 use crate::profile::{LateDay, Store, UsualTrains};
 use crate::school::SchoolHolidays;
+use crate::trains::Ended;
 use crate::watch::{Snapshot, View};
 use jiff::ToSpan;
 
@@ -130,7 +131,8 @@ struct Shared {
     history: Arc<History>,
     departures: Arc<NextDepartures>,
     line_alerts: Arc<LineAlerts>,
-    journal: Arc<Journal>,
+    journal: Arc<Journal<Ended>>,
+    notes: Arc<Journal<Note>>,
     school: Arc<SchoolHolidays>,
 }
 
@@ -140,9 +142,15 @@ impl FromRef<Shared> for Arc<SchoolHolidays> {
     }
 }
 
-impl FromRef<Shared> for Arc<Journal> {
+impl FromRef<Shared> for Arc<Journal<Ended>> {
     fn from_ref(shared: &Shared) -> Self {
         shared.journal.clone()
+    }
+}
+
+impl FromRef<Shared> for Arc<Journal<Note>> {
+    fn from_ref(shared: &Shared) -> Self {
+        shared.notes.clone()
     }
 }
 
@@ -190,7 +198,8 @@ pub struct Sources {
     pub history: Arc<History>,
     pub departures: Arc<NextDepartures>,
     pub line_alerts: Arc<LineAlerts>,
-    pub journal: Arc<Journal>,
+    pub journal: Arc<Journal<Ended>>,
+    pub notes: Arc<Journal<Note>>,
     pub school: Arc<SchoolHolidays>,
 }
 
@@ -203,6 +212,7 @@ pub fn router(sources: Sources, key: String) -> Router {
         departures,
         line_alerts,
         journal,
+        notes,
         school,
     } = sources;
     Router::new()
@@ -216,6 +226,7 @@ pub fn router(sources: Sources, key: String) -> Router {
         .route("/late", put(set_late))
         .route("/alerts", get(alerts))
         .route("/trains", get(ended_trains))
+        .route("/notes", get(kept_notes))
         .route("/calendar", get(month).put(put_day))
         .layer(middleware::from_fn_with_state(Arc::new(key), authorize))
         .with_state(Shared {
@@ -226,6 +237,7 @@ pub fn router(sources: Sources, key: String) -> Router {
             departures,
             line_alerts,
             journal,
+            notes,
             school,
         })
 }
@@ -316,7 +328,22 @@ struct EndedTrains {
     trains: Vec<crate::trains::Ended>,
 }
 
-async fn ended_trains(State(journal): State<Arc<Journal>>) -> Json<EndedTrains> {
+/// How many notes `GET /notes` gives, the latest first.
+const NOTES_SHOWN: usize = 500;
+
+/// `GET /notes`, in the shape fixed by `fixtures/api/notes.json`.
+#[derive(Serialize)]
+struct KeptNotes {
+    notes: Vec<Note>,
+}
+
+async fn kept_notes(State(notes): State<Arc<Journal<Note>>>) -> Json<KeptNotes> {
+    Json(KeptNotes {
+        notes: notes.latest(NOTES_SHOWN),
+    })
+}
+
+async fn ended_trains(State(journal): State<Arc<Journal<Ended>>>) -> Json<EndedTrains> {
     Json(EndedTrains {
         trains: journal.latest(TRAINS_SHOWN),
     })
@@ -532,7 +559,8 @@ mod tests {
         history: Arc<History>,
         departures: Arc<NextDepartures>,
         line_alerts: Arc<LineAlerts>,
-        journal: Arc<Journal>,
+        journal: Arc<Journal<Ended>>,
+        notes: Arc<Journal<Note>>,
         school: Arc<SchoolHolidays>,
         _dir: tempfile::TempDir,
     }
@@ -557,6 +585,7 @@ mod tests {
                     Prim::new("http://127.0.0.1:9", "key"),
                 )),
                 journal: Arc::new(Journal::open(&dir.path().join("journal.jsonl"))),
+                notes: Arc::new(Journal::open(&dir.path().join("notes.jsonl"))),
                 // Nothing read: the tests set what is known.
                 school: Arc::new(SchoolHolidays::new(
                     None,
@@ -595,6 +624,7 @@ mod tests {
                 departures: self.departures.clone(),
                 line_alerts: self.line_alerts.clone(),
                 journal: self.journal.clone(),
+                notes: self.notes.clone(),
                 school: self.school.clone(),
             };
             let response = router(sources, KEY.into()).oneshot(request).await.unwrap();
@@ -626,6 +656,7 @@ mod tests {
             (Method::PUT, "/departure", Some(r#"{"journey":null}"#)),
             (Method::GET, "/alerts", None),
             (Method::GET, "/trains", None),
+            (Method::GET, "/notes", None),
             (Method::GET, "/calendar?month=2026-11", None),
             (
                 Method::PUT,
@@ -788,6 +819,24 @@ mod tests {
                 "{body}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn the_notes_kept_answer_as_in_the_fixture() {
+        let api = Api::new();
+        let path = format!("{}/../fixtures/api/notes.json", env!("CARGO_MANIFEST_DIR"));
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        // Written as noted, the oldest first.
+        let mut kept: Vec<Note> = serde_json::from_value(fixture["notes"].clone()).unwrap();
+        kept.reverse();
+        api.notes.append(&kept);
+        let (status, body) = api.authorized(Method::GET, "/notes", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+            fixture
+        );
     }
 
     #[tokio::test]

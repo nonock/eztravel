@@ -108,6 +108,7 @@ All requests carry `Authorization: Bearer <APP_KEY>`.
 | `POST /devices` `{"token": "…"}` | Registers the phone's Firebase token |
 | `GET /settings` | The usual trains: [fixtures/api/README.md](fixtures/api/README.md) |
 | `PUT /usual-train` `{"direction": "outbound", "time": "08:07"}` | Sets the usual train of a way, or `null` for none: [fixtures/api/README.md](fixtures/api/README.md) |
+| `GET /notes` | The backend's notes on its own judgments: records set aside, timetables shown: [fixtures/api/README.md](fixtures/api/README.md) |
 | `PUT /late` `{"leave": "22:00"}` | Sets today's way home later than usual, or `null` as usual: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /calendar?month=2026-11` | Each day of the month, what it is and why: [fixtures/api/README.md](fixtures/api/README.md) |
 | `PUT /calendar` `{"date": "2026-11-05", "kind": "remote"}` | Sets a day, or every day `through` another, or `null` to put them back as planned: [fixtures/api/README.md](fixtures/api/README.md) |
