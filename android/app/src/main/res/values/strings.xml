@@ -40,6 +40,16 @@
         <item quantity="other">%1$s: %2$d trains cancelled</item>
     </plurals>
     <string name="notification_trains_cancelled_train">%1$s %2$s to %3$s</string>
+    <string name="notification_line_late">%1$s: trains running late</string>
+    <plurals name="notification_line_late_text">
+        <item quantity="one">%1$d train leaves %2$d to %3$d min late, with no disruption announced.</item>
+        <item quantity="other">%1$d trains leave %2$d to %3$d min late, with no disruption announced.</item>
+    </plurals>
+    <plurals name="notification_line_late_even">
+        <item quantity="one">%1$d train leaves %2$d min late, with no disruption announced.</item>
+        <item quantity="other">%1$d trains leave %2$d min late, with no disruption announced.</item>
+    </plurals>
+    <string name="notification_line_on_time">%1$s: trains on time again</string>
     <string name="notification_train_back">%1$s: %2$s train runs after all</string>
     <string name="notification_train_missing">%1$s to %2$s, from %3$s: no longer announced.</string>
     <string name="notification_train_unlisted">%1$s to %2$s, from %3$s: in the timetable, not announced.</string>

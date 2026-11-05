@@ -88,6 +88,25 @@ class NotificationTextTest {
     private val palo = PushMessage.Train(train, "PALO", "Gare Centrale", "Les Aubépines", Instant.parse("2026-11-03T06:52:00Z"))
 
     @Test
+    fun aLineRunningLateSaysHowLateThenOnTimeAgain() {
+        val late = PushMessage.LineLate(train, count = 3, least = 6, most = 12, until = null)
+        assertEquals(
+            NotificationText("Ligne L : des trains en retard", "3 trains partent avec 6 à 12 min de retard, sans perturbation annoncée."),
+            late.text(french, paris),
+        )
+        assertEquals(
+            NotificationText("Line L: trains running late", "3 trains leave 6 to 12 min late, with no disruption announced."),
+            late.text(english, paris),
+        )
+        val even = late.copy(least = 7, most = 7)
+        assertEquals("3 trains partent avec 7 min de retard, sans perturbation annoncée.", even.text(french, paris).body)
+        assertEquals("3 trains leave 7 min late, with no disruption announced.", even.text(english, paris).body)
+        val onTime = PushMessage.LineOnTime(train, null)
+        assertEquals(NotificationText("Ligne L : trains de nouveau à l’heure", ""), onTime.text(french, paris))
+        assertEquals(NotificationText("Line L: trains on time again", ""), onTime.text(english, paris))
+    }
+
+    @Test
     fun trainsCancelledTogetherAreListedByTheirTimes() {
         val later = palo.copy(mission = null, destination = "Mairie", aimed = Instant.parse("2026-11-03T07:02:00Z"))
         val together = PushMessage.TrainsCancelled(listOf(palo, later), null)

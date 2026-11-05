@@ -146,6 +146,24 @@ class PushMessageTest {
     private val trainGone = Instant.parse("2026-11-03T07:02:00Z")
 
     @Test
+    fun readsALineRunningLateThenOnTimeAgain() {
+        val l = PushMessage.Line("L", PushMessage.Mode.TRAIN)
+        val windowEnd = Instant.parse("2026-11-03T07:15:00Z")
+        val late = PushMessage.parse(fixture("line_late"))
+        assertEquals(PushMessage.LineLate(l, count = 3, least = 6, most = 12, until = windowEnd), late)
+        val onTime = PushMessage.parse(fixture("line_on_time"))
+        assertEquals(PushMessage.LineOnTime(l, windowEnd), onTime)
+        // The end replaces the notice, and neither replaces the line's state.
+        assertEquals("late-L", late!!.tag)
+        assertEquals("late-L", onTime!!.tag)
+        assertNull(late.opening)
+        for (missing in listOf("line", "count", "least", "most")) {
+            assertNull(missing, PushMessage.parse(fixture("line_late") - missing))
+        }
+        assertNull(PushMessage.parse(fixture("line_on_time") - "line"))
+    }
+
+    @Test
     fun readsTrainsCancelledTogether() {
         val later = train.copy(mission = null, aimed = Instant.parse("2026-11-03T07:02:00Z"), expected = Instant.parse("2026-11-03T07:02:00Z"))
         val together = PushMessage.parse(fixture("trains_cancelled"))
