@@ -2110,7 +2110,13 @@ mod tests {
         let feed = service.line_alerts();
         let from = async |now| {
             departures
-                .view(at(now), None, &Default::default(), &feed)
+                .view(
+                    at(now),
+                    None,
+                    &Default::default(),
+                    &feed,
+                    &Config::parse(EXAMPLE).unwrap().windows,
+                )
                 .await
                 .legs[0]
                 .from

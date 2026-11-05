@@ -283,13 +283,15 @@ pub struct Departure {
 /// alight stop and its visits, only those that call there afterwards, or end there:
 /// during an incident, a terminus drops trains from its arrivals long before they come.
 /// With `reach`, the minutes to the platform, those too soon to leave for come
-/// first, for whoever is already on the way, then [`SHOWN`] more.
+/// first, for whoever is already on the way, then [`SHOWN`] more, or, with
+/// `until`, all those left for before then if more.
 pub fn select(
     line: &str,
     board: &[Visit],
     alight: Option<(&str, &[Visit])>,
     now: Timestamp,
     reach: Option<u32>,
+    until: Option<Timestamp>,
 ) -> Vec<Departure> {
     let shown: Vec<Departure> = board
         .iter()
@@ -318,21 +320,31 @@ pub fn select(
             })
         })
         .collect();
-    trim(shown, now, reach)
+    trim(shown, now, reach, until)
 }
 
 /// Soonest first; with `reach`, the minutes to the platform, those too soon to
-/// leave for first, then [`SHOWN`] more.
-fn trim(mut shown: Vec<Departure>, now: Timestamp, reach: Option<u32>) -> Vec<Departure> {
+/// leave for first, then [`SHOWN`] more, or, with `until`, all those left for
+/// before then if more: the end of the window, so that any can be picked.
+fn trim(
+    mut shown: Vec<Departure>,
+    now: Timestamp,
+    reach: Option<u32>,
+    until: Option<Timestamp>,
+) -> Vec<Departure> {
     shown.sort_by_key(|departure| departure.expected);
-    let too_soon = reach.map_or(0, |reach| {
-        let reach = SignedDuration::from_mins(i64::from(reach));
-        shown
-            .iter()
-            .take_while(|departure| departure.expected - reach < now)
-            .count()
-    });
-    shown.truncate(too_soon + SHOWN);
+    let reach = reach.map(|reach| SignedDuration::from_mins(i64::from(reach)));
+    let left_for_before = |at: Timestamp| {
+        reach.map_or(0, |reach| {
+            shown
+                .iter()
+                .take_while(|departure| departure.expected - reach < at)
+                .count()
+        })
+    };
+    let too_soon = left_for_before(now);
+    let pickable = until.map_or(0, |until| left_for_before(until).saturating_sub(too_soon));
+    shown.truncate(too_soon + SHOWN.max(pickable));
     shown
 }
 
@@ -519,7 +531,9 @@ impl NextDepartures {
 
     /// `pick`, the train picked in the app, is marked when it is of this day and
     /// way; or else, on the ride reminded, the first train from the way's usual
-    /// time, up to half an hour after. When the way has backups, the lines' disruptions, shared with the
+    /// time, up to half an hour after. That ride shows every train left for before
+    /// the end of the way's window in `windows`, the day's, so that any can be
+    /// picked. When the way has backups, the lines' disruptions, shared with the
     /// Alertes page, say which are needed.
     pub async fn view(
         &self,
@@ -527,6 +541,7 @@ impl NextDepartures {
         pick: Option<&Pick>,
         usual: &UsualTrains,
         feed: &LineAlerts,
+        windows: &WatchWindows,
     ) -> View {
         let (direction, legs) = self.shown(now);
         let local = now.to_zoned(self.time_zone.clone());
@@ -568,19 +583,21 @@ impl NextDepartures {
                     .expect("a day's local time is within range")
                     .timestamp()
             });
+        let until = self.window_end(now, direction, windows);
         let mut cache = self.cache.lock().await;
         // Judged once per request, so that all of its legs are read or none.
         let may_read = cache.may_read(now);
         let mut views = vec![];
         for leg in legs {
-            let mut view = self.leg_view(&mut cache, may_read, leg, now).await;
+            let is_reminded = reminded.is_some_and(|ride| std::ptr::eq(ride, leg));
+            let mut view = self
+                .leg_view(&mut cache, may_read, leg, now, is_reminded.then_some(until))
+                .await;
             let departures = &mut view.departures;
             for departure in departures.iter_mut().flatten() {
                 departure.picked = Some(departure.journey.as_str()) == picked;
             }
-            if let Some(from) =
-                usual_from.filter(|_| reminded.is_some_and(|ride| std::ptr::eq(ride, leg)))
-            {
+            if let Some(from) = usual_from.filter(|_| is_reminded) {
                 let usual = departures.iter_mut().flatten().find(|departure| {
                     departure.status != "cancelled"
                         && departure.expected >= from
@@ -597,7 +614,7 @@ impl NextDepartures {
             let mut rides = vec![];
             for (ride, severity) in backup.backup.rides.iter().zip(backup.rides) {
                 rides.push(BackupLeg {
-                    leg: self.leg_view(&mut cache, may_read, ride, now).await,
+                    leg: self.leg_view(&mut cache, may_read, ride, now, None).await,
                     severity: severity.map(push::severity_name),
                 });
             }
@@ -625,18 +642,20 @@ impl NextDepartures {
         }
     }
 
-    /// A ride with its next departures, none marked.
+    /// A ride with its next departures, none marked; with `until`, all those
+    /// left for before then.
     async fn leg_view(
         &self,
         cache: &mut Cache,
         may_read: bool,
         leg: &Leg,
         now: Timestamp,
+        until: Option<Timestamp>,
     ) -> LegView {
         let stops = self.stops(leg);
         let departures = match &stops {
             Some((board, alight)) => {
-                self.departures(cache, may_read, leg, board, alight, now)
+                self.departures(cache, may_read, leg, (board, alight), now, until)
                     .await
             }
             None => None,
@@ -734,7 +753,22 @@ impl NextDepartures {
             })
             .filter(|departure| departure.expected >= now - GRACE)
             .collect();
-        Some(trim(shown, now, leg.reach))
+        Some(trim(shown, now, leg.reach, None))
+    }
+
+    /// When today's window of the way `direction` in `windows` ends.
+    fn window_end(
+        &self,
+        now: Timestamp,
+        direction: Direction,
+        windows: &WatchWindows,
+    ) -> Timestamp {
+        now.to_zoned(self.time_zone.clone())
+            .date()
+            .to_datetime(windows.of(direction).end)
+            .to_zoned(self.time_zone.clone())
+            .expect("a day's local time is within range")
+            .timestamp()
     }
 
     /// Whether a usual train leaving at `time` on the way `direction` can be
@@ -769,10 +803,18 @@ impl NextDepartures {
         if one_way(&board.stop_point) {
             return Err(Refusal::Unknown);
         }
+        let until = self.window_end(now, direction, windows);
         let mut cache = self.cache.lock().await;
         let may_read = cache.may_read(now);
         let departures = self
-            .departures(&mut cache, may_read, leg, &board, &alight, now)
+            .departures(
+                &mut cache,
+                may_read,
+                leg,
+                (&board, &alight),
+                now,
+                Some(until),
+            )
             .await
             .ok_or(Refusal::Unavailable)?;
         let departure = departures
@@ -794,15 +836,15 @@ impl NextDepartures {
         cache: &mut Cache,
         may_read: bool,
         leg: &Leg,
-        board: &RouteStop,
-        alight: &RouteStop,
+        (board, alight): (&RouteStop, &RouteStop),
         now: Timestamp,
+        until: Option<Timestamp>,
     ) -> Option<Vec<Departure>> {
         let leaving = self
             .visits(cache, may_read, &monitoring_ref(&board.stop_point)?, now)
             .await?;
         if one_way(&board.stop_point) {
-            return Some(select(&leg.line, &leaving, None, now, leg.reach));
+            return Some(select(&leg.line, &leaving, None, now, leg.reach, until));
         }
         let stop = monitoring_ref(&alight.stop_point)?;
         let arriving = self.visits(cache, may_read, &stop, now).await?;
@@ -812,6 +854,7 @@ impl NextDepartures {
             Some((&stop, &arriving)),
             now,
             leg.reach,
+            until,
         ))
     }
 
@@ -1211,7 +1254,13 @@ mod tests {
             inbound: None,
         };
         let view = departures
-            .view(at("06:50:00"), Some(&j2()), &usual, &quiet())
+            .view(
+                at("06:50:00"),
+                Some(&j2()),
+                &usual,
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         assert_eq!(serde_json::to_value(&view).unwrap(), fixture("departures"));
     }
@@ -1269,10 +1318,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn at_rush_hour_the_ride_reminded_still_shows_five_trains_to_pick() {
-        // A train every two minutes from 7:51 in Paris, twelve minutes from home.
+    async fn at_rush_hour_the_ride_reminded_shows_every_train_to_pick_in_the_window() {
+        // A train every two minutes from 7:51 in Paris to 8:29, twelve minutes from home.
         let rush = siri(
-            (0..12)
+            (0..20)
                 .map(|n| {
                     let time = format!(
                         "{}:00",
@@ -1292,36 +1341,42 @@ mod tests {
         answers(&server, "STIF:StopArea:SP:100:", rush, 1).await;
         answers(&server, "STIF:StopArea:SP:200:", siri(vec![]), 1).await;
         let departures = next_departures(&server, EXAMPLE);
-        let view = departures
-            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
-            .await;
-        // Six leave before the platform can be reached: still shown, for whoever is on the way.
-        let shown: Vec<_> = view.legs[0]
-            .departures
-            .iter()
-            .flatten()
-            .map(|departure| departure.journey.as_str())
-            .collect();
-        assert_eq!(
-            shown,
-            [
-                "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10"
-            ]
-        );
+        let shown = async |windows: &WatchWindows| {
+            let view = departures
+                .view(
+                    at("06:50:00"),
+                    None,
+                    &UsualTrains::default(),
+                    &quiet(),
+                    windows,
+                )
+                .await;
+            view.legs[0]
+                .departures
+                .iter()
+                .flatten()
+                .map(|departure| departure.journey.clone())
+                .collect::<Vec<_>>()
+        };
+        let journeys = |count: usize| (0..count).map(|n| format!("t{n}")).collect::<Vec<_>>();
+        // Six leave before the platform can be reached: still shown, for whoever is
+        // on the way. Then all those left for before the window ends at 8:15: up to
+        // the 8:25, more than five.
+        assert_eq!(shown(&example_windows()).await, journeys(18));
         let calendar = Config::parse(EXAMPLE).unwrap().calendar;
-        assert_eq!(
+        let pick = async |journey: &str, windows: &WatchWindows| {
             departures
-                .pick("t10", at("06:50:00"), &calendar, &example_windows())
+                .pick(journey, at("06:50:00"), &calendar, windows)
                 .await
-                .map(|pick| pick.leave),
-            Ok(at("06:59:00"))
-        );
-        assert_eq!(
-            departures
-                .pick("t11", at("06:50:00"), &calendar, &example_windows())
-                .await,
-            Err(Refusal::Unknown)
-        );
+                .map(|pick| pick.leave)
+        };
+        assert_eq!(pick("t17", &example_windows()).await, Ok(at("07:13:00")));
+        assert_eq!(pick("t18", &example_windows()).await, Err(Refusal::Unknown));
+        // The day's window, later: the trains up to its end.
+        let mut later = example_windows();
+        later.outbound.end = time(8, 30, 0, 0);
+        assert_eq!(shown(&later).await, journeys(20));
+        assert_eq!(pick("t18", &later).await, Ok(at("07:15:00")));
     }
 
     #[test]
@@ -1389,27 +1444,57 @@ mod tests {
         };
         // The first train from 8:05 in Paris: the 8:07, leaving at 8:11.
         let view = departures
-            .view(at("06:50:00"), None, &usual(8, 5), &quiet())
+            .view(
+                at("06:50:00"),
+                None,
+                &usual(8, 5),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         assert_eq!(marked(&view), ["j2"]);
         // From 8:12: the 8:22 is cancelled, and none other is listed.
         let view = departures
-            .view(at("06:50:00"), None, &usual(8, 12), &quiet())
+            .view(
+                at("06:50:00"),
+                None,
+                &usual(8, 12),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         assert_eq!(marked(&view), Vec::<String>::new());
         // Up to half an hour after the usual time, as the reminder: the 7:52
         // is the usual train from 7:22, not from 7:21.
         let view = departures
-            .view(at("06:50:00"), None, &usual(7, 22), &quiet())
+            .view(
+                at("06:50:00"),
+                None,
+                &usual(7, 22),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         assert_eq!(marked(&view), ["j1"]);
         let view = departures
-            .view(at("06:50:00"), None, &usual(7, 21), &quiet())
+            .view(
+                at("06:50:00"),
+                None,
+                &usual(7, 21),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         assert_eq!(marked(&view), Vec::<String>::new());
         // The train picked today is the one reminded.
         let view = departures
-            .view(at("06:50:00"), Some(&j2()), &usual(7, 50), &quiet())
+            .view(
+                at("06:50:00"),
+                Some(&j2()),
+                &usual(7, 50),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         assert_eq!(marked(&view), Vec::<String>::new());
         // The other way's usual train is not this one's.
@@ -1418,7 +1503,13 @@ mod tests {
             inbound: Some(time(7, 50, 0, 0)),
         };
         let view = departures
-            .view(at("06:50:00"), None, &evening, &quiet())
+            .view(
+                at("06:50:00"),
+                None,
+                &evening,
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         assert_eq!(marked(&view), Vec::<String>::new());
     }
@@ -1488,7 +1579,13 @@ mod tests {
         let departures = next_departures(&server, EXAMPLE);
         let feed = feed(&[incident("C02000", Severity::Blocking)]);
         let view = departures
-            .view(at("06:50:00"), None, &UsualTrains::default(), &feed)
+            .view(
+                at("06:50:00"),
+                None,
+                &UsualTrains::default(),
+                &feed,
+                &departures.windows,
+            )
             .await;
         assert_eq!(
             serde_json::to_value(&view).unwrap(),
@@ -1507,7 +1604,9 @@ mod tests {
         let usual = UsualTrains::default();
         // Without the feed, or with nothing on line X: no backup, and Y is not read.
         for feed in [unread(), feed(&[incident("C01740", Severity::Blocking)])] {
-            let view = departures.view(at("06:50:00"), None, &usual, &feed).await;
+            let view = departures
+                .view(at("06:50:00"), None, &usual, &feed, &departures.windows)
+                .await;
             assert_eq!(view.backups, []);
         }
         // The backup's own line disrupted too: said on its ride.
@@ -1515,7 +1614,9 @@ mod tests {
             incident("C02000", Severity::Unknown),
             incident("C03000", Severity::Disrupted),
         ]);
-        let view = departures.view(at("06:50:30"), None, &usual, &feed).await;
+        let view = departures
+            .view(at("06:50:30"), None, &usual, &feed, &departures.windows)
+            .await;
         assert_eq!(view.backups.len(), 1);
         assert_eq!(view.backups[0].instead_of[0].severity, Some("disrupted"));
         assert_eq!(view.backups[0].legs[0].severity, Some("disrupted"));
@@ -1541,8 +1642,12 @@ mod tests {
             Prim::new(&server.uri(), "key"),
         );
         let usual = UsualTrains::default();
-        departures.view(at("16:20:00"), None, &usual, &feed).await;
-        let view = departures.view(at("06:50:00"), None, &usual, &feed).await;
+        departures
+            .view(at("16:20:00"), None, &usual, &feed, &departures.windows)
+            .await;
+        let view = departures
+            .view(at("06:50:00"), None, &usual, &feed, &departures.windows)
+            .await;
         assert_eq!(view.backups, []);
     }
 
@@ -1651,7 +1756,13 @@ outbound = \"07:30\"
         routes.remove("C02000");
         departures.set_routes(routes);
         let view = departures
-            .view(at("16:20:00"), None, &UsualTrains::default(), &quiet())
+            .view(
+                at("16:20:00"),
+                None,
+                &UsualTrains::default(),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         assert_eq!(
             serde_json::to_value(&view).unwrap(),
@@ -1667,7 +1778,13 @@ outbound = \"07:30\"
             .mount(&server)
             .await;
         let view = next_departures(&server, EXAMPLE)
-            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
+            .view(
+                at("06:50:00"),
+                None,
+                &UsualTrains::default(),
+                &quiet(),
+                &example_windows(),
+            )
             .await;
         assert_eq!(
             view.legs
@@ -1716,7 +1833,13 @@ outbound = \"07:30\"
         let notes = Arc::new(Journal::open(&dir.path().join("notes.jsonl")));
         let departures = next_departures(&server, EXAMPLE).noting(notes.clone());
         let view = departures
-            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
+            .view(
+                at("06:50:00"),
+                None,
+                &UsualTrains::default(),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         // The metro's next trains have no timetable: they stay unknown.
         assert_eq!(
@@ -1725,7 +1848,13 @@ outbound = \"07:30\"
         );
         // Twenty minutes on, the same timetable: the 7:52 has left.
         let view = departures
-            .view(at("07:10:00"), None, &UsualTrains::default(), &quiet())
+            .view(
+                at("07:10:00"),
+                None,
+                &UsualTrains::default(),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         let journeys: Vec<_> = view.legs[0]
             .departures
@@ -1737,7 +1866,13 @@ outbound = \"07:30\"
         // Departures that note nowhere read it all the same.
         let silent = next_departures(&server, EXAMPLE);
         let view = silent
-            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
+            .view(
+                at("06:50:00"),
+                None,
+                &UsualTrains::default(),
+                &quiet(),
+                &silent.windows,
+            )
             .await;
         assert!(view.legs[0].timetable);
         // Noted once, as it was read.
@@ -1770,7 +1905,13 @@ outbound = \"07:30\"
         // No answer for the alight stop: a 404.
         let departures = next_departures(&server, EXAMPLE);
         let view = departures
-            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
+            .view(
+                at("06:50:00"),
+                None,
+                &UsualTrains::default(),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         assert_eq!(view.legs[0].departures, None);
         assert!(view.legs[1].departures.is_some());
@@ -1780,7 +1921,13 @@ outbound = \"07:30\"
         departures.set_routes(routes);
         assert_eq!(
             departures
-                .view(at("06:50:30"), None, &UsualTrains::default(), &quiet())
+                .view(
+                    at("06:50:30"),
+                    None,
+                    &UsualTrains::default(),
+                    &quiet(),
+                    &departures.windows
+                )
                 .await
                 .legs[0]
                 .departures,
@@ -1796,16 +1943,34 @@ outbound = \"07:30\"
         answers(&server, "STIF:StopPoint:Q:300:", morning_metro(), 2).await;
         let departures = next_departures(&server, EXAMPLE);
         let first = departures
-            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
+            .view(
+                at("06:50:00"),
+                None,
+                &UsualTrains::default(),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         assert_eq!(
             departures
-                .view(at("06:50:59"), None, &UsualTrains::default(), &quiet())
+                .view(
+                    at("06:50:59"),
+                    None,
+                    &UsualTrains::default(),
+                    &quiet(),
+                    &departures.windows
+                )
                 .await,
             first
         );
         departures
-            .view(at("06:51:00"), None, &UsualTrains::default(), &quiet())
+            .view(
+                at("06:51:00"),
+                None,
+                &UsualTrains::default(),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         // The mocks check their counts when the server drops.
     }
@@ -1818,7 +1983,13 @@ outbound = \"07:30\"
         answers(&server, "STIF:StopPoint:Q:300:", morning_metro(), 1).await;
         let departures = next_departures(&server, EXAMPLE);
         departures
-            .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
+            .view(
+                at("06:50:00"),
+                None,
+                &UsualTrains::default(),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         let read = departures
             .read("STIF:StopArea:SP:100:", at("06:50:30"))
@@ -1854,7 +2025,13 @@ outbound = \"07:30\"
         // Judged once per request: the first answer does not stop the next stop's read.
         assert!(
             departures
-                .view(at("06:50:00"), None, &UsualTrains::default(), &quiet())
+                .view(
+                    at("06:50:00"),
+                    None,
+                    &UsualTrains::default(),
+                    &quiet(),
+                    &departures.windows
+                )
                 .await
                 .legs[0]
                 .departures
@@ -1863,14 +2040,26 @@ outbound = \"07:30\"
         // Still served from the last answer while it is fresh, then nothing.
         assert!(
             departures
-                .view(at("06:50:30"), None, &UsualTrains::default(), &quiet())
+                .view(
+                    at("06:50:30"),
+                    None,
+                    &UsualTrains::default(),
+                    &quiet(),
+                    &departures.windows
+                )
                 .await
                 .legs[0]
                 .departures
                 .is_some()
         );
         let low = departures
-            .view(at("06:52:00"), None, &UsualTrains::default(), &quiet())
+            .view(
+                at("06:52:00"),
+                None,
+                &UsualTrains::default(),
+                &quiet(),
+                &departures.windows,
+            )
             .await;
         assert_eq!(low.legs[0].departures, None);
         assert_eq!(low.legs[1].departures, None);
@@ -1878,7 +2067,13 @@ outbound = \"07:30\"
         let next_day: Timestamp = "2026-11-04T06:50:00Z".parse().unwrap();
         assert!(
             departures
-                .view(next_day, None, &UsualTrains::default(), &quiet())
+                .view(
+                    next_day,
+                    None,
+                    &UsualTrains::default(),
+                    &quiet(),
+                    &departures.windows
+                )
                 .await
                 .legs[0]
                 .departures
@@ -2016,7 +2211,7 @@ outbound = \"07:30\"
             .unwrap(),
         )
         .unwrap();
-        let shown = select("C01740", &visits, None, at("06:50:00"), None);
+        let shown = select("C01740", &visits, None, at("06:50:00"), None, None);
         assert_eq!(shown[0].expected, at("07:00:00"));
         assert_eq!(shown[0].aimed, Some(at("07:00:00")));
     }
@@ -2047,6 +2242,7 @@ outbound = \"07:30\"
             Some(("STIF:StopArea:SP:200:", &[])),
             at("06:50:00"),
             None,
+            None,
         );
         assert_eq!(
             shown
@@ -2063,11 +2259,14 @@ outbound = \"07:30\"
             .map(|n| metro(&format!("m{n}"), &format!("07:0{n}:00")))
             .collect();
         let visits = parse(&serde_json::to_vec(&siri(visits)).unwrap()).unwrap();
-        let shown = select("C02000", &visits, None, at("07:00:00"), None);
+        let shown = select("C02000", &visits, None, at("07:00:00"), None, None);
         assert_eq!(shown.len(), SHOWN);
         assert_eq!(shown[0].expected, at("07:00:00"));
         // Another line's trains are not this leg's.
-        assert_eq!(select("C01740", &visits, None, at("07:00:00"), None), []);
+        assert_eq!(
+            select("C01740", &visits, None, at("07:00:00"), None, None),
+            []
+        );
     }
 
     #[test]
@@ -2078,11 +2277,35 @@ outbound = \"07:30\"
         let visits = parse(&serde_json::to_vec(&siri(visits)).unwrap()).unwrap();
         // Three minutes to the platform: leaving now catches the 7:03. The 7:00 to
         // 7:02 are still shown, for whoever is already on the way.
-        let shown = select("C02000", &visits, None, at("07:00:00"), Some(3));
+        let shown = select("C02000", &visits, None, at("07:00:00"), Some(3), None);
         assert_eq!(shown.len(), 3 + SHOWN);
         assert_eq!(shown[0].expected, at("07:00:00"));
         assert_eq!(shown[3].expected, at("07:03:00"));
         assert_eq!(shown[3 + SHOWN - 1].expected, at("07:07:00"));
+    }
+
+    #[test]
+    fn every_train_left_for_before_the_window_ends_is_shown_to_pick() {
+        let visits: Vec<Value> = (0..15)
+            .map(|n| metro(&format!("m{n}"), &format!("07:{n:02}:00")))
+            .collect();
+        let visits = parse(&serde_json::to_vec(&siri(visits)).unwrap()).unwrap();
+        let shown = |until| {
+            select(
+                "C02000",
+                &visits,
+                None,
+                at("07:00:00"),
+                Some(3),
+                Some(until),
+            )
+        };
+        // Three minutes to the platform, the window ending at 7:10: up to the 7:12.
+        let ending = shown(at("07:10:00"));
+        assert_eq!(ending.len(), 13);
+        assert_eq!(ending[12].expected, at("07:12:00"));
+        // Ending sooner: still five that can be caught.
+        assert_eq!(shown(at("07:04:00")).len(), 3 + SHOWN);
     }
 
     #[test]
