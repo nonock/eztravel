@@ -51,6 +51,14 @@ class TomorrowActionTest {
         shown()?.extras?.getString(Notification.EXTRA_TITLE) == expected
     }
 
+    /** The system drops a notification's updates past a few a second: one at a time. */
+    private fun paced() = SystemClock.sleep(500)
+
+    private fun tap() {
+        paced()
+        remoteButton()!!.actionIntent.send()
+    }
+
     private fun remoteButton(): Notification.Action? =
         shown()?.actions?.singleOrNull { it.title == context.getString(R.string.notification_remote_tomorrow) }
 
@@ -60,7 +68,7 @@ class TomorrowActionTest {
         AppBackend.current = fake
         Notifier.show(context, notice)
         waitForTitle(notice.text(context.resources).title)
-        remoteButton()!!.actionIntent.send()
+        tap()
         waitForTitle(context.getString(R.string.notification_tomorrow_remote))
         assertEquals(listOf(Triple(tomorrow, tomorrow, Kind.REMOTE)), fake.daysSet.toList())
         assertEquals(
@@ -77,23 +85,24 @@ class TomorrowActionTest {
         AppBackend.current = fake
         Notifier.show(context, notice)
         waitForTitle(notice.text(context.resources).title)
-        remoteButton()!!.actionIntent.send()
+        tap()
         waitForTitle(context.getString(R.string.notification_tomorrow_unchanged))
         // An answer that cannot be read, from a server in a bad state.
         fake.failing = false
         fake.garbled = true
+        paced()
         Notifier.show(context, notice)
         waitForTitle(notice.text(context.resources).title)
-        remoteButton()!!.actionIntent.send()
+        tap()
         waitForTitle(context.getString(R.string.notification_tomorrow_unchanged))
         // Refused, as when tapped too late: not changed either.
         fake.garbled = false
         fake.dayRefusal = DayRefusal.PAST
-        remoteButton()!!.actionIntent.send()
+        tap()
         waitFor("set once") { fake.daysSet.size == 1 }
         waitForTitle(context.getString(R.string.notification_tomorrow_unchanged))
         fake.dayRefusal = null
-        remoteButton()!!.actionIntent.send()
+        tap()
         waitForTitle(context.getString(R.string.notification_tomorrow_remote))
     }
 }
