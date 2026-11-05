@@ -358,14 +358,16 @@ async fn next_departures(
     State(line_alerts): State<Arc<LineAlerts>>,
 ) -> Json<departures::View> {
     let now = Timestamp::now();
+    let today = schedule.today(now);
     let profile = store.profile();
     Json(
         departures
             .view(
                 now,
                 profile.pick.as_ref(),
-                &profile.usual_on(schedule.today(now), &schedule.windows),
+                &profile.usual_on(today, &schedule.windows),
                 &line_alerts,
+                &profile.windows(&schedule.windows, today),
             )
             .await,
     )
