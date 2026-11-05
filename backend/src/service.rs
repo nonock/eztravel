@@ -359,7 +359,7 @@ impl Service {
                 .map(|seen| (seen.line.clone(), trains.around(&seen.line, now, AROUND)))
                 .collect();
             let alerted: Vec<String> = next.lines().iter().map(|(line, _)| line.clone()).collect();
-            notifications.extend(judge(&mut lateness, key, &around, &alerted));
+            notifications.extend(judge(&mut lateness, key, now, &around, &alerted));
             notifications.extend(self.reminders(&mut leaving, key, now, local, seen, profile));
             // Last: when anything before it cannot be sent, the poll is tried again
             // whole, and checks are not back yet anyway.

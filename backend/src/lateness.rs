@@ -1,10 +1,11 @@
 //! Trains of a line running late with no record to tell why: at least
 //! [`LATE_TRAINS`] of those leaving around now, [`LATE`] or more behind their
 //! timetable, while no alert is under way on the line. Told once, then when no
-//! train around now is late any more; a record on the line tells the rest.
+//! train around now is late any more; a record on the line tells the rest, and
+//! why the trains that left while it was under way ran late.
 
-use jiff::SignedDuration;
 use jiff::civil::Date;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::alerts::Notification;
@@ -18,36 +19,53 @@ pub const LATE_TRAINS: usize = 3;
 /// Around now: the trains leaving from this long before now to this long after.
 pub const AROUND: SignedDuration = SignedDuration::from_mins(30);
 
-/// The lines told late in the current window. Kept between polls, and across restarts.
+/// The lines told late in the current window, and when each last had an alert
+/// under way. Kept between polls, and across restarts.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lateness {
     window: Option<(Date, Direction)>,
     late: Vec<String>,
+    #[serde(default)]
+    alerted: Vec<(String, Timestamp)>,
 }
 
-/// One poll's word on how the lines run: each with its trains around now, and
-/// those with an alert under way.
+/// One poll's word, at `now`, on how the lines run: each with its trains
+/// around now, and those with an alert under way.
 pub fn judge(
     state: &mut Lateness,
     key: (Date, Direction),
+    now: Timestamp,
     lines: &[(String, Vec<Train>)],
     alerted: &[String],
 ) -> Vec<Notification> {
     if state.window != Some(key) {
-        state.window = Some(key);
-        state.late.clear();
+        *state = Lateness {
+            window: Some(key),
+            ..Lateness::default()
+        };
     }
     let mut notifications = vec![];
     for (line, trains) in lines {
+        if alerted.contains(line) {
+            state.late.retain(|known| known != line);
+            state.alerted.retain(|(known, _)| known != line);
+            state.alerted.push((line.clone(), now));
+            continue;
+        }
+        let last_alerted = state
+            .alerted
+            .iter()
+            .find(|(known, _)| known == line)
+            .map(|(_, at)| *at);
         let late: Vec<Train> = trains
             .iter()
             .filter(|train| train.expected.duration_since(train.aimed) >= LATE)
+            // Left while a record was under way: it told why.
+            .filter(|train| last_alerted.is_none_or(|at| train.expected > at))
             .cloned()
             .collect();
         let told = state.late.contains(line);
-        if alerted.contains(line) {
-            state.late.retain(|known| known != line);
-        } else if !told && late.len() >= LATE_TRAINS {
+        if !told && late.len() >= LATE_TRAINS {
             state.late.push(line.clone());
             notifications.push(Notification::LineLate {
                 line: line.clone(),
@@ -64,11 +82,14 @@ pub fn judge(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jiff::Timestamp;
     use jiff::civil::date;
 
     const KEY: (Date, Direction) = (date(2026, 11, 3), Direction::Outbound);
     const LINE: &str = "C01740";
+
+    fn at(time: &str) -> Timestamp {
+        format!("2026-11-03T{time}:00Z").parse().unwrap()
+    }
 
     /// A train of the line leaving `index` ten minutes apart from 6:00 UTC, `late` minutes behind.
     fn train(index: usize, late: i64) -> Train {
@@ -96,46 +117,109 @@ mod tests {
     #[test]
     fn a_line_late_with_no_record_is_told_once_then_on_time_again() {
         let mut state = Lateness::default();
+        let now = at("06:20");
         // Two late: not yet.
-        assert_eq!(judge(&mut state, KEY, &around(&[6, 7, 2]), &[]), []);
+        assert_eq!(judge(&mut state, KEY, now, &around(&[6, 7, 2]), &[]), []);
         assert_eq!(
-            judge(&mut state, KEY, &around(&[6, 7, 12]), &[]),
+            judge(&mut state, KEY, now, &around(&[6, 7, 12]), &[]),
             [Notification::LineLate {
                 line: LINE.into(),
                 trains: vec![train(0, 6), train(1, 7), train(2, 12)],
             }]
         );
         // Once.
-        assert_eq!(judge(&mut state, KEY, &around(&[6, 7, 12, 9]), &[]), []);
-        // One still late: not on time yet.
-        assert_eq!(judge(&mut state, KEY, &around(&[0, 6]), &[]), []);
         assert_eq!(
-            judge(&mut state, KEY, &around(&[0, 1]), &[]),
+            judge(&mut state, KEY, now, &around(&[6, 7, 12, 9]), &[]),
+            []
+        );
+        // One still late: not on time yet.
+        assert_eq!(judge(&mut state, KEY, now, &around(&[0, 6]), &[]), []);
+        assert_eq!(
+            judge(&mut state, KEY, now, &around(&[0, 1]), &[]),
             [Notification::LineOnTime { line: LINE.into() }]
         );
-        assert_eq!(judge(&mut state, KEY, &around(&[0, 1]), &[]), []);
+        assert_eq!(judge(&mut state, KEY, now, &around(&[0, 1]), &[]), []);
     }
 
     #[test]
     fn a_record_on_the_line_tells_why_its_trains_are_late() {
         let alerted = [LINE.to_string()];
+        let now = at("06:20");
         let mut state = Lateness::default();
-        assert_eq!(judge(&mut state, KEY, &around(&[6, 7, 12]), &alerted), []);
+        assert_eq!(
+            judge(&mut state, KEY, now, &around(&[6, 7, 12]), &alerted),
+            []
+        );
         // Told late, then a record: its end says the rest.
         let mut state = Lateness::default();
-        judge(&mut state, KEY, &around(&[6, 7, 12]), &[]);
-        assert_eq!(judge(&mut state, KEY, &around(&[6, 7, 12]), &alerted), []);
-        assert_eq!(judge(&mut state, KEY, &around(&[0]), &[]), []);
+        judge(&mut state, KEY, now, &around(&[6, 7, 12]), &[]);
+        assert_eq!(
+            judge(&mut state, KEY, now, &around(&[6, 7, 12]), &alerted),
+            []
+        );
+        assert_eq!(judge(&mut state, KEY, now, &around(&[0]), &[]), []);
+    }
+
+    #[test]
+    fn trains_that_left_late_under_a_record_were_told_by_it() {
+        let mut state = Lateness::default();
+        // A record under way at 6:20: the trains of 6:00 and 6:10 left late under it.
+        judge(
+            &mut state,
+            KEY,
+            at("06:20"),
+            &around(&[6, 7]),
+            &[LINE.to_string()],
+        );
+        // It ends: with the train of 6:20 late too, one alone counts.
+        assert_eq!(
+            judge(&mut state, KEY, at("06:22"), &around(&[6, 7, 12]), &[]),
+            []
+        );
+        // Two more leave late after it.
+        assert_eq!(
+            judge(
+                &mut state,
+                KEY,
+                at("06:50"),
+                &around(&[6, 7, 12, 8, 9]),
+                &[]
+            ),
+            [Notification::LineLate {
+                line: LINE.into(),
+                trains: vec![train(2, 12), train(3, 8), train(4, 9)],
+            }]
+        );
+    }
+
+    #[test]
+    fn a_state_saved_before_records_were_kept_still_reads() {
+        let state: Lateness = serde_json::from_str(r#"{"window": null, "late": []}"#).unwrap();
+        assert_eq!(state, Lateness::default());
     }
 
     #[test]
     fn each_window_starts_afresh() {
         let mut state = Lateness::default();
-        judge(&mut state, KEY, &around(&[6, 7, 12]), &[]);
+        let now = at("08:00");
+        judge(&mut state, KEY, now, &around(&[6, 7, 12]), &[]);
         let evening = (date(2026, 11, 3), Direction::Inbound);
-        assert_eq!(judge(&mut state, evening, &around(&[0]), &[]), []);
+        assert_eq!(judge(&mut state, evening, now, &around(&[0]), &[]), []);
         assert_eq!(
-            judge(&mut state, evening, &around(&[6, 7, 12]), &[]).len(),
+            judge(&mut state, evening, now, &around(&[6, 7, 12]), &[]).len(),
+            1
+        );
+        // Nor does a record of the morning tell the evening's trains.
+        let mut state = Lateness::default();
+        judge(
+            &mut state,
+            KEY,
+            now,
+            &around(&[6, 7, 12]),
+            &[LINE.to_string()],
+        );
+        assert_eq!(
+            judge(&mut state, evening, now, &around(&[6, 7, 12]), &[]).len(),
             1
         );
     }
