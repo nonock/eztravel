@@ -57,6 +57,15 @@ fun PushMessage.text(resources: Resources, zone: ZoneId = ZoneId.systemDefault()
             },
         ),
     )
+    is PushMessage.LineLate -> NotificationText(
+        resources.getString(R.string.notification_line_late, line.label(resources)),
+        if (least == most) {
+            resources.getQuantityString(R.plurals.notification_line_late_even, count, count, most)
+        } else {
+            resources.getQuantityString(R.plurals.notification_line_late_text, count, count, least, most)
+        },
+    )
+    is PushMessage.LineOnTime -> NotificationText(resources.getString(R.string.notification_line_on_time, line.label(resources)), "")
     is PushMessage.TrainsCancelled -> NotificationText(
         resources.getQuantityString(R.plurals.notification_trains_cancelled, trains.size, trains[0].line.label(resources), trains.size),
         trains.joinToString("\n") {

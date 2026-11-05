@@ -43,6 +43,18 @@
         <item quantity="other">%1$s : %2$d trains supprimés</item>
     </plurals>
     <string name="notification_trains_cancelled_train">%1$s %2$s vers %3$s</string>
+    <string name="notification_line_late">%1$s : des trains en retard</string>
+    <plurals name="notification_line_late_text">
+        <item quantity="one">%1$d train part avec %2$d à %3$d min de retard, sans perturbation annoncée.</item>
+        <item quantity="many">%1$d trains partent avec %2$d à %3$d min de retard, sans perturbation annoncée.</item>
+        <item quantity="other">%1$d trains partent avec %2$d à %3$d min de retard, sans perturbation annoncée.</item>
+    </plurals>
+    <plurals name="notification_line_late_even">
+        <item quantity="one">%1$d train part avec %2$d min de retard, sans perturbation annoncée.</item>
+        <item quantity="many">%1$d trains partent avec %2$d min de retard, sans perturbation annoncée.</item>
+        <item quantity="other">%1$d trains partent avec %2$d min de retard, sans perturbation annoncée.</item>
+    </plurals>
+    <string name="notification_line_on_time">%1$s : trains de nouveau à l’heure</string>
     <string name="notification_train_back">%1$s : train de %2$s finalement maintenu</string>
     <string name="notification_train_missing">%1$s vers %2$s, depuis %3$s : il n’est plus annoncé.</string>
     <string name="notification_train_unlisted">%1$s vers %2$s, depuis %3$s : prévu à l’horaire, il n’est pas annoncé.</string>

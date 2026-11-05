@@ -90,6 +90,12 @@ sealed interface PushMessage {
         ANNOUNCED,
     }
 
+    /** Trains of [line] run late with no record to tell why: [count] of them, [least] to [most] minutes late. */
+    data class LineLate(val line: Line, val count: Int, val least: Int, val most: Int, override val until: Instant?) : PushMessage
+
+    /** The trains of [line], told late, run on time again. */
+    data class LineOnTime(val line: Line, override val until: Instant?) : PushMessage
+
     /** Several trains of a line will not run, known at once: all leave from the same station. */
     data class TrainsCancelled(val trains: List<Train>, override val until: Instant?) : PushMessage
 
@@ -142,6 +148,9 @@ sealed interface PushMessage {
             is TrainCancelled -> "train-${train.line.name}-${train.aimed}"
             // Neither the line's state nor a train's own.
             is TrainsCancelled -> "trains-${trains[0].line.name}-${trains[0].aimed}"
+            // The end replaces the notice.
+            is LineLate -> "late-${line.name}"
+            is LineOnTime -> "late-${line.name}"
             is TrainBack -> "train-${train.line.name}-${train.aimed}"
             is Leave -> "train-${train.line.name}-${train.aimed}"
             is TrainLate -> "train-${train.line.name}-${train.aimed}"
@@ -197,6 +206,14 @@ sealed interface PushMessage {
                     until,
                 )
                 "trains_cancelled" -> TrainsCancelled(trains(data, line) ?: return null, until)
+                "line_late" -> LineLate(
+                    line ?: return null,
+                    data["count"]?.toIntOrNull() ?: return null,
+                    data["least"]?.toIntOrNull() ?: return null,
+                    data["most"]?.toIntOrNull() ?: return null,
+                    until,
+                )
+                "line_on_time" -> LineOnTime(line ?: return null, until)
                 "train_back" -> TrainBack(train(data, line) ?: return null, until)
                 "leave" -> Leave(
                     train(data, line) ?: return null,
