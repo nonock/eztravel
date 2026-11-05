@@ -88,6 +88,21 @@ class NotificationTextTest {
     private val palo = PushMessage.Train(train, "PALO", "Gare Centrale", "Les Aubépines", Instant.parse("2026-11-03T06:52:00Z"))
 
     @Test
+    fun trainsCancelledTogetherAreListedByTheirTimes() {
+        val later = palo.copy(mission = null, destination = "Mairie", aimed = Instant.parse("2026-11-03T07:02:00Z"))
+        val together = PushMessage.TrainsCancelled(listOf(palo, later), null)
+        assertEquals(
+            NotificationText("Ligne L : 2 trains supprimés", "07:52 PALO vers Gare Centrale\n08:02 Train vers Mairie"),
+            together.text(french, paris),
+        )
+        val clock = { at: Instant -> DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(Locale.ENGLISH).format(at.atZone(paris)) }
+        assertEquals(
+            NotificationText("Line L: 2 trains cancelled", "${clock(palo.aimed)} PALO to Gare Centrale\n${clock(later.aimed)} Train to Mairie"),
+            together.text(english, paris),
+        )
+    }
+
+    @Test
     fun aCancelledTrainIsNamedByItsTimeAndSaysHowItIsKnown() {
         val missing = PushMessage.TrainCancelled(palo, PushMessage.Reason.MISSING, null)
         assertEquals(

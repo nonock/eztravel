@@ -146,6 +146,22 @@ class PushMessageTest {
     private val trainGone = Instant.parse("2026-11-03T07:02:00Z")
 
     @Test
+    fun readsTrainsCancelledTogether() {
+        val later = train.copy(mission = null, aimed = Instant.parse("2026-11-03T07:02:00Z"), expected = Instant.parse("2026-11-03T07:02:00Z"))
+        val together = PushMessage.parse(fixture("trains_cancelled"))
+        assertEquals(PushMessage.TrainsCancelled(listOf(train, later), until = Instant.parse("2026-11-03T07:12:00Z")), together)
+        // Neither the line's state nor a train's own.
+        assertEquals("trains-L-2026-11-03T06:52:00Z", together!!.tag)
+        assertNull(together.opening)
+        for (garbled in listOf("not JSON", "[]", "[{\"aimed\":\"2026-11-03T06:52:00Z\"}]", "[{\"destination\":\"X\",\"aimed\":\"never\"}]", "[1]")) {
+            assertNull(garbled, PushMessage.parse(fixture("trains_cancelled") + ("trains" to garbled)))
+        }
+        for (missing in listOf("line", "station", "trains")) {
+            assertNull(missing, PushMessage.parse(fixture("trains_cancelled") - missing))
+        }
+    }
+
+    @Test
     fun readsACancelledTrainThatGoesAwayAfterItsTime() {
         assertEquals(
             PushMessage.TrainCancelled(train, PushMessage.Reason.MISSING, until = trainGone),

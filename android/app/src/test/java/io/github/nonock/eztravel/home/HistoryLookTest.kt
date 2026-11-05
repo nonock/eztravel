@@ -30,6 +30,7 @@ class HistoryLookTest {
     @Test
     fun aTrainShowsItsLineAndTheReminderItsBell() {
         assertEquals(Look(Mark.Line(l), Tone.BAD), sent(PushMessage.TrainCancelled(train, PushMessage.Reason.MISSING, null)))
+        assertEquals(Look(Mark.Line(l), Tone.BAD), sent(PushMessage.TrainsCancelled(listOf(train, train), null)))
         assertEquals(Look(Mark.Line(l), Tone.GOOD), sent(PushMessage.TrainBack(train, null)))
         assertEquals(Look(Mark.Line(l), Tone.WARN), sent(PushMessage.TrainLate(train, null)))
         assertEquals(Look(Mark.Reminder, Tone.INFO), sent(PushMessage.Leave(train, at, "2", live = true, until = null)))

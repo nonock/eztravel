@@ -57,6 +57,12 @@ fun PushMessage.text(resources: Resources, zone: ZoneId = ZoneId.systemDefault()
             },
         ),
     )
+    is PushMessage.TrainsCancelled -> NotificationText(
+        resources.getQuantityString(R.plurals.notification_trains_cancelled, trains.size, trains[0].line.label(resources), trains.size),
+        trains.joinToString("\n") {
+            resources.getString(R.string.notification_trains_cancelled_train, it.time(resources, zone), it.name(resources), it.destination)
+        },
+    )
     is PushMessage.TrainBack -> NotificationText(
         resources.getString(R.string.notification_train_back, train.line.label(resources), train.time(resources, zone)),
         train.describe(resources, R.string.notification_train_route),

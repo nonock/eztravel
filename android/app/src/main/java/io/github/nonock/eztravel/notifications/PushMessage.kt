@@ -1,5 +1,7 @@
 package io.github.nonock.eztravel.notifications
 
+import io.github.nonock.eztravel.backend.stringOrNull
+import org.json.JSONArray
 import java.time.Instant
 import java.time.LocalDate
 
@@ -88,6 +90,9 @@ sealed interface PushMessage {
         ANNOUNCED,
     }
 
+    /** Several trains of a line will not run, known at once: all leave from the same station. */
+    data class TrainsCancelled(val trains: List<Train>, override val until: Instant?) : PushMessage
+
     /** A train of the window will not run. */
     data class TrainCancelled(val train: Train, val reason: Reason, override val until: Instant?) : PushMessage
 
@@ -135,6 +140,8 @@ sealed interface PushMessage {
             Outage, Recovered -> "watch"
             // A train's own: neither its line's state nor another train.
             is TrainCancelled -> "train-${train.line.name}-${train.aimed}"
+            // Neither the line's state nor a train's own.
+            is TrainsCancelled -> "trains-${trains[0].line.name}-${trains[0].aimed}"
             is TrainBack -> "train-${train.line.name}-${train.aimed}"
             is Leave -> "train-${train.line.name}-${train.aimed}"
             is TrainLate -> "train-${train.line.name}-${train.aimed}"
@@ -189,6 +196,7 @@ sealed interface PushMessage {
                     },
                     until,
                 )
+                "trains_cancelled" -> TrainsCancelled(trains(data, line) ?: return null, until)
                 "train_back" -> TrainBack(train(data, line) ?: return null, until)
                 "leave" -> Leave(
                     train(data, line) ?: return null,
@@ -214,6 +222,24 @@ sealed interface PushMessage {
                 instant(data["aimed"]) ?: return null,
                 instant(data["expected"]),
             )
+        }
+
+        /** The trains told together, as a JSON array in `trains`: null when one cannot be read. */
+        private fun trains(data: Map<String, String>, line: Line?): List<Train>? {
+            val station = data["station"] ?: return null
+            val listed = data["trains"]?.let { runCatching { JSONArray(it) }.getOrNull() } ?: return null
+            val trains = List(listed.length()) { index ->
+                val train = listed.optJSONObject(index) ?: return null
+                Train(
+                    line ?: return null,
+                    train.stringOrNull("mission"),
+                    train.stringOrNull("destination") ?: return null,
+                    station,
+                    instant(train.stringOrNull("aimed")) ?: return null,
+                    instant(train.stringOrNull("expected")),
+                )
+            }
+            return trains.ifEmpty { null }
         }
 
         /** Null from a backend that does not say where, or says it in a way this version cannot read. */

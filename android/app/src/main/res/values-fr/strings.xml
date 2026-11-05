@@ -37,6 +37,12 @@
     <string name="notification_recovered">Surveillance rétablie</string>
     <string name="notification_recovered_text">Les relevés fonctionnent de nouveau.</string>
     <string name="notification_train_cancelled">%1$s : train de %2$s supprimé</string>
+    <plurals name="notification_trains_cancelled">
+        <item quantity="one">%1$s : %2$d train supprimé</item>
+        <item quantity="many">%1$s : %2$d trains supprimés</item>
+        <item quantity="other">%1$s : %2$d trains supprimés</item>
+    </plurals>
+    <string name="notification_trains_cancelled_train">%1$s %2$s vers %3$s</string>
     <string name="notification_train_back">%1$s : train de %2$s finalement maintenu</string>
     <string name="notification_train_missing">%1$s vers %2$s, depuis %3$s : il n’est plus annoncé.</string>
     <string name="notification_train_unlisted">%1$s vers %2$s, depuis %3$s : prévu à l’horaire, il n’est pas annoncé.</string>
