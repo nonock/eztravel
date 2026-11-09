@@ -107,7 +107,8 @@ sealed interface PushMessage {
 
     /**
      * Time to [leave] for [train]. [live] when PRIM follows the train live: a
-     * train that has not set off yet is only still scheduled.
+     * train that has not set off yet is only still scheduled. An [update] tells
+     * quietly what changed since the reminder: the time, or the platform.
      */
     data class Leave(
         val train: Train,
@@ -115,10 +116,20 @@ sealed interface PushMessage {
         val platform: String?,
         val live: Boolean,
         override val until: Instant?,
+        val update: Boolean = false,
     ) : PushMessage
 
-    /** The train of the reminder now runs late, to leave at its `expected` time. */
-    data class TrainLate(val train: Train, override val until: Instant?) : PushMessage
+    /**
+     * The train of the reminder now runs late, to leave at its `expected` time:
+     * time to [leave] for it then, from [platform] when known. An older backend
+     * did not say when to leave.
+     */
+    data class TrainLate(
+        val train: Train,
+        override val until: Instant?,
+        val leave: Instant? = null,
+        val platform: String? = null,
+    ) : PushMessage
 
     /** When the watch window ends, or the train's time: the message goes away then. Null for the others. */
     val until: Instant?
@@ -215,16 +226,19 @@ sealed interface PushMessage {
                 )
                 "line_on_time" -> LineOnTime(line ?: return null, until)
                 "train_back" -> TrainBack(train(data, line) ?: return null, until)
-                "leave" -> Leave(
+                "leave", "trip" -> Leave(
                     train(data, line) ?: return null,
                     instant(data["leave"]) ?: return null,
                     data["platform"],
                     data["live"] == "true",
                     until,
+                    update = data["type"] == "trip",
                 )
                 "train_late" -> TrainLate(
                     train(data, line)?.takeIf { it.expected != null } ?: return null,
                     until,
+                    instant(data["leave"]),
+                    data["platform"],
                 )
                 else -> null
             }

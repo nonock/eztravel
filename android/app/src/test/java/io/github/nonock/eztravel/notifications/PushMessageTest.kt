@@ -80,7 +80,7 @@ class PushMessageTest {
         // Planned works may be on several lines: the page, folded.
         assertEquals(Opening(null, null, null), PushMessage.parse(fixture("planned"))!!.opening)
         // Trains and the watch open the commute.
-        for (name in listOf("train_cancelled", "train_back", "leave", "train_late", "outage", "recovered")) {
+        for (name in listOf("train_cancelled", "train_back", "leave", "train_late", "trip", "outage", "recovered")) {
             assertNull(name, PushMessage.parse(fixture(name))!!.opening)
         }
     }
@@ -218,11 +218,31 @@ class PushMessageTest {
     }
 
     @Test
+    fun readsTheTripUpdatedQuietly() {
+        val moved = train.copy(expected = Instant.parse("2026-11-03T06:55:00Z"))
+        assertEquals(
+            PushMessage.Leave(moved, Instant.parse("2026-11-03T06:43:00Z"), "4", live = true, until = Instant.parse("2026-11-03T07:05:00Z"), update = true),
+            PushMessage.parse(fixture("trip")),
+        )
+        assertEquals(false, (PushMessage.parse(fixture("leave")) as PushMessage.Leave).update)
+        assertNull(PushMessage.parse(fixture("trip") - "leave"))
+    }
+
+    @Test
     fun readsALateTrain() {
         assertEquals(
-            PushMessage.TrainLate(train.copy(expected = Instant.parse("2026-11-03T06:56:00Z")), until = Instant.parse("2026-11-03T07:06:00Z")),
+            PushMessage.TrainLate(
+                train.copy(expected = Instant.parse("2026-11-03T06:56:00Z")),
+                until = Instant.parse("2026-11-03T07:06:00Z"),
+                leave = Instant.parse("2026-11-03T06:44:00Z"),
+                platform = "2",
+            ),
             PushMessage.parse(fixture("train_late")),
         )
+        // From an older backend: when to leave is not said.
+        val older = PushMessage.parse(fixture("train_late") - "leave" - "platform") as PushMessage.TrainLate
+        assertNull(older.leave)
+        assertNull(older.platform)
         // Late by how much, it must say.
         assertNull(PushMessage.parse(fixture("train_late") - "expected"))
         assertNull(PushMessage.parse(fixture("train_late") - "station"))
@@ -244,6 +264,7 @@ class PushMessageTest {
         assertEquals("train-L-2026-11-03T06:52:00Z", PushMessage.parse(fixture("train_back"))!!.tag)
         assertEquals("train-L-2026-11-03T06:52:00Z", PushMessage.parse(fixture("leave"))!!.tag)
         assertEquals("train-L-2026-11-03T06:52:00Z", PushMessage.parse(fixture("train_late"))!!.tag)
+        assertEquals("train-L-2026-11-03T06:52:00Z", PushMessage.parse(fixture("trip"))!!.tag)
     }
 
     @Test
