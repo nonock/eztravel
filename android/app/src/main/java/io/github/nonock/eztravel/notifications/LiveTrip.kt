@@ -41,20 +41,30 @@ object LiveTrip {
     private fun onTheWay(context: Context, leave: PushMessage.Leave) =
         leave.train.trip(leave.onTheWay(context.resources), leave.train.expected ?: leave.train.aimed, leave.until)
 
-    /** The reminder to leave, at [now]: until the time to leave, counting down to it, then to the train. */
+    /**
+     * The reminder to leave, at [now]: until the time to leave, counting down to
+     * it, then to the train. An update changes the trip quietly, if still shown.
+     */
     fun leave(context: Context, leave: PushMessage.Leave, now: Instant) {
+        if (leave.update && shown(context)?.isFor(leave.train.line.name, leave.train.aimed) != true) return
         val onTheWay = onTheWay(context, leave)
         if (now < leave.leave) {
-            post(context, leave.train.trip(leave.text(context.resources), leave.leave, leave.until), now, quietly = false)
+            post(context, leave.train.trip(leave.text(context.resources), leave.leave, leave.until), now, quietly = leave.update)
             schedule(context, leave.leave, onTheWay)
         } else {
             cancelAlarm(context)
-            post(context, onTheWay, now, quietly = false)
+            post(context, onTheWay, now, quietly = leave.update)
         }
     }
 
-    /** The trip's train runs late: counting down to its new departure. */
+    /**
+     * The trip's train runs late: a reminder with the new time to leave, or,
+     * from an older backend, counting down to its new departure.
+     */
     fun late(context: Context, late: PushMessage.TrainLate, now: Instant) {
+        late.leave?.let {
+            return leave(context, PushMessage.Leave(late.train, it, late.platform, live = true, until = late.until), now)
+        }
         cancelAlarm(context)
         post(context, late.train.trip(late.text(context.resources), late.train.expected ?: late.train.aimed, late.until), now, quietly = false)
     }

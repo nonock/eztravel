@@ -199,4 +199,53 @@ class LiveTripTest {
         SystemClock.sleep(500)
         assertNotNull(trip())
     }
+
+    @Test
+    fun aLateTrainWithItsNewTimeToLeaveCountsDownToIt() {
+        Notifier.show(context, leave, now)
+        waitFor("the trip shows") { trip() != null }
+        SystemClock.sleep(500)
+        val later = train.copy(expected = train.aimed.plus(Duration.ofMinutes(6)))
+        val newLeave = leave.leave.plus(Duration.ofMinutes(4))
+        Notifier.show(context, PushMessage.TrainLate(later, leave.until, newLeave, "2"), now)
+        // As a reminder with the new time: it says how late in its body.
+        val told = PushMessage.Leave(later, newLeave, "2", live = true, until = leave.until)
+        waitFor("the new time to leave") { trip()?.`when` == newLeave.toEpochMilli() }
+        assertEquals(told.text(context.resources).title, title())
+        assertEquals(told.text(context.resources).body, trip()!!.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString())
+        // Told, not quietly.
+        assertEquals(0, trip()!!.flags and Notification.FLAG_ONLY_ALERT_ONCE)
+        assertTrue(alarmSet())
+    }
+
+    @Test
+    fun theTripIsUpdatedQuietly() {
+        Notifier.show(context, leave, now)
+        waitFor("the trip shows") { trip() != null }
+        SystemClock.sleep(500)
+        // The platform known at last, and the train a minute later.
+        val update = leave.copy(
+            train = train.copy(expected = train.expected!!.plus(Duration.ofMinutes(1))),
+            leave = leave.leave.plus(Duration.ofMinutes(1)),
+            platform = "14",
+            update = true,
+        )
+        Notifier.show(context, update, now)
+        waitFor("updated") { trip()?.`when` == update.leave.toEpochMilli() }
+        assertEquals(update.text(context.resources).body, trip()!!.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString())
+        assertTrue(trip()!!.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
+        assertTrue(alarmSet())
+    }
+
+    @Test
+    fun anUpdateDoesNotBringBackADismissedTrip() {
+        Notifier.show(context, leave, now)
+        waitFor("the trip shows") { trip() != null }
+        manager.cancel(LiveTrip.TAG, 1)
+        waitFor("dismissed") { trip() == null }
+        SystemClock.sleep(500)
+        Notifier.show(context, leave.copy(platform = "14", update = true), now)
+        SystemClock.sleep(500)
+        assertNull(trip())
+    }
 }
