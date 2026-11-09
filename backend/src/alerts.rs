@@ -92,9 +92,20 @@ pub enum Notification {
         platform: Option<String>,
         live: bool,
     },
-    /// The train of the reminder now runs late.
+    /// The train of the reminder now runs late: leave `at` the given time, from
+    /// `platform` when known.
     Late {
         train: Train,
+        at: Timestamp,
+        platform: Option<String>,
+    },
+    /// The train of the reminder changed otherwise, its time or its platform:
+    /// told quietly, as a reminder.
+    Trip {
+        train: Train,
+        at: Timestamp,
+        platform: Option<String>,
+        live: bool,
     },
 }
 

@@ -691,12 +691,15 @@ impl Service {
                     Err(error) => return Err(error),
                 }
             }
-            self.history.record(Entry {
-                at: now,
-                data,
-                delivered,
-                records: history::records(notification),
-            });
+            // The trip's quiet updates are not kept: the notifications told are.
+            if !matches!(notification, Notification::Trip { .. }) {
+                self.history.record(Entry {
+                    at: now,
+                    data,
+                    delivered,
+                    records: history::records(notification),
+                });
+            }
         }
         Ok(())
     }
@@ -1897,6 +1900,44 @@ mod tests {
         assert_eq!(service.poll(tuesday("06:36")).await, Poll::Sent(1));
         // Remembered across a restart.
         assert_eq!(setup.service().poll(tuesday("06:38")).await, Poll::Sent(0));
+    }
+
+    #[tokio::test]
+    async fn the_trip_updated_quietly_is_not_kept_in_the_history() {
+        let setup = Setup::with(train_routes_server().await).await;
+        setup.prim_answers(200, false, 2).await;
+        // The board stop says the 7:52 on time once, then two minutes late.
+        let board = || {
+            Mock::given(path("/stop-monitoring"))
+                .and(query_param("MonitoringRef", "STIF:StopArea:SP:100:"))
+        };
+        board()
+            .respond_with(ResponseTemplate::new(200).set_body_json(stop_list(&["j1"])))
+            .up_to_n_times(1)
+            .mount(&setup.server)
+            .await;
+        let mut moved = stop_list(&["j1"]);
+        moved["Siri"]["ServiceDelivery"]["StopMonitoringDelivery"][0]["MonitoredStopVisit"][0]["MonitoredVehicleJourney"]
+            ["MonitoredCall"]["ExpectedDepartureTime"] = serde_json::json!("2026-11-03T06:54:00Z");
+        board()
+            .respond_with(ResponseTemplate::new(200).set_body_json(moved))
+            .mount(&setup.server)
+            .await;
+        Mock::given(path("/stop-monitoring"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(stop_list(&["j1"])))
+            .mount(&setup.server)
+            .await;
+        setup.firebase_answers_to("leave", 200, 1).await;
+        setup.firebase_answers_to("trip", 200, 1).await;
+        usual(&setup, Direction::Outbound, 7, 52);
+        let mut service = setup.service();
+        assert_eq!(service.poll(tuesday("06:36")).await, Poll::Sent(1));
+        assert_eq!(service.poll(tuesday("06:38")).await, Poll::Sent(1));
+        let kept: Vec<String> = history(&service)
+            .iter()
+            .map(|entry| entry.data["type"].clone())
+            .collect();
+        assert_eq!(kept, ["leave"]);
     }
 
     /// Sets the usual train of the way `direction`, by its time in Paris.
