@@ -9,6 +9,8 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.core.app.NotificationManagerCompat
 import io.github.nonock.eztravel.watchdog.Watchdog
+import io.github.nonock.eztravel.widget.TripWidget
+import io.github.nonock.eztravel.widget.WidgetTrip
 import java.time.Duration
 import java.time.Instant
 
@@ -46,6 +48,9 @@ object LiveTrip {
      * it, then to the train. An update changes the trip quietly, if still shown.
      */
     fun leave(context: Context, leave: PushMessage.Leave, now: Instant) {
+        // The widget follows the trip, even with its notification swiped away.
+        val train = leave.train
+        TripWidget.show(context, WidgetTrip(train.line, train.aimed, train.expected ?: train.aimed, leave.platform, leave.leave, leave.until), now)
         if (leave.update && shown(context)?.isFor(leave.train.line.name, leave.train.aimed) != true) return
         val onTheWay = onTheWay(context, leave)
         if (now < leave.leave) {
@@ -65,14 +70,20 @@ object LiveTrip {
         late.leave?.let {
             return leave(context, PushMessage.Leave(late.train, it, late.platform, live = true, until = late.until), now)
         }
+        val train = late.train
+        TripWidget.show(context, WidgetTrip(train.line, train.aimed, train.expected ?: train.aimed, null, null, late.until), now)
         cancelAlarm(context)
         post(context, late.train.trip(late.text(context.resources), late.train.expected ?: late.train.aimed, late.until), now, quietly = false)
     }
 
-    /** Ends the trip if it is for one of [trains], cancelled. */
+    /** Ends the trip if it is for one of [trains], cancelled: as notified, or on the widget. */
     fun cancelled(context: Context, trains: List<PushMessage.Train>) {
-        val shown = shown(context) ?: return
-        if (trains.any { shown.isFor(it.line.name, it.aimed) }) end(context)
+        val shown = shown(context)
+        val widget = TripWidget.saved(context)
+        val ends = trains.any { train ->
+            shown?.isFor(train.line.name, train.aimed) == true || (widget?.line?.name == train.line.name && widget.aimed == train.aimed)
+        }
+        if (ends) end(context)
     }
 
     /** At the time to leave, from the alarm's [intent]: the trip on the way, unless it was dismissed or replaced. */
@@ -82,10 +93,11 @@ object LiveTrip {
         post(context, trip, now, quietly = true)
     }
 
-    /** No trip shown, nor on its way. */
+    /** No trip shown, nor on its way, nor on the widget. */
     fun end(context: Context) {
         NotificationManagerCompat.from(context).cancel(TAG, Notifier.ID)
         cancelAlarm(context)
+        TripWidget.clear(context)
     }
 
     /** What the alarm at the time to leave of [leave] carries. */

@@ -58,6 +58,13 @@
     <string name="notification_train_unnamed">Train</string>
     <string name="notification_leave">%1$s: leave at %2$s</string>
     <string name="notification_leave_on_the_way">%1$s: train leaves at %2$s</string>
+    <string name="widget_description">The trip under way: when to leave, then the train.</string>
+    <string name="widget_idle">No trip under way</string>
+    <string name="widget_leave_in">Leave in</string>
+    <string name="widget_train_in">Train in</string>
+    <string name="widget_train" translatable="false">%1$s %2$s</string>
+    <string name="widget_platform">platform %1$s</string>
+    <string name="widget_late" translatable="false">+%1$d min</string>
     <string name="notification_leave_train">%1$s at %2$s to %3$s</string>
     <string name="notification_leave_train_platform">%1$s at %2$s to %3$s, platform %4$s</string>
     <string name="notification_sentences">%1$s. %2$s</string>
