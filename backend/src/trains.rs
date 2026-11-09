@@ -252,6 +252,8 @@ pub fn follow(
                 .iter()
                 .position(|followed| followed.journey == visit.journey)
                 .or_else(|| {
+                    // Only a train of the leg: one of the other way may leave at the same time.
+                    serves(visit, expected, (&leg.alight, &leg.arriving))?;
                     trains
                         .followed
                         .iter()
@@ -542,6 +544,21 @@ mod tests {
             polls(&mut trains, "05:58", 1, true, Vec::new),
             cancelled(Why::Missing)
         );
+    }
+
+    #[test]
+    fn a_train_of_the_other_way_does_not_take_the_place_of_one_of_the_timetable() {
+        let mut trains = Trains::default();
+        plan(&mut trains, KEY, &[scheduled("06:52")]);
+        // A minute before at the board stop, listed first, but not to the alight stop.
+        let board = || vec![visit("k1", "06:51", "06:51", "onTime", 300), j1("onTime")];
+        assert_eq!(polls(&mut trains, "05:50", 1, true, board), []);
+        let followed: Vec<&str> = trains
+            .followed
+            .iter()
+            .map(|followed| followed.journey.as_str())
+            .collect();
+        assert_eq!(followed, ["j1"]);
     }
 
     #[test]
