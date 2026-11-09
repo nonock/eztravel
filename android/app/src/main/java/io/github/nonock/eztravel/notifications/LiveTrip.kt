@@ -38,7 +38,9 @@ object LiveTrip {
     /** What the trip shows: [text], counting down to [at], until [until]; for the train of [line] at [aimed]. */
     private data class Trip(val text: NotificationText, val at: Instant, val until: Instant?, val line: String, val aimed: Instant)
 
-    private fun PushMessage.Train.trip(text: NotificationText, at: Instant, until: Instant?) = Trip(text, at, until, line.name, aimed)
+    /** The trip for this train: it goes once the train has left, as the widget does, and by [until] at the latest. */
+    private fun PushMessage.Train.trip(text: NotificationText, at: Instant, until: Instant?) =
+        Trip(text, at, listOfNotNull(expected ?: aimed, until).min(), line.name, aimed)
 
     private fun onTheWay(context: Context, leave: PushMessage.Leave) =
         leave.train.trip(leave.onTheWay(context.resources), leave.train.expected ?: leave.train.aimed, leave.until)

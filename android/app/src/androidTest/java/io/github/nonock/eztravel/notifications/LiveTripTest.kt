@@ -76,8 +76,8 @@ class LiveTripTest {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1) {
             assertTrue(trip.hasPromotableCharacteristics())
         }
-        // Gone once the train has left.
-        assertEquals(Duration.between(now, leave.until).toMillis(), trip.timeoutAfter)
+        // Gone once the train has left, as the widget: not left with a chip that counts no more.
+        assertEquals(Duration.between(now, train.expected).toMillis(), trip.timeoutAfter)
         // In place of the train's own notification, with the time to leave set to go on the way.
         assertEquals(emptyList<Any>(), manager.activeNotifications.filter { it.tag == leave.tag })
         assertTrue(alarmSet())
