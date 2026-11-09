@@ -3,4 +3,8 @@
     <!-- The "Z route" logo: an amber ride on navy. -->
     <color name="brand_navy">#FF0E1A2B</color>
     <color name="brand_amber">#FFFFB547</color>
+    <!-- The home screen widget, as the app's dark theme: raised surface, text and secondary text. -->
+    <color name="widget_surface">#FF1C2D45</color>
+    <color name="widget_text">#FFE7EBF1</color>
+    <color name="widget_secondary">#FFB4C0D0</color>
 </resources>

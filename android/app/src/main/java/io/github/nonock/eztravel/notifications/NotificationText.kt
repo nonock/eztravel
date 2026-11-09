@@ -121,7 +121,7 @@ private fun PushMessage.Scope.words(resources: Resources): String = when (this) 
     }
 }
 
-private fun Instant.clock(resources: Resources, zone: ZoneId): String =
+internal fun Instant.clock(resources: Resources, zone: ZoneId): String =
     DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(resources.configuration.locales[0]).format(atZone(zone))
 
 /** Its mission code, or just "Train". */

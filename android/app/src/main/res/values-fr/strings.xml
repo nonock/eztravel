@@ -63,6 +63,11 @@
     <string name="notification_train_unnamed">Train</string>
     <string name="notification_leave">%1$s : partir à %2$s</string>
     <string name="notification_leave_on_the_way">%1$s : départ à %2$s</string>
+    <string name="widget_description">Le trajet en cours : quand partir, puis le train.</string>
+    <string name="widget_idle">Pas de trajet en cours</string>
+    <string name="widget_leave_in">Partir dans</string>
+    <string name="widget_train_in">Départ dans</string>
+    <string name="widget_platform">voie %1$s</string>
     <string name="notification_leave_train">%1$s de %2$s vers %3$s</string>
     <string name="notification_leave_train_platform">%1$s de %2$s vers %3$s, voie %4$s</string>
     <string name="notification_sentences">%1$s. %2$s</string>
