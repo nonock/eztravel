@@ -214,8 +214,19 @@ pub fn data(
             at,
             platform,
             live,
+        }
+        | Notification::Trip {
+            train,
+            at,
+            platform,
+            live,
         } => {
-            put("type", "leave");
+            let kind = if matches!(notification, Notification::Leave { .. }) {
+                "leave"
+            } else {
+                "trip"
+            };
+            put("type", kind);
             describe_train(train, labels, &mut put);
             put("leave", &at.to_string());
             if let Some(platform) = platform {
@@ -223,9 +234,17 @@ pub fn data(
             }
             put("live", if *live { "true" } else { "false" });
         }
-        Notification::Late { train } => {
+        Notification::Late {
+            train,
+            at,
+            platform,
+        } => {
             put("type", "train_late");
             describe_train(train, labels, &mut put);
+            put("leave", &at.to_string());
+            if let Some(platform) = platform {
+                put("platform", platform);
+            }
         }
     }
     data
@@ -1295,19 +1314,43 @@ mod tests {
         let unknown = data(&leave(None, false), &labels(), until());
         assert_eq!(unknown["live"], "false");
         assert!(!unknown.contains_key("platform"));
-        let late = Notification::Late {
+        let late = |platform: Option<&str>| Notification::Late {
             train: Train {
                 expected: at("06:56"),
                 ..train(Some("PALO"))
             },
+            at: at("06:44"),
+            platform: platform.map(String::from),
         };
-        assert_eq!(data(&late, &labels(), until()), fixture("train_late"));
+        assert_eq!(
+            data(&late(Some("2")), &labels(), until()),
+            fixture("train_late")
+        );
+        assert!(!data(&late(None), &labels(), until()).contains_key("platform"));
+        // The trip updated quietly: as a reminder, of its own type.
+        let trip = |platform: Option<&str>| Notification::Trip {
+            train: Train {
+                expected: at("06:55"),
+                ..train(Some("PALO"))
+            },
+            at: at("06:43"),
+            platform: platform.map(String::from),
+            live: true,
+        };
+        assert_eq!(data(&trip(Some("4")), &labels(), until()), fixture("trip"));
+        assert!(!data(&trip(None), &labels(), until()).contains_key("platform"));
     }
 
     #[test]
     fn a_train_back_replaces_its_cancellation_only() {
         // And a reminder or a delay replaces what was said of the same train.
-        for name in ["train_cancelled", "train_back", "leave", "train_late"] {
+        for name in [
+            "train_cancelled",
+            "train_back",
+            "leave",
+            "train_late",
+            "trip",
+        ] {
             assert_eq!(
                 message("t", &fixture(name))["message"]["android"]["collapse_key"],
                 "train-L-2026-11-03T06:52:00Z"

@@ -99,7 +99,8 @@ pub fn records(notification: &Notification) -> Vec<Record> {
         | Notification::LineOnTime { .. }
         | Notification::TrainBack { .. }
         | Notification::Leave { .. }
-        | Notification::Late { .. } => vec![],
+        | Notification::Late { .. }
+        | Notification::Trip { .. } => vec![],
     }
 }
 
@@ -307,7 +308,24 @@ mod tests {
             }),
             []
         );
-        assert_eq!(records(&Notification::Late { train }), []);
+        let at = train.expected;
+        assert_eq!(
+            records(&Notification::Late {
+                train: train.clone(),
+                at,
+                platform: None,
+            }),
+            []
+        );
+        assert_eq!(
+            records(&Notification::Trip {
+                train,
+                at,
+                platform: None,
+                live: true,
+            }),
+            []
+        );
     }
 
     #[test]

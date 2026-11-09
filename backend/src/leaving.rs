@@ -5,7 +5,8 @@
 //! for its time, or now if later, up to half an hour after. The reminder says how it runs, but only what PRIM knows: a train that has not
 //! set off yet carries the night's timetable, so it is "still scheduled"
 //! rather than "on time". After the reminder, a delay of a few minutes is
-//! told once; a train said cancelled gives way to the next one.
+//! told once, and any other change of its time or platform quietly; a train
+//! said cancelled gives way to the next one.
 
 use jiff::civil::Date;
 use jiff::tz::TimeZone;
@@ -25,6 +26,8 @@ pub const NOTICE: SignedDuration = SignedDuration::from_mins(5);
 pub const LATEST: SignedDuration = SignedDuration::from_mins(30);
 /// A delay this long, said after the reminder, is told.
 pub const LATE: SignedDuration = SignedDuration::from_mins(3);
+/// A departure moved this much since last told is told again, quietly.
+const MOVED: SignedDuration = SignedDuration::from_mins(1);
 /// A train recorded this recently is followed live.
 const LIVE: SignedDuration = SignedDuration::from_mins(30);
 
@@ -43,6 +46,9 @@ struct Reminded {
     /// The pick it was for, if any: a new pick is reminded anew.
     #[serde(default)]
     picked: Option<String>,
+    /// The platform last told.
+    #[serde(default)]
+    platform: Option<String>,
 }
 
 /// What the reminder is for.
@@ -139,15 +145,29 @@ pub fn remind(
             Some(visit) if visit.status == CallStatus::Cancelled => {}
             Some(visit) => {
                 let expected = departure(visit).unwrap_or(reminded.train.expected);
+                let moved = expected.duration_since(reminded.train.expected).abs() >= MOVED;
+                if now >= expected || (!moved && visit.platform == reminded.platform) {
+                    return vec![];
+                }
+                reminded.train.expected = expected;
+                reminded.platform.clone_from(&visit.platform);
+                let at = expected - reach;
+                let platform = visit.platform.clone();
                 let late = expected.duration_since(reminded.train.aimed) >= LATE;
-                if late && !reminded.told_late && now < expected {
+                if late && !reminded.told_late {
                     reminded.told_late = true;
-                    reminded.train.expected = expected;
                     return vec![Notification::Late {
                         train: reminded.train.clone(),
+                        at,
+                        platform,
                     }];
                 }
-                return vec![];
+                return vec![Notification::Trip {
+                    train: reminded.train.clone(),
+                    at,
+                    platform,
+                    live: now.duration_since(visit.recorded_at) <= LIVE,
+                }];
             }
             None => return vec![],
         }
@@ -193,9 +213,11 @@ pub fn remind(
     };
     leaving.reminded = Some(Reminded {
         journey: visit.journey.clone(),
+        // Already late, the reminder says so.
+        told_late: train.expected.duration_since(train.aimed) >= LATE,
         train: train.clone(),
-        told_late: false,
         picked: picked.map(String::from),
+        platform: visit.platform.clone(),
     });
     vec![Notification::Leave {
         train,
@@ -377,21 +399,107 @@ mod tests {
         );
     }
 
+    /// The trip updated quietly: leave at `at_` for `train`, from platform 2.
+    fn trip(train: Train, at_: &str) -> Vec<Notification> {
+        vec![Notification::Trip {
+            train,
+            at: at(at_),
+            platform: Some("2".into()),
+            live: true,
+        }]
+    }
+
+    /// `visit` leaving from `platform`, or none known yet.
+    fn on_platform(mut visit: Value, platform: Option<&str>) -> Value {
+        let call = &mut visit["MonitoredVehicleJourney"]["MonitoredCall"];
+        match platform {
+            Some(platform) => call["DeparturePlatformName"] = json!({ "value": platform }),
+            None => {
+                call.as_object_mut()
+                    .unwrap()
+                    .remove("DeparturePlatformName");
+            }
+        }
+        visit
+    }
+
     #[test]
-    fn a_delay_after_the_reminder_is_told_once() {
+    fn after_the_reminder_a_delay_is_told_once_and_each_change_quietly() {
         let mut leaving = Leaving::default();
         poll(&mut leaving, "07:15", three(on_time()));
-        let late = |minutes: &str| visit("j2", "07:32", minutes, "delayed", "07:16");
-        assert_eq!(poll(&mut leaving, "07:16", three(late("07:34"))), []);
+        let late = |expected: &str| visit("j2", "07:32", expected, "delayed", "07:16");
+        // Seconds are no change.
+        let jitter = visit("j2", "07:32", "07:32", "onTime", "07:16");
+        let mut jitter_board = three(jitter);
+        jitter_board[1]["MonitoredVehicleJourney"]["MonitoredCall"]["ExpectedDepartureTime"] =
+            json!("2026-11-03T07:32:40Z");
+        assert_eq!(poll(&mut leaving, "07:16", jitter_board), []);
+        // Two minutes: a new time to leave, told quietly.
+        assert_eq!(
+            poll(&mut leaving, "07:16", three(late("07:34"))),
+            trip(train("07:32", "07:34"), "07:22")
+        );
+        assert_eq!(poll(&mut leaving, "07:17", three(late("07:34"))), []);
+        // Three minutes late: told, with when to leave now.
         assert_eq!(
             poll(&mut leaving, "07:18", three(late("07:35"))),
             vec![Notification::Late {
-                train: train("07:32", "07:35")
+                train: train("07:32", "07:35"),
+                at: at("07:23"),
+                platform: Some("2".into()),
             }]
         );
-        assert_eq!(poll(&mut leaving, "07:20", three(late("07:40"))), []);
+        // Later still: quietly again.
+        assert_eq!(
+            poll(&mut leaving, "07:20", three(late("07:40"))),
+            trip(train("07:32", "07:40"), "07:28")
+        );
         // Gone from the list, or past: nothing more.
         assert_eq!(poll(&mut leaving, "07:22", vec![]), []);
+        assert_eq!(poll(&mut leaving, "07:43", three(late("07:42"))), []);
+    }
+
+    #[test]
+    fn a_platform_known_after_the_reminder_is_told_quietly() {
+        // At a terminus, the platform comes minutes before the train leaves.
+        let mut leaving = Leaving::default();
+        let unknown = on_platform(on_time(), None);
+        let reminded = poll(&mut leaving, "07:15", three(unknown.clone()));
+        assert_eq!(
+            reminded,
+            vec![Notification::Leave {
+                train: train("07:32", "07:32"),
+                at: at("07:20"),
+                platform: None,
+                live: true,
+            }]
+        );
+        assert_eq!(poll(&mut leaving, "07:20", three(unknown)), []);
+        let known = on_platform(on_time(), Some("14"));
+        assert_eq!(
+            poll(&mut leaving, "07:28", three(known.clone())),
+            vec![Notification::Trip {
+                train: train("07:32", "07:32"),
+                at: at("07:20"),
+                platform: Some("14".into()),
+                live: true,
+            }]
+        );
+        assert_eq!(poll(&mut leaving, "07:29", three(known)), []);
+    }
+
+    #[test]
+    fn a_train_late_at_the_reminder_is_not_told_late_again() {
+        let mut leaving = Leaving::default();
+        let late = |expected: &str| visit("j2", "07:32", expected, "delayed", "07:10");
+        assert_eq!(
+            poll(&mut leaving, "07:19", three(late("07:36"))),
+            leave(train("07:32", "07:36"), "07:24", true)
+        );
+        assert_eq!(
+            poll(&mut leaving, "07:20", three(late("07:37"))),
+            trip(train("07:32", "07:37"), "07:25")
+        );
     }
 
     #[test]
@@ -623,6 +731,10 @@ mod tests {
         let old = saved.replace(r#","picked":null"#, "");
         assert!(!old.contains("picked"));
         assert_eq!(serde_json::from_str::<Leaving>(&old).unwrap(), leaving);
+        // Nor did it keep the platform told.
+        let older = saved.replace(r#","platform":"2""#, "");
+        assert!(!older.contains("platform"));
+        assert!(serde_json::from_str::<Leaving>(&older).is_ok());
     }
 
     #[test]
