@@ -204,6 +204,28 @@
     <string name="settings_calendar_about">Bureau, télétravail et congés</string>
     <string name="settings_usual_about">Le rappel pour partir, chaque jour de bureau</string>
     <string name="settings_history_about">Les notifications envoyées</string>
+    <string name="nav_stats">Statistiques</string>
+    <string name="stats_title">Statistiques</string>
+    <string name="settings_stats_about">Comment vos trains ont roulé, jour par jour</string>
+    <string name="stats_since">Depuis le %1$s</string>
+    <string name="stats_on_time_share">%1$d\u00A0%% à l’heure</string>
+    <plurals name="stats_trains">
+        <item quantity="one">%d train</item>
+        <item quantity="many">%d trains</item>
+        <item quantity="other">%d trains</item>
+    </plurals>
+    <plurals name="stats_cancelled">
+        <item quantity="one">%d supprimé</item>
+        <item quantity="many">%d supprimés</item>
+        <item quantity="other">%d supprimés</item>
+    </plurals>
+    <string name="stats_count">%1$s : %2$d à l’heure, %3$d en retard, %4$s</string>
+    <string name="stats_usual">Votre train de %1$s</string>
+    <string name="stats_run_on_time">À l’heure</string>
+    <string name="stats_run_late">+%1$d min</string>
+    <string name="stats_run_cancelled">Supprimé</string>
+    <string name="stats_run_none">Pas de train</string>
+    <string name="stats_empty">Aucun train suivi pour l’instant.</string>
     <string name="settings_on_time">Vérifications à l’heure</string>
     <string name="settings_on_time_about">Autorisez « Alarmes et rappels » : sans cela, le téléphone peut vérifier le serveur jusqu’à une heure en retard</string>
     <string name="calendar_holiday">Férié</string>

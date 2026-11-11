@@ -136,6 +136,14 @@ class HttpBackendTest {
     }
 
     @Test
+    fun readsTheStatistics() = runBlocking {
+        status = 200
+        answer = File("../../fixtures/api/stats.json").readText()
+        assertEquals(Stats.parse(answer), backend.stats())
+        assertEquals(listOf("GET /stats"), received.map { "${it.method} ${it.path}" })
+    }
+
+    @Test
     fun readsAMonthOfTheCalendar() = runBlocking {
         status = 200
         answer = File("../../fixtures/api/calendar.json").readText()

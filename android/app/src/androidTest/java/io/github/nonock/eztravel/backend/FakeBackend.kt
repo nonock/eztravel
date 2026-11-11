@@ -37,6 +37,7 @@ class FakeBackend(
     var statusGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null,
     /** Why today's way home is refused, if it is. */
     var lateRefusal: Refusal? = null,
+    var stats: Stats = Stats(null, emptyList()),
 ) : Backend {
     /** Days set otherwise than planned, as the backend keeps them. */
     val set = java.util.concurrent.ConcurrentHashMap<LocalDate, CalendarDay>()
@@ -55,6 +56,7 @@ class FakeBackend(
     val departuresReads = AtomicInteger()
     val alertsReads = AtomicInteger()
     val historyReads = AtomicInteger()
+    val statsReads = AtomicInteger()
 
     override fun register(token: String) {
         if (failing) throw IOException("unreachable")
@@ -73,6 +75,13 @@ class FakeBackend(
         if (failing) throw IOException("unreachable")
         if (garbled) throw JSONException("not JSON")
         return departures
+    }
+
+    override suspend fun stats(): Stats {
+        statsReads.incrementAndGet()
+        if (failing) throw IOException("unreachable")
+        if (garbled) throw JSONException("not JSON")
+        return stats
     }
 
     override suspend fun alerts(): Alerts {

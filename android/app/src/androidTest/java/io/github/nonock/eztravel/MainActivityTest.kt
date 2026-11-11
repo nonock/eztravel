@@ -138,9 +138,9 @@ class MainActivityTest {
     }
 
     @Test
-    fun theGearOpensTheCalendarTheUsualTrainsAndTheHistory() {
+    fun theGearOpensTheCalendarTheUsualTrainsTheStatisticsAndTheHistory() {
         compose.onNodeWithContentDescription(text(R.string.settings_title)).performClick()
-        for (entry in listOf(R.string.nav_calendar, R.string.usual_title, R.string.nav_history)) {
+        for (entry in listOf(R.string.nav_calendar, R.string.usual_title, R.string.nav_stats, R.string.nav_history)) {
             compose.onNode(hasText(text(entry)) and hasClickAction()).assertIsDisplayed()
         }
         tab(R.string.nav_trip).assertDoesNotExist()
@@ -150,6 +150,10 @@ class MainActivityTest {
         compose.onNodeWithContentDescription(text(R.string.back)).performClick()
         compose.onNode(hasText(text(R.string.usual_title)) and hasClickAction()).performClick()
         compose.onNodeWithText(text(R.string.usual_explained)).assertIsDisplayed()
+        back()
+        compose.onNode(hasText(text(R.string.nav_stats)) and hasClickAction()).performClick()
+        compose.onNodeWithText(text(R.string.stats_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.stats_empty)).assertIsDisplayed()
         back()
         compose.onNode(hasText(text(R.string.nav_history)) and hasClickAction()).performClick()
         compose.onNodeWithText(text(R.string.history_title)).assertIsDisplayed()
@@ -180,6 +184,9 @@ class MainActivityTest {
         pullDown({ backend.historyReads.get() })
         // And again: the spinner went away after the last read.
         pullDown({ backend.historyReads.get() })
+        back()
+        compose.onNode(hasText(text(R.string.nav_stats)) and hasClickAction()).performClick()
+        pullDown({ backend.statsReads.get() })
         back()
         compose.onNode(hasText(text(R.string.nav_calendar)) and hasClickAction()).performClick()
         pullDown({ backend.monthReads.size })
