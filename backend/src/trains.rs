@@ -332,6 +332,20 @@ pub fn follow(
             });
         }
     }
+    // The halves of one train that part further on leave together: while
+    // one leaves, the other gone takes no departure away.
+    let leaving: Vec<(String, Timestamp, String)> = trains
+        .followed
+        .iter()
+        .filter(|followed| listed.contains(&followed.journey.as_str()) && !followed.said_cancelled)
+        .map(|followed| {
+            (
+                followed.train.line.clone(),
+                followed.train.aimed,
+                followed.journey.clone(),
+            )
+        })
+        .collect();
     // A train of the timetable is missing only once later ones of its line are listed.
     let last_listed = |line: &str| {
         seen.iter()
@@ -353,6 +367,14 @@ pub fn follow(
         }
         // Once it should have left, too late to tell.
         if !notify || followed.notified || now >= followed.train.expected {
+            continue;
+        }
+        let half = leaving.iter().any(|(line, aimed, journey)| {
+            *line == followed.train.line
+                && *aimed == followed.train.aimed
+                && *journey != followed.journey
+        });
+        if half {
             continue;
         }
         let why = if followed.said_cancelled {
@@ -872,6 +894,44 @@ mod tests {
                     ..late
                 }
             }]
+        );
+    }
+
+    #[test]
+    fn half_of_a_train_gone_says_nothing_while_the_other_half_leaves() {
+        // The halves of one train that part further on, both stopping where the leg ends.
+        let half = |status: &str| visit("j1b", "06:52", "06:53", status, 200);
+        let both_gone = [Notification::TrainsCancelled {
+            trains: vec![
+                train("06:52"),
+                Train {
+                    expected: at("06:53"),
+                    ..train("06:52")
+                },
+            ],
+        }];
+        // Said cancelled.
+        let mut trains = Trains::default();
+        assert_eq!(
+            polls(&mut trains, "06:00", 2, true, || vec![
+                j1("cancelled"),
+                half("onTime")
+            ]),
+            []
+        );
+        // Gone from the list.
+        let mut trains = Trains::default();
+        polls(&mut trains, "05:50", 1, true, || {
+            vec![j1("onTime"), half("onTime")]
+        });
+        assert_eq!(
+            polls(&mut trains, "05:52", 5, true, || vec![half("onTime")]),
+            []
+        );
+        // The other half cancelled as well: the train is gone.
+        assert_eq!(
+            polls(&mut trains, "06:02", 1, true, || vec![half("cancelled")]),
+            both_gone
         );
     }
 
