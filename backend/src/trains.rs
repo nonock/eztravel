@@ -111,6 +111,11 @@ pub struct Trains {
     #[serde(default)]
     timetable: Option<(Date, Direction)>,
     followed: Vec<Followed>,
+    /// The lines whose trains start at their board stop, as seen in the window:
+    /// a terminus drops trains from its list while the line is disrupted, and
+    /// lists them again minutes before they leave.
+    #[serde(default)]
+    origins: Vec<String>,
     /// The trains that ended since this was last taken: whoever keeps them takes them.
     #[serde(skip)]
     pub ended: Vec<Ended>,
@@ -171,6 +176,7 @@ impl Trains {
             self.ended.extend(ended);
         }
         self.window = Some(key);
+        self.origins.clear();
     }
 }
 
@@ -233,8 +239,21 @@ pub fn follow(
     now: Timestamp,
     seen: &[Seen],
     notify: bool,
+    disrupted: &[String],
 ) -> Vec<Notification> {
     trains.open(key);
+    // A train starting here has no arrival, only a departure.
+    for leg in seen {
+        let starts = leg.board.iter().any(|visit| {
+            visit.line == leg.line
+                && visit.aimed_arrival.is_none()
+                && visit.expected_arrival.is_none()
+                && visit.expected_departure.or(visit.aimed_departure).is_some()
+        });
+        if starts && !trains.origins.contains(&leg.line) {
+            trains.origins.push(leg.line.clone());
+        }
+    }
     let mut notifications = vec![];
     let mut listed: Vec<&str> = vec![];
     for leg in seen {
@@ -339,6 +358,11 @@ pub fn follow(
         let why = if followed.said_cancelled {
             Why::Announced
         } else if followed.missing >= CONFIRM {
+            // Where its trains start, the line disrupted: gone for now, maybe back later.
+            let line = &followed.train.line;
+            if trains.origins.contains(line) && disrupted.contains(line) {
+                continue;
+            }
             if followed.listed {
                 Why::Missing
             } else {
@@ -479,13 +503,133 @@ mod tests {
         notify: bool,
         board: impl Fn() -> Vec<Value>,
     ) -> Vec<Notification> {
+        polls_while(trains, from, count, notify, &[], board)
+    }
+
+    /// As [`polls`], while the lines `disrupted` have an alert under way.
+    fn polls_while(
+        trains: &mut Trains,
+        from: &str,
+        count: usize,
+        notify: bool,
+        disrupted: &[String],
+        board: impl Fn() -> Vec<Value>,
+    ) -> Vec<Notification> {
         let start = at(from);
         (0..count)
             .flat_map(|n| {
                 let now = start + SignedDuration::from_mins(2 * n as i64);
-                follow(trains, KEY, window(), now, &seen(board()), notify)
+                follow(
+                    trains,
+                    KEY,
+                    window(),
+                    now,
+                    &seen(board()),
+                    notify,
+                    disrupted,
+                )
             })
             .collect()
+    }
+
+    /// `visit` passing the board stop: it arrives a minute before it leaves.
+    fn passing(mut visit: Value) -> Value {
+        let call = &mut visit["MonitoredVehicleJourney"]["MonitoredCall"];
+        let departure: Timestamp = call["AimedDepartureTime"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let arrival = (departure - SignedDuration::from_mins(1)).to_string();
+        call["AimedArrivalTime"] = json!(arrival);
+        call["ExpectedArrivalTime"] = json!(arrival);
+        visit
+    }
+
+    #[test]
+    fn where_trains_start_one_gone_while_its_line_is_disrupted_is_told_only_after() {
+        // A terminus drops trains from its list during a disruption, and lists
+        // them again minutes before they leave.
+        let disrupted = ["C01740".to_string()];
+        let mut trains = Trains::default();
+        let listed = || vec![j1("onTime")];
+        assert_eq!(
+            polls_while(&mut trains, "05:50", 1, true, &disrupted, listed),
+            []
+        );
+        assert_eq!(
+            polls_while(&mut trains, "05:52", 4, true, &disrupted, Vec::new),
+            []
+        );
+        // The disruption over, still gone: told then.
+        assert_eq!(
+            polls_while(&mut trains, "06:00", 1, true, &[], Vec::new),
+            cancelled(Why::Missing)
+        );
+    }
+
+    #[test]
+    fn where_trains_pass_one_gone_during_a_disruption_is_told() {
+        let disrupted = ["C01740".to_string()];
+        let mut trains = Trains::default();
+        let listed = || vec![passing(j1("onTime"))];
+        polls_while(&mut trains, "05:50", 1, true, &disrupted, listed);
+        assert_eq!(
+            polls_while(&mut trains, "05:52", 4, true, &disrupted, Vec::new),
+            cancelled(Why::Missing)
+        );
+        // Nor does another line's alert quiet one where trains start.
+        let mut trains = Trains::default();
+        let other = ["C02000".to_string()];
+        polls_while(&mut trains, "05:50", 1, true, &other, || vec![j1("onTime")]);
+        assert_eq!(
+            polls_while(&mut trains, "05:52", 4, true, &other, Vec::new),
+            cancelled(Why::Missing)
+        );
+    }
+
+    #[test]
+    fn where_trains_start_one_of_the_timetable_never_listed_waits_for_the_disruption_to_end() {
+        let disrupted = ["C01740".to_string()];
+        let mut trains = Trains::default();
+        plan(&mut trains, KEY, &[scheduled("06:52"), scheduled("07:02")]);
+        let later = || vec![visit("j2", "07:02", "07:02", "onTime", 200)];
+        assert_eq!(
+            polls_while(&mut trains, "05:50", 4, true, &disrupted, later),
+            []
+        );
+        assert_eq!(
+            polls_while(&mut trains, "05:58", 1, true, &[], later),
+            cancelled(Why::Unlisted)
+        );
+    }
+
+    #[test]
+    fn where_trains_start_is_known_for_the_window_only() {
+        let disrupted = ["C01740".to_string()];
+        let mut trains = Trains::default();
+        polls_while(&mut trains, "05:50", 1, true, &disrupted, || {
+            vec![j1("onTime")]
+        });
+        assert_eq!(trains.origins, ["C01740"]);
+        // Kept across a restart; a state saved before still reads.
+        let saved = serde_json::to_string(&trains).unwrap();
+        assert_eq!(serde_json::from_str::<Trains>(&saved).unwrap(), trains);
+        let older = saved.replace(r#","origins":["C01740"]"#, "");
+        assert!(!older.contains("origins"));
+        assert!(serde_json::from_str::<Trains>(&older).is_ok());
+        // The evening's board is another stop.
+        let evening = (TUESDAY, Direction::Inbound);
+        follow(
+            &mut trains,
+            evening,
+            window(),
+            at("15:00"),
+            &[],
+            true,
+            &disrupted,
+        );
+        assert!(trains.origins.is_empty());
     }
 
     /// A train of line L in the timetable, due to leave the board stop at `aimed`.
@@ -598,6 +742,7 @@ mod tests {
             at("15:00"),
             &[],
             false,
+            &[],
         );
         let ended: Vec<_> = trains.ended.iter().map(|ended| ended.train.aimed).collect();
         assert_eq!(ended, [at("06:52")]);
@@ -833,12 +978,12 @@ mod tests {
         let mut trains = Trains::default();
         let mut seen = seen(vec![visit("j2", "06:20", "06:20", "onTime", 50)]);
         seen[0].arriving = visits(vec![visit("j2", "06:35", "06:35", "onTime", 50)]);
-        follow(&mut trains, KEY, window(), at("06:00"), &seen, true);
+        follow(&mut trains, KEY, window(), at("06:00"), &seen, true, &[]);
         assert_eq!(trains.followed.len(), 1);
         // Another line's trains are not this leg's.
         let mut other = Trains::default();
         seen[0].line = "C09999".into();
-        follow(&mut other, KEY, window(), at("06:00"), &seen, true);
+        follow(&mut other, KEY, window(), at("06:00"), &seen, true, &[]);
         assert_eq!(other.followed, []);
     }
 
@@ -853,7 +998,7 @@ mod tests {
 
         polls(&mut trains, "06:00", 1, true, || vec![j1("onTime")]);
         let evening = (TUESDAY, Direction::Inbound);
-        follow(&mut trains, evening, window(), at("15:00"), &[], true);
+        follow(&mut trains, evening, window(), at("15:00"), &[], true, &[]);
         assert_eq!(trains.followed, []);
     }
 
@@ -920,7 +1065,7 @@ mod tests {
         let mut trains = Trains::default();
         polls(&mut trains, "06:00", 1, true, || vec![j1("onTime")]);
         let evening = (TUESDAY, Direction::Inbound);
-        follow(&mut trains, evening, window(), at("15:00"), &[], true);
+        follow(&mut trains, evening, window(), at("15:00"), &[], true, &[]);
         assert_eq!(trains.ended, [ended("06:52", Outcome::Ran, false)]);
         // Remembered with the trains, as they are kept between polls.
         let saved = serde_json::to_string(&trains).unwrap();
@@ -942,7 +1087,8 @@ mod tests {
                 window(),
                 at("06:00"),
                 &seen(vec![board]),
-                true
+                true,
+                &[],
             ),
             cancelled(Why::Announced)
         );
@@ -961,6 +1107,7 @@ mod tests {
             at("06:00"),
             &seen(vec![arrival]),
             true,
+            &[],
         );
         assert_eq!(other.followed, []);
     }
