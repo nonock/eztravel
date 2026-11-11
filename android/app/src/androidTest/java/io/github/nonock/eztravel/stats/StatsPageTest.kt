@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -174,6 +175,19 @@ class StatsPageTest : ScreenTesting() {
         compose.setContent { StatsPage(FakeBackend(stats = stats.copy(since = null))) }
         waitFor(text(R.string.usual_outbound))
         compose.onNodeWithText(text(R.string.stats_since, day.minusDays(1).shortDate())).assertDoesNotExist()
+    }
+
+    @Test
+    fun theUsualTrainsLatestTenDaysShowThenTheOthersOnRequest() {
+        val days = (0L until 12L).map { Stats.Day(day.minusDays(it), Stats.Count(1, 1, 0, 0), usualOf(day.minusDays(it), Stats.Run.ON_TIME, 0)) }
+        val way = stats.ways[0].copy(days = days, times = emptyList(), weekdays = emptyList())
+        compose.setContent { StatsPage(FakeBackend(stats = Stats(null, listOf(way)))) }
+        waitFor(day.minusDays(9).shortDate())
+        compose.onNodeWithText(day.minusDays(10).shortDate()).assertDoesNotExist()
+        compose.onNodeWithText(context.resources.getQuantityString(R.plurals.departures_more, 2, 2)).performClick()
+        compose.onNodeWithText(day.minusDays(11).shortDate()).assertExists()
+        compose.onNodeWithText(text(R.string.departures_less)).performClick()
+        compose.onNodeWithText(day.minusDays(10).shortDate()).assertDoesNotExist()
     }
 
     @Test
