@@ -17,17 +17,20 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -149,11 +152,19 @@ private fun WayCard(way: Stats.Way) {
                     Tone.LATE to MaterialTheme.colorScheme.primary,
                     Tone.BAD to MaterialTheme.colorScheme.error,
                 )
-                for (day in way.days) {
+                // The latest days, the others on request: one more each office day.
+                var all by rememberSaveable(way.direction, way.line.name) { mutableStateOf(false) }
+                for (day in if (all) way.days else way.days.take(DAYS_SHOWN)) {
                     val (words, tone) = ran(day.usual)
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Text(day.day.shortDate(), Modifier.weight(1f))
                         Text(stringResource(words, day.usual?.late ?: 0), color = tones.getValue(tone))
+                    }
+                }
+                val hidden = way.days.size - DAYS_SHOWN
+                if (hidden > 0) {
+                    TextButton(onClick = { all = !all }) {
+                        Text(if (all) stringResource(R.string.departures_less) else pluralStringResource(R.plurals.departures_more, hidden, hidden))
                     }
                 }
             }
@@ -166,6 +177,9 @@ private fun WayCard(way: Stats.Way) {
 private fun Heading(title: Int, vararg args: Any) {
     Text(stringResource(title, *args), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
 }
+
+/** About two weeks of office days. */
+private const val DAYS_SHOWN = 10
 
 private val TIME_WIDTH = 56.dp
 private val WEEKDAY_WIDTH = 136.dp
