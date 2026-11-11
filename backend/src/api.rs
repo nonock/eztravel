@@ -226,6 +226,8 @@ pub fn router(sources: Sources, key: String) -> Router {
         .route("/late", put(set_late))
         .route("/alerts", get(alerts))
         .route("/trains", get(ended_trains))
+        .route("/trains/forget", post(forget_trains))
+        .route("/stats", get(statistics))
         .route("/notes", get(kept_notes))
         .route("/calendar", get(month).put(put_day))
         .layer(middleware::from_fn_with_state(Arc::new(key), authorize))
@@ -352,6 +354,66 @@ async fn ended_trains(State(journal): State<Arc<Journal<Ended>>>) -> Json<EndedT
     Json(EndedTrains {
         trains: journal.latest(TRAINS_SHOWN),
     })
+}
+
+/// The statistics of every train kept, with the usual trains as set now.
+async fn statistics(
+    State(journal): State<Arc<Journal<Ended>>>,
+    State(store): State<Arc<Store>>,
+    State(schedule): State<Arc<Schedule>>,
+    State(departures): State<Arc<NextDepartures>>,
+) -> Json<crate::stats::Stats> {
+    Json(crate::stats::stats(
+        &journal.latest(usize::MAX),
+        &store.profile().usual,
+        |direction| departures.reminded_line(direction),
+        departures.labels(),
+        &schedule.time_zone,
+    ))
+}
+
+/// Trains to take out of the journal, kept by mistake.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Forget {
+    trains: Vec<Kept>,
+}
+
+/// A train of the journal: on its day and way, its line's leaving at its time.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Kept {
+    day: Date,
+    direction: Direction,
+    line: String,
+    aimed: Timestamp,
+}
+
+#[derive(Serialize)]
+struct Forgot {
+    forgot: usize,
+}
+
+/// Takes the trains named out of the journal, as for the statistics, and says how many went.
+async fn forget_trains(
+    State(journal): State<Arc<Journal<Ended>>>,
+    Json(forget): Json<Forget>,
+) -> Response {
+    let named = |ended: &Ended| {
+        forget.trains.iter().any(|kept| {
+            kept.day == ended.day
+                && kept.direction == ended.direction
+                && kept.line == ended.train.line
+                && kept.aimed == ended.train.aimed
+        })
+    };
+    match journal.retain(|ended| !named(ended)) {
+        Ok(forgot) => Json(Forgot { forgot }).into_response(),
+        Err(error) => {
+            eprintln!("cannot write the journal again: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 /// Read from PRIM when asked, at most once a minute per stop; the disruptions
@@ -663,6 +725,8 @@ mod tests {
             (Method::PUT, "/departure", Some(r#"{"journey":null}"#)),
             (Method::GET, "/alerts", None),
             (Method::GET, "/trains", None),
+            (Method::POST, "/trains/forget", Some(r#"{"trains":[]}"#)),
+            (Method::GET, "/stats", None),
             (Method::GET, "/notes", None),
             (Method::GET, "/calendar?month=2026-11", None),
             (
@@ -861,6 +925,99 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&body).unwrap(),
             fixture
+        );
+    }
+
+    #[tokio::test]
+    async fn the_statistics_answer_as_in_the_fixture() {
+        let api = Api::new();
+        let path = format!("{}/../fixtures/api/trains.json", env!("CARGO_MANIFEST_DIR"));
+        let trains: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let mut kept: Vec<Ended> = serde_json::from_value(trains["trains"].clone()).unwrap();
+        kept.reverse();
+        api.journal.append(&kept);
+        // The usual train of the way to work: at 7:52 in Paris.
+        api.store.update(|profile| {
+            profile
+                .usual
+                .set(Direction::Outbound, Some(jiff::civil::time(7, 52, 0, 0)));
+        });
+        let path = format!("{}/../fixtures/api/stats.json", env!("CARGO_MANIFEST_DIR"));
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let (status, body) = api.authorized(Method::GET, "/stats", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+            fixture
+        );
+    }
+
+    #[tokio::test]
+    async fn trains_kept_by_mistake_are_taken_out_of_the_journal() {
+        let api = Api::new();
+        let path = format!("{}/../fixtures/api/trains.json", env!("CARGO_MANIFEST_DIR"));
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let mut kept: Vec<Ended> = serde_json::from_value(fixture["trains"].clone()).unwrap();
+        kept.reverse();
+        api.journal.append(&kept);
+        // The latest train, by its day, way, line and time; and one never kept.
+        let latest = &fixture["trains"][0];
+        let forget = serde_json::json!({ "trains": [
+            {
+                "day": latest["day"],
+                "direction": latest["direction"],
+                "line": latest["line"],
+                "aimed": latest["aimed"],
+            },
+            {
+                "day": "2026-11-03",
+                "direction": "outbound",
+                "line": "C01740",
+                "aimed": "2026-11-03T05:00:00Z",
+            },
+        ] });
+        let forget = forget.to_string();
+        assert_eq!(
+            api.authorized(Method::POST, "/trains/forget", Some(&forget))
+                .await,
+            (StatusCode::OK, r#"{"forgot":1}"#.into())
+        );
+        let (_, body) = api.authorized(Method::GET, "/trains", None).await;
+        let left: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            left["trains"].as_array().unwrap()[..],
+            fixture["trains"].as_array().unwrap()[1..]
+        );
+        for body in [
+            r#"{}"#,
+            r#"{"trains":[{"day":"2026-11-03"}]}"#,
+            r#"{"trains":[],"other":1}"#,
+        ] {
+            assert_eq!(
+                api.authorized(Method::POST, "/trains/forget", Some(body))
+                    .await
+                    .0,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{body}"
+            );
+        }
+        // A journal that cannot be written again.
+        std::fs::create_dir(api._dir.path().join("journal.tmp")).unwrap();
+        let second = &fixture["trains"][1];
+        let forget = serde_json::json!({ "trains": [{
+            "day": second["day"],
+            "direction": second["direction"],
+            "line": second["line"],
+            "aimed": second["aimed"],
+        }] });
+        assert_eq!(
+            api.authorized(Method::POST, "/trains/forget", Some(&forget.to_string()))
+                .await
+                .0,
+            StatusCode::INTERNAL_SERVER_ERROR
         );
     }
 

@@ -118,6 +118,8 @@ All requests carry `Authorization: Bearer <APP_KEY>`.
 | `GET /departures` | The next departures on each leg: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /alerts` | Every disruption of the lines not yet over: [fixtures/api/README.md](fixtures/api/README.md) |
 | `GET /trains` | Each train followed, as it ended, the latest first: [fixtures/api/README.md](fixtures/api/README.md) |
+| `POST /trains/forget` | Takes trains kept by mistake out of that journal: [fixtures/api/README.md](fixtures/api/README.md) |
+| `GET /stats` | The statistics of the trains kept: on time, late, cancelled, per way and day, and the usual trains: [fixtures/api/README.md](fixtures/api/README.md) |
 | `PUT /departure` `{"journey": "…"}` | Picks a departure for the reminder to leave, or `null` for none: [fixtures/api/README.md](fixtures/api/README.md) |
 
 Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md).

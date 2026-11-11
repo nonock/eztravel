@@ -17,6 +17,7 @@ pub mod push;
 pub mod relevance;
 pub mod school;
 pub mod service;
+pub mod stats;
 #[cfg(test)]
 mod testing;
 pub mod trains;
