@@ -1,0 +1,51 @@
+{
+  "since": "2026-11-03",
+  "ways": [
+    {
+      "direction": "outbound",
+      "line": "L",
+      "mode": "train",
+      "color": "#7B61C9",
+      "usual": "07:52:00",
+      "trains": 2,
+      "on_time": 1,
+      "late": 0,
+      "cancelled": 1,
+      "days": [
+        {
+          "day": "2026-11-03",
+          "trains": 2,
+          "on_time": 1,
+          "late": 0,
+          "cancelled": 1,
+          "usual": {
+            "aimed": "2026-11-03T06:52:00Z",
+            "run": "cancelled",
+            "late": 0
+          }
+        }
+      ]
+    },
+    {
+      "direction": "inbound",
+      "line": "L",
+      "mode": "train",
+      "color": "#7B61C9",
+      "usual": null,
+      "trains": 2,
+      "on_time": 1,
+      "late": 0,
+      "cancelled": 1,
+      "days": [
+        {
+          "day": "2026-11-03",
+          "trains": 2,
+          "on_time": 1,
+          "late": 0,
+          "cancelled": 1,
+          "usual": null
+        }
+      ]
+    }
+  ]
+}

@@ -517,6 +517,16 @@ impl NextDepartures {
         (direction, self.legs(direction))
     }
 
+    /// The line of the way's ride the reminder is for, where its usual train is.
+    pub fn reminded_line(&self, direction: Direction) -> Option<String> {
+        reminded_leg(self.legs(direction)).map(|(leg, _)| leg.line.clone())
+    }
+
+    /// How the lines are named.
+    pub fn labels(&self) -> &[LineLabel] {
+        &self.lines
+    }
+
     fn legs(&self, direction: Direction) -> &[Leg] {
         match direction {
             Direction::Outbound => &self.outbound,
