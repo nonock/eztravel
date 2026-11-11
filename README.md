@@ -159,6 +159,7 @@ Push payloads are described in [fixtures/push/README.md](fixtures/push/README.md
    - a train can be picked further ahead than the next five departures, up to the end of the window.
 8. **Under way.** Statistics, from the days recorded since milestone 3:
    - done: per way, the trains on time, late and cancelled, and day by day the usual train; trains kept by mistake can be taken out of the journal.
+   - done: per way, the trains on time by departure time, to see which train runs best, and by day of the week; per line, the days told disrupted, from the history of what was sent.
 
 Later: location in the background, to start the live trip on leaving home or work or on reaching the station (it may add a notification, never silence one); free route planning, several saved commutes.
 

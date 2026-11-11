@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -25,8 +26,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.backend.Backend
@@ -39,6 +44,7 @@ import org.json.JSONException
 import java.io.IOException
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import java.time.format.TextStyle
 
 private sealed interface Reading {
     data object Loading : Reading
@@ -50,7 +56,8 @@ private sealed interface Reading {
 
 /**
  * How the trains ran, office days only: for each way, the share on time, in
- * words and as a bar, then, day by day, how its usual train ran.
+ * words and as a bar, then by departure time and by weekday, and day by day
+ * how its usual train ran. Last, the days each line was told disrupted.
  */
 @Composable
 fun StatsPage(backend: Backend, modifier: Modifier = Modifier, refresh: Int = 0, onRead: () -> Unit = {}) {
@@ -78,6 +85,7 @@ fun StatsPage(backend: Backend, modifier: Modifier = Modifier, refresh: Int = 0,
                     )
                 }
                 for (way in current.stats.ways) WayCard(way)
+                current.stats.disruptions?.let { DisruptionsCard(it) }
             }
             current == Reading.Unreachable -> Text(stringResource(R.string.unreachable), color = MaterialTheme.colorScheme.error)
             else -> Text(stringResource(R.string.loading))
@@ -117,12 +125,22 @@ private fun WayCard(way: Stats.Way) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp),
             )
+            if (way.times.isNotEmpty()) {
+                Heading(R.string.stats_times)
+                val format = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+                for (slot in way.times) ShareRow(format.format(slot.time), slot.count, TIME_WIDTH, marked = slot.time == way.usual)
+            }
+            if (way.weekdays.isNotEmpty()) {
+                Heading(R.string.stats_weekdays)
+                val locale = LocalLocale.current.platformLocale
+                for (weekday in way.weekdays) {
+                    val name = weekday.day.getDisplayName(TextStyle.FULL, locale).let { it.substring(0, 1).uppercase(locale) + it.substring(1) }
+                    val days = resources.getQuantityString(R.plurals.stats_days, weekday.days, weekday.days)
+                    ShareRow(stringResource(R.string.stats_weekday, name, days), weekday.count, WEEKDAY_WIDTH)
+                }
+            }
             way.usual?.let { usual ->
-                Text(
-                    stringResource(R.string.stats_usual, DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).format(usual)),
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
-                )
+                Heading(R.string.stats_usual, DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).format(usual))
                 val tones = mapOf(
                     Tone.NONE to MaterialTheme.colorScheme.onSurfaceVariant,
                     Tone.GOOD to Good,
@@ -141,11 +159,69 @@ private fun WayCard(way: Stats.Way) {
     }
 }
 
-/** On time, late and cancelled side by side, each as wide as its share: the words above say the same. */
+/** A part of a way's card. */
 @Composable
-private fun Shares(count: Stats.Count) {
+private fun Heading(title: Int, vararg args: Any) {
+    Text(stringResource(title, *args), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
+}
+
+private val TIME_WIDTH = 56.dp
+private val WEEKDAY_WIDTH = 136.dp
+
+/** The trains of a time or a day, [label]led: their shares as a bar, then how many of them on time; the usual train's [marked]. */
+@Composable
+private fun ShareRow(label: String, count: Stats.Count, labelWidth: Dp, marked: Boolean = false) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            Modifier.width(labelWidth),
+            color = if (marked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            fontWeight = if (marked) FontWeight.Bold else FontWeight.Normal,
+        )
+        Shares(count, Modifier.weight(1f).padding(horizontal = 12.dp), height = 6.dp)
+        Text(
+            stringResource(R.string.stats_on_time_of, count.onTime, count.trains),
+            Modifier.widthIn(min = 48.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.End,
+        )
+    }
+}
+
+/** For each line told disrupted, the days with an alert and the alerts; since when the history keeps them. */
+@Composable
+private fun DisruptionsCard(disruptions: Stats.Disruptions) {
+    val resources = LocalResources.current
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.stats_disruptions), style = MaterialTheme.typography.titleMedium)
+            disruptions.since?.let {
+                Text(stringResource(R.string.stats_since, it.shortDate()), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (disruptions.lines.isEmpty()) Text(stringResource(R.string.stats_disruptions_none))
+            for (line in disruptions.lines) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LineBadge(line.line, line.color)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        stringResource(
+                            R.string.stats_disrupted,
+                            resources.getQuantityString(R.plurals.stats_days_disrupted, line.days, line.days),
+                            resources.getQuantityString(R.plurals.stats_alerts, line.alerts, line.alerts),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** On time, late and cancelled side by side, each as wide as its share: the words beside say the same. */
+@Composable
+private fun Shares(count: Stats.Count, modifier: Modifier = Modifier.fillMaxWidth().padding(top = 8.dp), height: Dp = 8.dp) {
     val parts = listOf(count.onTime to Good, count.late to MaterialTheme.colorScheme.primary, count.cancelled to MaterialTheme.colorScheme.error)
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp).height(8.dp).clip(RoundedCornerShape(4.dp))) {
+    Row(modifier.height(height).clip(RoundedCornerShape(height / 2))) {
         for ((trains, color) in parts.filter { it.first > 0 }) {
             Box(Modifier.weight(trains.toFloat()).fillMaxHeight().background(color))
         }

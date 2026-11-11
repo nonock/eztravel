@@ -11,6 +11,32 @@
       "on_time": 1,
       "late": 0,
       "cancelled": 1,
+      "times": [
+        {
+          "time": "07:52:00",
+          "trains": 1,
+          "on_time": 0,
+          "late": 0,
+          "cancelled": 1
+        },
+        {
+          "time": "08:07:00",
+          "trains": 1,
+          "on_time": 1,
+          "late": 0,
+          "cancelled": 0
+        }
+      ],
+      "weekdays": [
+        {
+          "weekday": 2,
+          "days": 1,
+          "trains": 2,
+          "on_time": 1,
+          "late": 0,
+          "cancelled": 1
+        }
+      ],
       "days": [
         {
           "day": "2026-11-03",
@@ -36,6 +62,32 @@
       "on_time": 1,
       "late": 0,
       "cancelled": 1,
+      "times": [
+        {
+          "time": "17:22:00",
+          "trains": 1,
+          "on_time": 1,
+          "late": 0,
+          "cancelled": 0
+        },
+        {
+          "time": "17:37:00",
+          "trains": 1,
+          "on_time": 0,
+          "late": 0,
+          "cancelled": 1
+        }
+      ],
+      "weekdays": [
+        {
+          "weekday": 2,
+          "days": 1,
+          "trains": 2,
+          "on_time": 1,
+          "late": 0,
+          "cancelled": 1
+        }
+      ],
       "days": [
         {
           "day": "2026-11-03",
@@ -47,5 +99,24 @@
         }
       ]
     }
-  ]
+  ],
+  "disruptions": {
+    "since": "2026-11-03",
+    "lines": [
+      {
+        "line": "L",
+        "mode": "train",
+        "color": "#7B61C9",
+        "days": 1,
+        "alerts": 1
+      },
+      {
+        "line": "X",
+        "mode": "metro",
+        "color": "#E07A1F",
+        "days": 1,
+        "alerts": 1
+      }
+    ]
+  }
 }
