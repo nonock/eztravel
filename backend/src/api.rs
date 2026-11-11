@@ -288,7 +288,12 @@ async fn status_now(
         .lock()
         .expect("no thread panics while holding the status")
         .view(now, next, school_holiday);
-    view.late = profile.late(today, &schedule.windows);
+    // Only an office day's way home is watched, late or not: not a day off, nor a public holiday.
+    view.late = profile
+        .calendar(&schedule.calendar)
+        .is_office_day(today)
+        .then(|| profile.late(today, &schedule.windows))
+        .flatten();
     Json(view)
 }
 
@@ -949,6 +954,16 @@ mod tests {
                 r#"{"refused":"not_office_day"}"#.into()
             )
         );
+        // Set late, then made a day off, as a rule's day may be a public holiday:
+        // not late, as nothing is watched.
+        api.store.update(|profile| {
+            profile.days.insert(today, Day::Office);
+        });
+        assert_eq!(set(r#"{"leave":"22:00"}"#).await.0, StatusCode::NO_CONTENT);
+        api.store.update(|profile| {
+            profile.days.insert(today, Day::Away);
+        });
+        assert_eq!(late().await, serde_json::Value::Null);
     }
 
     #[tokio::test]
