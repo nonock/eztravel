@@ -353,12 +353,12 @@ impl Service {
             let key = (local.date(), direction);
             self.read_timetable(&mut trains, key).await;
             let window = self.window_bounds(local, direction);
-            notifications.extend(follow(&mut trains, key, window, now, seen, true));
+            let alerted: Vec<String> = next.lines().iter().map(|(line, _)| line.clone()).collect();
+            notifications.extend(follow(&mut trains, key, window, now, seen, true, &alerted));
             let around: Vec<(String, Vec<Train>)> = seen
                 .iter()
                 .map(|seen| (seen.line.clone(), trains.around(&seen.line, now, AROUND)))
                 .collect();
-            let alerted: Vec<String> = next.lines().iter().map(|(line, _)| line.clone()).collect();
             notifications.extend(judge(&mut lateness, key, now, &around, &alerted));
             notifications.extend(self.reminders(&mut leaving, key, now, local, seen, profile));
             // Last: when anything before it cannot be sent, the poll is tried again
@@ -403,7 +403,7 @@ impl Service {
                 let key = (local.date(), direction);
                 self.read_timetable(&mut trains, key).await;
                 let window = self.window_bounds(local, direction);
-                follow(&mut trains, key, window, now, &seen, false);
+                follow(&mut trains, key, window, now, &seen, false, &[]);
                 self.commit_trains(trains);
                 Poll::Observing
             }
