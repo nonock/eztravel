@@ -23,7 +23,8 @@
           "platform": null,
           "status": "scheduled",
           "picked": false,
-          "usual": false
+          "usual": false,
+          "record": null
         },
         {
           "journey": "timetable:C01740:2026-11-03T07:10:00Z",
@@ -35,7 +36,8 @@
           "platform": null,
           "status": "scheduled",
           "picked": false,
-          "usual": false
+          "usual": false,
+          "record": null
         }
       ],
       "timetable": true

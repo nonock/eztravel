@@ -458,6 +458,9 @@ private fun DepartureRow(leg: Departures.Leg, departure: Departure, now: Instant
                     Text(stringResource(R.string.departures_picked), style = details, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 }
                 if (departure.usual) Text(stringResource(R.string.departures_usual), style = details, color = MaterialTheme.colorScheme.primary)
+                departure.oftenLate?.let {
+                    Text(stringResource(R.string.departures_often_late, it.onTime, it.trains), style = details, color = MaterialTheme.colorScheme.primary)
+                }
                 Spacer(Modifier.weight(1f))
                 Countdown(leg, departure, now)
             }

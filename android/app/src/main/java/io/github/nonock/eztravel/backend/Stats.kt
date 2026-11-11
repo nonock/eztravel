@@ -95,7 +95,7 @@ data class Stats(val since: LocalDate?, val ways: List<Way>, val disruptions: Di
 
         private fun line(json: JSONObject) = PushMessage.Line(json.getString("line"), PushMessage.mode(json.getString("mode")))
 
-        private fun count(json: JSONObject) =
+        internal fun count(json: JSONObject) =
             Count(json.getInt("trains"), json.getInt("on_time"), json.getInt("late"), json.getInt("cancelled"))
 
         /** A run a newer backend names otherwise is taken as late: trouble stays trouble. */

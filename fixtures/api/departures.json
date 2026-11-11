@@ -21,7 +21,8 @@
           "platform": "2",
           "status": "on_time",
           "picked": false,
-          "usual": false
+          "usual": false,
+          "record": null
         },
         {
           "journey": "j2",
@@ -33,7 +34,8 @@
           "platform": "2",
           "status": "delayed",
           "picked": true,
-          "usual": false
+          "usual": false,
+          "record": null
         },
         {
           "journey": "j3",
@@ -45,7 +47,8 @@
           "platform": "2",
           "status": "cancelled",
           "picked": false,
-          "usual": false
+          "usual": false,
+          "record": null
         }
       ]
     },
@@ -69,7 +72,8 @@
           "platform": null,
           "status": "on_time",
           "picked": false,
-          "usual": false
+          "usual": false,
+          "record": null
         },
         {
           "journey": "m2",
@@ -81,7 +85,8 @@
           "platform": null,
           "status": "on_time",
           "picked": false,
-          "usual": false
+          "usual": false,
+          "record": null
         }
       ]
     }

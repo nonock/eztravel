@@ -24,6 +24,7 @@ use crate::prim::{Prim, PrimError, Timetabled};
 use crate::profile::{Pick, UsualTrains};
 use crate::push::{self, LineLabel};
 use crate::relevance::{Coord, Leg, Route, RouteStop};
+use crate::stats::Count;
 use crate::watch::LineStatus;
 
 /// Departures shown per leg, after those too soon to leave for on a ride with its time to the platform.
@@ -277,6 +278,9 @@ pub struct Departure {
     /// The way's usual train, when none is picked today: the first from its
     /// time, up to half an hour after, as for the reminder to leave.
     pub usual: bool,
+    /// How the trains leaving at its time on this ride ran, office days, when
+    /// that time was kept on one day in two at least.
+    pub record: Option<Count>,
 }
 
 /// The next departures of `line` from the board stop, soonest first. With the
@@ -317,6 +321,7 @@ pub fn select(
                 status: visit.status.name(),
                 picked: false,
                 usual: false,
+                record: None,
             })
         })
         .collect();
@@ -773,6 +778,7 @@ impl NextDepartures {
                     status: "scheduled",
                     picked: false,
                     usual: false,
+                    record: None,
                 }
             })
             .filter(|departure| departure.expected >= now - GRACE)

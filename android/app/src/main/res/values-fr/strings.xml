@@ -264,6 +264,7 @@
     <string name="calendar_too_far">Un jour se change jusqu’à un an à l’avance.</string>
     <string name="departures_hero_usual">Votre train habituel</string>
     <string name="departures_usual">Train habituel</string>
+    <string name="departures_often_late">Souvent en retard : à l’heure %1$d/%2$d</string>
     <string name="watchdog_unreachable">Le serveur d’eztravel ne répond pas</string>
     <string name="watchdog_unreachable_text">Aucune alerte ne peut vous arriver pour l’instant : vérifiez vos lignes par un autre moyen.</string>
     <string name="watchdog_stopped">Le serveur d’eztravel ne vérifie plus vos lignes</string>
