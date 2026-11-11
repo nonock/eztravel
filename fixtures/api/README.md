@@ -12,7 +12,7 @@ What the backend answers and the app reads, one file per case. Both sides test a
 - `planned`: the titles of the planned disruptions announced today.
 - `school_holiday`: the name of the school holidays today is in, as the open data names them, or `null`: also when the zone is not configured, or before the backend could read them.
 - `school_holiday_first` and `school_holiday_last`: the first and last days of those holidays, local (`2026-10-17`), or `null` with them.
-- `late`: `null`, or today's way home when it is later than usual (`status-late.json`): when it `leave`s and `until` when it is watched, local, and whether it was `set` from the app rather than by the configuration's rules.
+- `late`: `null`, or today's way home when it is later than usual, on an office day only (`status-late.json`): when it `leave`s and `until` when it is watched, local, and whether it was `set` from the app rather than by the configuration's rules.
 
 Times are UTC, in RFC 3339.
 
