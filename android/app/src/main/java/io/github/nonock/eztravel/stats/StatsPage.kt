@@ -128,7 +128,9 @@ private fun WayCard(way: Stats.Way) {
             if (way.times.isNotEmpty()) {
                 Heading(R.string.stats_times)
                 val format = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
-                for (slot in way.times) ShareRow(format.format(slot.time), slot.count, TIME_WIDTH, marked = slot.time == way.usual)
+                // The usual train's: the first leaving at the time set or after, as each day's.
+                val usual = way.usual?.let { usual -> way.times.firstOrNull { !it.time.isBefore(usual) }?.time }
+                for (slot in way.times) ShareRow(format.format(slot.time), slot.count, TIME_WIDTH, marked = slot.time == usual)
             }
             if (way.weekdays.isNotEmpty()) {
                 Heading(R.string.stats_weekdays)

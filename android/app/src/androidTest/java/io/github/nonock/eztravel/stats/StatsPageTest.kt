@@ -1,9 +1,12 @@
 package io.github.nonock.eztravel.stats
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.nonock.eztravel.R
 import io.github.nonock.eztravel.ScreenTesting
@@ -13,6 +16,7 @@ import io.github.nonock.eztravel.backend.Status
 import io.github.nonock.eztravel.home.shortDate
 import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
+import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.DayOfWeek
@@ -105,6 +109,34 @@ class StatsPageTest : ScreenTesting() {
         // The way home has neither.
         compose.onAllNodesWithText(text(R.string.stats_times)).assertCountEquals(1)
         compose.onAllNodesWithText(text(R.string.stats_weekdays)).assertCountEquals(1)
+    }
+
+    /** Whether the text [label] is in bold. */
+    private fun bold(label: String): Boolean {
+        val node = compose.onNodeWithText(label, useUnmergedTree = true).fetchSemanticsNode()
+        val layouts = mutableListOf<TextLayoutResult>()
+        node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts)
+        return layouts.single().layoutInput.style.fontWeight == FontWeight.Bold
+    }
+
+    @Test
+    fun theUsualTrainsTimeIsTheFirstFromTheTimeSetAsEachDay() {
+        val count = Stats.Count(1, 1, 0, 0)
+        fun way(direction: Status.Direction, line: Line, usual: LocalTime?, vararg times: LocalTime) =
+            Stats.Way(direction, line, null, usual, count, emptyList(), times = times.map { Stats.Slot(it, count) })
+        val at = { hour: Int, minute: Int -> LocalTime.of(hour, minute) }
+        val ways = listOf(
+            // Set between two trains: the next one.
+            way(Status.Direction.OUTBOUND, l, at(7, 50), at(7, 46), at(7, 52), at(8, 7)),
+            // Set after the last train, or not set: none.
+            way(Status.Direction.INBOUND, l, at(19, 0), at(17, 52)),
+            way(Status.Direction.INBOUND, Line("X", Mode.METRO), null, at(17, 40)),
+        )
+        compose.setContent { StatsPage(FakeBackend(stats = Stats(day, ways))) }
+        waitFor(text(R.string.usual_outbound))
+        val format = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+        val times = listOf(at(7, 46), at(7, 52), at(8, 7), at(17, 52), at(17, 40))
+        assertEquals(listOf(false, true, false, false, false), times.map { bold(format.format(it)) })
     }
 
     @Test
