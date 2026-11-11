@@ -69,6 +69,7 @@ import io.github.nonock.eztravel.notifications.Opening
 import io.github.nonock.eztravel.notifications.PushToken
 import io.github.nonock.eztravel.settings.SettingsMenu
 import io.github.nonock.eztravel.settings.SettingsPage
+import io.github.nonock.eztravel.stats.StatsPage
 import io.github.nonock.eztravel.settings.UsualTrainSetting
 import io.github.nonock.eztravel.watchdog.Watchdog
 import io.github.nonock.eztravel.ui.theme.EztravelTheme
@@ -210,6 +211,7 @@ fun App(opening: Opening? = null) {
                 when {
                     opened == SettingsPage.CALENDAR -> CalendarPage(backend, refresh = refresh, onRead = read, onSaved = daysSaved)
                     opened == SettingsPage.USUAL_TRAINS -> UsualTrainSetting(backend, onSaved = { refresh++ })
+                    opened == SettingsPage.STATS -> StatsPage(backend, refresh = refresh, onRead = read)
                     opened == SettingsPage.HISTORY -> NotificationHistory(backend, refresh = refresh, onRead = read)
                     settings -> {
                         if (!backend.configured) Text(stringResource(R.string.not_configured))
@@ -235,7 +237,7 @@ fun App(opening: Opening? = null) {
             }
         }
         // Without a server, nothing would be read again; nor is the list, nor the usual trains.
-        val readAgain = !settings || opened == SettingsPage.CALENDAR || opened == SettingsPage.HISTORY
+        val readAgain = !settings || opened == SettingsPage.CALENDAR || opened == SettingsPage.STATS || opened == SettingsPage.HISTORY
         if (!readAgain || !backend.configured) {
             Box(Modifier.padding(padding)) { page() }
         } else {

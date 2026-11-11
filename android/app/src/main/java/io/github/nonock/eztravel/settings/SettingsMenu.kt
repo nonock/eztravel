@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Warning
@@ -37,6 +38,7 @@ import io.github.nonock.eztravel.watchdog.Watchdog
 enum class SettingsPage(@StringRes val label: Int, @StringRes val title: Int, @StringRes val about: Int, val icon: ImageVector) {
     CALENDAR(R.string.nav_calendar, R.string.nav_calendar, R.string.settings_calendar_about, Icons.Outlined.DateRange),
     USUAL_TRAINS(R.string.usual_title, R.string.usual_title, R.string.settings_usual_about, Icons.Outlined.Notifications),
+    STATS(R.string.nav_stats, R.string.stats_title, R.string.settings_stats_about, Icons.Outlined.CheckCircle),
     HISTORY(R.string.nav_history, R.string.history_title, R.string.settings_history_about, Icons.AutoMirrored.Outlined.List),
 }
 

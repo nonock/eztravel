@@ -201,6 +201,26 @@
     <string name="settings_calendar_about">Office, remote work and days off</string>
     <string name="settings_usual_about">The reminder to leave, each office day</string>
     <string name="settings_history_about">The notifications sent</string>
+    <string name="nav_stats">Statistics</string>
+    <string name="stats_title">Statistics</string>
+    <string name="settings_stats_about">How your trains ran, day by day</string>
+    <string name="stats_since">Since %1$s</string>
+    <string name="stats_on_time_share">%1$d%% on time</string>
+    <plurals name="stats_trains">
+        <item quantity="one">%d train</item>
+        <item quantity="other">%d trains</item>
+    </plurals>
+    <plurals name="stats_cancelled">
+        <item quantity="one">%d cancelled</item>
+        <item quantity="other">%d cancelled</item>
+    </plurals>
+    <string name="stats_count">%1$s: %2$d on time, %3$d late, %4$s</string>
+    <string name="stats_usual">Your %1$s train</string>
+    <string name="stats_run_on_time">On time</string>
+    <string name="stats_run_late">+%1$d min</string>
+    <string name="stats_run_cancelled">Cancelled</string>
+    <string name="stats_run_none">No train</string>
+    <string name="stats_empty">No train followed yet.</string>
     <string name="settings_on_time">Checks on time</string>
     <string name="settings_on_time_about">Allow “Alarms &amp; reminders”: the phone’s own checks of the server can be up to an hour late without it</string>
     <string name="calendar_holiday">Public holiday</string>
