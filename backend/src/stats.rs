@@ -1,7 +1,9 @@
 //! The statistics of the trains kept in the journal, office days only: per way
 //! and line, how many ran on time, late, or not at all, in all, by departure
 //! time, by weekday and day by day; and each day, how the way's usual train
-//! ran. Besides, from what was sent, the days each line was told disrupted.
+//! ran. Trains leaving together, the halves of one train that part further
+//! on, count as one, the best of them: if one left, the departure was there.
+//! Besides, from what was sent, the days each line was told disrupted.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -113,7 +115,8 @@ pub struct UsualRun {
     pub late: i64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+/// From the best to the worst.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Run {
     OnTime,
@@ -167,11 +170,23 @@ pub fn stats(
             }
         }
         for line in lines {
-            let trains: Vec<&Ended> = of_way
+            let mut trains: Vec<&Ended> = vec![];
+            for ended in of_way
                 .iter()
                 .copied()
                 .filter(|ended| ended.train.line == line)
-                .collect();
+            {
+                match trains.last_mut() {
+                    Some(last)
+                        if (last.day, last.train.aimed) == (ended.day, ended.train.aimed) =>
+                    {
+                        if (run(ended), ended.train.expected) < (run(last), last.train.expected) {
+                            *last = ended;
+                        }
+                    }
+                    _ => trains.push(ended),
+                }
+            }
             let usual_time = usual
                 .of(direction)
                 .filter(|_| reminded(direction).as_deref() == Some(line));
@@ -487,6 +502,36 @@ mod tests {
                 (time(7, 52, 0, 0), &count(4, 2, 1, 1)),
                 (time(8, 7, 0, 0), &count(2, 2, 0, 0))
             ]
+        );
+    }
+
+    #[test]
+    fn trains_leaving_together_are_one_departure_the_best_of_them() {
+        use Direction::Inbound;
+        // Halves of one train that part further on, listed apart.
+        let journal = [
+            ended(DAY, Inbound, "C01740", "16:52", 0, Outcome::Announced),
+            ended(DAY, Inbound, "C01740", "16:52", 1, Outcome::Ran),
+            ended(DAY, Inbound, "C01740", "17:07", 2, Outcome::Ran),
+            ended(DAY, Inbound, "C01740", "17:07", 6, Outcome::Ran),
+            ended(DAY, Inbound, "C01740", "17:22", 0, Outcome::Missing),
+        ];
+        // At 17:52 in Paris.
+        let usual = UsualTrains {
+            outbound: None,
+            inbound: Some(time(17, 52, 0, 0)),
+        };
+        let reminded = |_| Some("C01740".to_string());
+        let stats = stats(&journal, &[], &usual, reminded, &[], &paris());
+        let way = &stats.ways[0];
+        assert_eq!(way.count, count(3, 2, 0, 1));
+        assert_eq!(way.days[0].count, count(3, 2, 0, 1));
+        let run = way.days[0].usual.as_ref().map(|run| (run.run, run.late));
+        assert_eq!(run, Some((Run::OnTime, 1)));
+        let times: Vec<&Count> = way.times.iter().map(|slot| &slot.count).collect();
+        assert_eq!(
+            times,
+            [&count(1, 1, 0, 0), &count(1, 1, 0, 0), &count(1, 0, 0, 1)]
         );
     }
 
