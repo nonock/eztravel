@@ -359,12 +359,14 @@ async fn ended_trains(State(journal): State<Arc<Journal<Ended>>>) -> Json<EndedT
 /// The statistics of every train kept, with the usual trains as set now.
 async fn statistics(
     State(journal): State<Arc<Journal<Ended>>>,
+    State(history): State<Arc<History>>,
     State(store): State<Arc<Store>>,
     State(schedule): State<Arc<Schedule>>,
     State(departures): State<Arc<NextDepartures>>,
 ) -> Json<crate::stats::Stats> {
     Json(crate::stats::stats(
         &journal.latest(usize::MAX),
+        &history.latest(usize::MAX),
         &store.profile().usual,
         |direction| departures.reminded_line(direction),
         departures.labels(),
@@ -937,6 +939,21 @@ mod tests {
         let mut kept: Vec<Ended> = serde_json::from_value(trains["trains"].clone()).unwrap();
         kept.reverse();
         api.journal.append(&kept);
+        // What was sent, as in the history fixture: oldest first, as the poll loop records it.
+        let path = format!(
+            "{}/../fixtures/api/history.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let sent: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        for entry in sent["entries"].as_array().unwrap().iter().rev() {
+            api.history.record(crate::history::Entry {
+                at: entry["at"].as_str().unwrap().parse().unwrap(),
+                data: serde_json::from_value(entry["data"].clone()).unwrap(),
+                delivered: 1,
+                records: vec![],
+            });
+        }
         // The usual train of the way to work: at 7:52 in Paris.
         api.store.update(|profile| {
             profile

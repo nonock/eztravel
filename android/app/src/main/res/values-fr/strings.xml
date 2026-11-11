@@ -226,6 +226,28 @@
     <string name="stats_run_cancelled">Supprimé</string>
     <string name="stats_run_none">Pas de train</string>
     <string name="stats_empty">Aucun train suivi pour l’instant.</string>
+    <string name="stats_times">À l’heure, par horaire</string>
+    <string name="stats_weekdays">À l’heure, par jour de la semaine</string>
+    <string name="stats_on_time_of">%1$d/%2$d</string>
+    <string name="stats_weekday">%1$s (%2$s)</string>
+    <plurals name="stats_days">
+        <item quantity="one">%d jour</item>
+        <item quantity="many">%d jours</item>
+        <item quantity="other">%d jours</item>
+    </plurals>
+    <string name="stats_disruptions">Perturbations</string>
+    <string name="stats_disruptions_none">Aucune ligne perturbée.</string>
+    <string name="stats_disrupted">%1$s, %2$s</string>
+    <plurals name="stats_days_disrupted">
+        <item quantity="one">%d jour perturbé</item>
+        <item quantity="many">%d jours perturbés</item>
+        <item quantity="other">%d jours perturbés</item>
+    </plurals>
+    <plurals name="stats_alerts">
+        <item quantity="one">%d alerte</item>
+        <item quantity="many">%d alertes</item>
+        <item quantity="other">%d alertes</item>
+    </plurals>
     <string name="settings_on_time">Vérifications à l’heure</string>
     <string name="settings_on_time_about">Autorisez « Alarmes et rappels » : sans cela, le téléphone peut vérifier le serveur jusqu’à une heure en retard</string>
     <string name="calendar_holiday">Férié</string>

@@ -15,11 +15,14 @@ import io.github.nonock.eztravel.notifications.PushMessage.Line
 import io.github.nonock.eztravel.notifications.PushMessage.Mode
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import java.time.format.TextStyle
+import java.util.Locale
 
 @RunWith(AndroidJUnit4::class)
 class StatsPageTest : ScreenTesting() {
@@ -45,8 +48,14 @@ class StatsPageTest : ScreenTesting() {
                     Stats.Day(day, Stats.Count(9, 8, 0, 1), usualOf(day, Stats.Run.CANCELLED, 0)),
                     Stats.Day(day.minusDays(1), Stats.Count(1, 0, 1, 0), null),
                 ),
+                times = listOf(Stats.Slot(usual, Stats.Count(3, 2, 0, 1)), Stats.Slot(usual.plusMinutes(15), Stats.Count(3, 3, 0, 0))),
+                weekdays = listOf(Stats.Weekday(DayOfWeek.MONDAY, 2, Stats.Count(19, 17, 1, 1)), Stats.Weekday(DayOfWeek.TUESDAY, 1, Stats.Count(1, 0, 1, 0))),
             ),
             Stats.Way(Status.Direction.INBOUND, l, null, null, Stats.Count(10, 10, 0, 0), listOf(Stats.Day(day, Stats.Count(10, 10, 0, 0), null))),
+        ),
+        disruptions = Stats.Disruptions(
+            since = day.minusDays(2),
+            lines = listOf(Stats.Disrupted(l, null, days = 2, alerts = 3), Stats.Disrupted(Line("X", Mode.METRO), null, days = 1, alerts = 1)),
         ),
     )
 
@@ -75,6 +84,64 @@ class StatsPageTest : ScreenTesting() {
         compose.onNodeWithText(text(R.string.stats_on_time_share, 100)).assertExists()
         compose.onNodeWithText(text(R.string.usual_inbound)).assertExists()
         compose.onAllNodesWithText(text(R.string.stats_usual, time)).assertCountEquals(1)
+    }
+
+    @Test
+    fun eachTimeAndWeekdaySaysHowManyOfItsTrainsRanOnTime() {
+        compose.setContent { StatsPage(FakeBackend(stats = stats)) }
+        waitFor(text(R.string.stats_times))
+        val format = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+        // The usual train's time, then the next.
+        compose.onNodeWithText(format.format(usual)).assertExists()
+        compose.onNodeWithText(text(R.string.stats_on_time_of, 2, 3)).assertExists()
+        compose.onNodeWithText(format.format(usual.plusMinutes(15))).assertExists()
+        compose.onNodeWithText(text(R.string.stats_on_time_of, 3, 3)).assertExists()
+        compose.onNodeWithText(text(R.string.stats_weekdays)).assertExists()
+        val locale = Locale.getDefault()
+        val monday = DayOfWeek.MONDAY.getDisplayName(TextStyle.FULL, locale).let { it.substring(0, 1).uppercase(locale) + it.substring(1) }
+        val days = context.resources.getQuantityString(R.plurals.stats_days, 2, 2)
+        compose.onNodeWithText(text(R.string.stats_weekday, monday, days)).assertExists()
+        compose.onNodeWithText(text(R.string.stats_on_time_of, 17, 19)).assertExists()
+        // The way home has neither.
+        compose.onAllNodesWithText(text(R.string.stats_times)).assertCountEquals(1)
+        compose.onAllNodesWithText(text(R.string.stats_weekdays)).assertCountEquals(1)
+    }
+
+    @Test
+    fun eachLineToldDisruptedSaysOnHowManyDaysAndWithHowManyAlerts() {
+        compose.setContent { StatsPage(FakeBackend(stats = stats)) }
+        waitFor(text(R.string.stats_disruptions))
+        val resources = context.resources
+        compose.onNodeWithText(text(R.string.stats_since, day.minusDays(2).shortDate())).assertExists()
+        val disrupted = { days: Int, alerts: Int ->
+            text(
+                R.string.stats_disrupted,
+                resources.getQuantityString(R.plurals.stats_days_disrupted, days, days),
+                resources.getQuantityString(R.plurals.stats_alerts, alerts, alerts),
+            )
+        }
+        compose.onNodeWithText(disrupted(2, 3)).assertExists()
+        compose.onNodeWithText(disrupted(1, 1)).assertExists()
+    }
+
+    @Test
+    fun withNoLineDisruptedItSaysSo() {
+        compose.setContent { StatsPage(FakeBackend(stats = stats.copy(disruptions = Stats.Disruptions(null, emptyList())))) }
+        waitFor(text(R.string.stats_disruptions_none))
+    }
+
+    @Test
+    fun aBackendBeforeTheDisruptionsShowsNone() {
+        compose.setContent { StatsPage(FakeBackend(stats = stats.copy(disruptions = null))) }
+        waitFor(text(R.string.usual_outbound))
+        compose.onNodeWithText(text(R.string.stats_disruptions)).assertDoesNotExist()
+    }
+
+    @Test
+    fun withoutAFirstDayItSaysNoneSince() {
+        compose.setContent { StatsPage(FakeBackend(stats = stats.copy(since = null))) }
+        waitFor(text(R.string.usual_outbound))
+        compose.onNodeWithText(text(R.string.stats_since, day.minusDays(1).shortDate())).assertDoesNotExist()
     }
 
     @Test
