@@ -13,6 +13,7 @@ use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
 
 use crate::calendar::Direction;
+use crate::departures::View;
 use crate::history::Entry;
 use crate::leaving::LATEST;
 use crate::profile::UsualTrains;
@@ -90,7 +91,7 @@ pub struct Disrupted {
 /// What was sent that tells a line disrupted.
 const ALERTS: [&str; 2] = ["started", "line_late"];
 
-#[derive(Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Count {
     pub trains: usize,
     pub on_time: usize,
@@ -286,6 +287,32 @@ pub fn stats(
     }
 }
 
+/// Gives each departure of the rides of `view` how the trains leaving at its
+/// time ran, as `stats` count them by departure time; none for a time kept
+/// on fewer than one day in two.
+pub fn annotate(view: &mut View, stats: &Stats, tz: &TimeZone) {
+    for leg in &mut view.legs {
+        let Some(way) = stats
+            .ways
+            .iter()
+            .find(|way| way.direction == view.direction && way.line == leg.line)
+        else {
+            continue;
+        };
+        for departure in leg.departures.iter_mut().flatten() {
+            let Some(aimed) = departure.aimed else {
+                continue;
+            };
+            let time = aimed.to_zoned(tz.clone()).time();
+            departure.record = way
+                .times
+                .iter()
+                .find(|slot| slot.time == time)
+                .map(|slot| slot.count.clone());
+        }
+    }
+}
+
 /// The days each line was told disrupted, and the alerts, in `history`.
 fn disruptions(history: &[Entry], labels: &[LineLabel], tz: &TimeZone) -> Disruptions {
     let day = |at: Timestamp| at.to_zoned(tz.clone()).date();
@@ -337,6 +364,7 @@ fn disruptions(history: &[Entry], labels: &[LineLabel], tz: &TimeZone) -> Disrup
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::departures::{Departure, LegView};
     use crate::push::Mode;
     use crate::trains::Train;
     use jiff::civil::{date, time};
@@ -658,6 +686,122 @@ mod tests {
                     line("Z", "metro", None, 1, 1),
                 ],
             }
+        );
+    }
+
+    /// A departure of `journey` at `aimed`, UTC, on Tuesday; with no time, a metro's.
+    fn departure(journey: &str, aimed: Option<&str>) -> Departure {
+        let at = |time: &str| -> Timestamp { format!("{DAY}T{time}:00Z").parse().unwrap() };
+        Departure {
+            journey: journey.into(),
+            aimed: aimed.map(at),
+            expected: at(aimed.unwrap_or("07:00")),
+            arrival: None,
+            mission: None,
+            destination: "Gare Centrale".into(),
+            platform: None,
+            status: "on_time",
+            picked: false,
+            usual: false,
+            record: None,
+        }
+    }
+
+    fn leg(line: &str, departures: Vec<Departure>) -> LegView {
+        LegView {
+            line: line.into(),
+            mode: "train",
+            color: None,
+            from: None,
+            to: None,
+            from_position: None,
+            reach: None,
+            departures: Some(departures),
+            timetable: false,
+        }
+    }
+
+    #[test]
+    fn each_departure_says_how_the_trains_leaving_at_its_time_ran() {
+        use Direction::{Inbound, Outbound};
+        let labels = [LineLabel {
+            code: "C01740".into(),
+            name: "L".into(),
+            mode: Mode::Train,
+            color: None,
+        }];
+        let journal = [
+            // 7:52 in Paris, on the three days kept.
+            ended(DAY, Outbound, "C01740", "06:52", 6, Outcome::Ran),
+            ended(
+                date(2026, 11, 5),
+                Outbound,
+                "C01740",
+                "06:52",
+                0,
+                Outcome::Ran,
+            ),
+            ended(
+                date(2026, 11, 4),
+                Outbound,
+                "C01740",
+                "06:52",
+                0,
+                Outcome::Ran,
+            ),
+            // 8:07, on one day of three.
+            ended(DAY, Outbound, "C01740", "07:07", 0, Outcome::Ran),
+            // 8:22, the other way only.
+            ended(DAY, Inbound, "C01740", "07:22", 0, Outcome::Ran),
+        ];
+        let stats = stats(
+            &journal,
+            &[],
+            &UsualTrains::default(),
+            |_| None,
+            &labels,
+            &paris(),
+        );
+        let mut view = View {
+            direction: Outbound,
+            legs: vec![
+                leg(
+                    "L",
+                    vec![
+                        departure("j1", Some("06:52")),
+                        departure("j2", Some("07:07")),
+                        departure("j3", Some("07:22")),
+                        departure("j4", None),
+                    ],
+                ),
+                // A line with no trains kept, and a ride not read.
+                leg("X", vec![departure("m1", Some("06:52"))]),
+                LegView {
+                    departures: None,
+                    ..leg("L", vec![])
+                },
+            ],
+            backups: vec![],
+        };
+        annotate(&mut view, &stats, &paris());
+        let records: Vec<Vec<Option<Count>>> = view
+            .legs
+            .iter()
+            .map(|leg| {
+                leg.departures
+                    .iter()
+                    .flatten()
+                    .map(|departure| departure.record.clone())
+                    .collect()
+            })
+            .collect();
+        assert_eq!(
+            records,
+            [
+                vec![Some(count(3, 2, 1, 0)), None, None, None],
+                vec![None],
+                vec![]
+            ]
         );
     }
 

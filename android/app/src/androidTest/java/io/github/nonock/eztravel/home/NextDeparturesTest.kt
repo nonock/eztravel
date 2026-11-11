@@ -29,6 +29,7 @@ import io.github.nonock.eztravel.backend.Departures.State
 import io.github.nonock.eztravel.backend.Position
 import io.github.nonock.eztravel.backend.FakeBackend
 import io.github.nonock.eztravel.backend.Refusal
+import io.github.nonock.eztravel.backend.Stats
 import io.github.nonock.eztravel.backend.Status.Direction
 import io.github.nonock.eztravel.backend.Status.LineState
 import io.github.nonock.eztravel.notifications.PushMessage.Line
@@ -408,6 +409,21 @@ class NextDeparturesTest : ScreenTesting() {
             node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts)
             assertEquals("lines of \"${layouts.single().layoutInput.text}\"", 1, layouts.single().lineCount)
         }
+    }
+
+    @Test
+    fun aTrainOftenLateAtItsTimeSaysSo() {
+        val trains = morning.legs[0].departures!!.map {
+            when (it.journey) {
+                "j2" -> it.copy(record = Stats.Count(8, 3, 5, 0))
+                "j3" -> it.copy(record = Stats.Count(8, 7, 1, 0))
+                else -> it
+            }
+        }
+        show(FakeBackend(departures = morning.copy(legs = listOf(morning.legs[0].copy(departures = trains), morning.legs[1]))))
+        waitFor(hasText(text(R.string.departures_often_late, 3, 8)))
+        // Seven days of eight on time: nothing to say.
+        compose.onNode(hasText(text(R.string.departures_often_late, 7, 8))).assertDoesNotExist()
     }
 
     @Test

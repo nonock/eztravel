@@ -425,21 +425,31 @@ async fn next_departures(
     State(store): State<Arc<Store>>,
     State(schedule): State<Arc<Schedule>>,
     State(line_alerts): State<Arc<LineAlerts>>,
+    State(journal): State<Arc<Journal<Ended>>>,
 ) -> Json<departures::View> {
     let now = Timestamp::now();
     let today = schedule.today(now);
     let profile = store.profile();
-    Json(
-        departures
-            .view(
-                now,
-                profile.pick.as_ref(),
-                &profile.usual_on(today, &schedule.windows),
-                &line_alerts,
-                &profile.windows(&schedule.windows, today),
-            )
-            .await,
-    )
+    let mut view = departures
+        .view(
+            now,
+            profile.pick.as_ref(),
+            &profile.usual_on(today, &schedule.windows),
+            &line_alerts,
+            &profile.windows(&schedule.windows, today),
+        )
+        .await;
+    // How the trains at each time ran, from the statistics.
+    let stats = crate::stats::stats(
+        &journal.latest(usize::MAX),
+        &[],
+        &profile.usual,
+        |direction| departures.reminded_line(direction),
+        departures.labels(),
+        &schedule.time_zone,
+    );
+    crate::stats::annotate(&mut view, &stats, &schedule.time_zone);
+    Json(view)
 }
 
 /// The lines' disruptions, as the poll loop last read them, or read at most every few minutes.
@@ -1496,6 +1506,17 @@ mod tests {
     #[tokio::test]
     async fn the_departures_are_read_when_asked() {
         let api = Api::new();
+        // With trains kept, for how those at each time ran: none here, nothing read.
+        let path = format!("{}/../fixtures/api/trains.json", env!("CARGO_MANIFEST_DIR"));
+        let trains: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let kept: Vec<Ended> = serde_json::from_value(trains["trains"].clone()).unwrap();
+        api.journal.append(&kept);
+        api.store.update(|profile| {
+            profile
+                .usual
+                .set(Direction::Outbound, Some(jiff::civil::time(7, 52, 0, 0)));
+        });
         let (status, body) = api.authorized(Method::GET, "/departures", None).await;
         assert_eq!(status, StatusCode::OK);
         let view: serde_json::Value = serde_json::from_str(&body).unwrap();

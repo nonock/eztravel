@@ -256,6 +256,7 @@
     <string name="calendar_too_far">Days can be changed up to a year ahead.</string>
     <string name="departures_hero_usual">Your usual train</string>
     <string name="departures_usual">Usual train</string>
+    <string name="departures_often_late">Often late: on time %1$d/%2$d</string>
     <string name="watchdog_unreachable">eztravel’s server does not answer</string>
     <string name="watchdog_unreachable_text">No alert can reach you for now: check your lines another way.</string>
     <string name="watchdog_stopped">eztravel’s server no longer checks your lines</string>

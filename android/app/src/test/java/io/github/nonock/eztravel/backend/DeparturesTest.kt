@@ -83,6 +83,27 @@ class DeparturesTest {
     }
 
     @Test
+    fun readsHowTheTrainsAtEachTimeRan() {
+        val text = JSONObject(fixture("departures")).apply {
+            getJSONArray("legs").getJSONObject(0).getJSONArray("departures").getJSONObject(0)
+                .put("record", JSONObject().put("trains", 8).put("on_time", 3).put("late", 5).put("cancelled", 0))
+        }.toString()
+        val departures = Departures.parse(text).legs[0].departures!!
+        assertEquals(listOf(Stats.Count(8, 3, 5, 0), null, null), departures.map { it.record })
+    }
+
+    @Test
+    fun aTrainIsOftenLateWhenOnTimeFewerThanThreeDaysInFourOverFourDaysAtLeast() {
+        fun record(trains: Int, onTime: Int) =
+            Departure(at("06:52:00"), at("06:52:00"), null, null, "Gare Centrale", null, State.ON_TIME, record = Stats.Count(trains, onTime, trains - onTime, 0))
+        assertEquals(Stats.Count(8, 5, 3, 0), record(8, 5).oftenLate)
+        // Three days in four, or too few days to tell: not said.
+        assertNull(record(8, 6).oftenLate)
+        assertNull(record(3, 0).oftenLate)
+        assertNull(record(8, 6).copy(record = null).oftenLate)
+    }
+
+    @Test
     fun theDelayIsInWholeMinutes() {
         val (train, metro) = Departures.parse(fixture("departures")).legs
         assertEquals(listOf(0L, 4L, 0L), train.departures?.map { it.delayMinutes })

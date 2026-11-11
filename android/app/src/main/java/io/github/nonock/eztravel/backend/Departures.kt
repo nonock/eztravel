@@ -133,7 +133,13 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>, val 
         val picked: Boolean = false,
         /** The way's usual train, when none is picked that day. */
         val usual: Boolean = false,
+        /** How the trains leaving at its time ran, office days kept; none when too seldom kept, or from an older backend. */
+        val record: Stats.Count? = null,
     ) {
+        /** Its [record], when its time's trains ran on time on fewer than three days in four, over four days at least. */
+        val oftenLate: Stats.Count?
+            get() = record?.takeIf { it.trains >= 4 && it.onTime * 4 < it.trains * 3 }
+
         /** The time it is known by: the timetable's, or the expected one on the metro. */
         val knownBy: Instant
             get() = aimed ?: expected
@@ -189,6 +195,7 @@ data class Departures(val direction: Status.Direction, val legs: List<Leg>, val 
             journey = json.stringOrNull("journey"),
             picked = json.optBoolean("picked"),
             usual = json.optBoolean("usual"),
+            record = json.optJSONObject("record")?.let(Stats::count),
         )
     }
 }
