@@ -141,6 +141,21 @@ class StatsPageTest : ScreenTesting() {
     }
 
     @Test
+    fun timesCountedFromALaterDaySaySince() {
+        val later = day.plusDays(1)
+        compose.setContent { StatsPage(FakeBackend(stats = stats.copy(timesSince = later))) }
+        waitFor(text(R.string.stats_times))
+        compose.onNodeWithText(text(R.string.stats_since, later.shortDate())).assertExists()
+    }
+
+    @Test
+    fun timesCountedFromTheFirstDaySayItOnceAtTheTop() {
+        compose.setContent { StatsPage(FakeBackend(stats = stats.copy(timesSince = stats.since))) }
+        waitFor(text(R.string.stats_times))
+        compose.onAllNodesWithText(text(R.string.stats_since, stats.since!!.shortDate())).assertCountEquals(1)
+    }
+
+    @Test
     fun eachLineToldDisruptedSaysOnHowManyDaysAndWithHowManyAlerts() {
         compose.setContent { StatsPage(FakeBackend(stats = stats)) }
         waitFor(text(R.string.stats_disruptions))

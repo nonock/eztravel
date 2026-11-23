@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use jiff::civil::{Date, Time};
+use jiff::civil::{Date, Time, date};
 use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
@@ -27,6 +27,9 @@ pub const LATE: SignedDuration = SignedDuration::from_mins(5);
 pub struct Stats {
     /// The first day kept, if any.
     pub since: Option<Date>,
+    /// The first day counted by departure time: departure times change with
+    /// the timetable, so those of the one in force only.
+    pub times_since: Option<Date>,
     /// The way to work first, then home; each line in the order first kept.
     pub ways: Vec<Way>,
     pub disruptions: Disruptions,
@@ -157,6 +160,9 @@ pub fn stats(
 ) -> Stats {
     let mut kept: Vec<&Ended> = journal.iter().collect();
     kept.sort_by_key(|ended| (ended.day, ended.train.aimed));
+    let timetable = kept
+        .last()
+        .map_or(Date::MIN, |latest| timetable_start(latest.day));
     let mut ways: Vec<Way> = vec![];
     for direction in [Direction::Outbound, Direction::Inbound] {
         let of_way: Vec<&Ended> = kept
@@ -198,12 +204,13 @@ pub fn stats(
             let mut weekdays: BTreeMap<i8, (Count, Vec<Date>)> = BTreeMap::new();
             for ended in &trains {
                 count.add(ended);
-                let time = ended.train.aimed.to_zoned(tz.clone()).time();
                 let weekday = ended.day.weekday().to_monday_one_offset();
-                for (count, seen) in [
-                    slots.entry(time).or_default(),
-                    weekdays.entry(weekday).or_default(),
-                ] {
+                let mut counted = vec![weekdays.entry(weekday).or_default()];
+                if ended.day >= timetable {
+                    let time = ended.train.aimed.to_zoned(tz.clone()).time();
+                    counted.push(slots.entry(time).or_default());
+                }
+                for (count, seen) in counted {
                     count.add(ended);
                     if seen.last() != Some(&ended.day) {
                         seen.push(ended.day);
@@ -252,9 +259,10 @@ pub fn stats(
                     })
                 });
             }
+            let timetable_days = days.iter().filter(|day| day.day >= timetable).count();
             let times = slots
                 .into_iter()
-                .filter(|(_, (_, seen))| seen.len() * 2 >= days.len())
+                .filter(|(_, (_, seen))| seen.len() * 2 >= timetable_days)
                 .map(|(time, (count, _))| Slot { time, count })
                 .collect();
             let weekdays = weekdays
@@ -282,6 +290,7 @@ pub fn stats(
     }
     Stats {
         since: kept.first().map(|ended| ended.day),
+        times_since: kept.first().map(|first| first.day.max(timetable)),
         ways,
         disruptions: disruptions(history, labels, tz),
     }
@@ -310,6 +319,23 @@ pub fn annotate(view: &mut View, stats: &Stats, tz: &TimeZone) {
                 .find(|slot| slot.time == time)
                 .map(|slot| slot.count.clone());
         }
+    }
+}
+
+/// The first day of the timetable in force on `day`: the railways of Europe
+/// change theirs in the night after the second Saturday of December.
+fn timetable_start(day: Date) -> Date {
+    let start = |year: i16| {
+        date(year, 12, 1)
+            .nth_weekday_of_month(2, jiff::civil::Weekday::Saturday)
+            .and_then(|saturday| saturday.tomorrow())
+            .expect("December has two Saturdays, and a day after")
+    };
+    let this_year = start(day.year());
+    if day >= this_year {
+        this_year
+    } else {
+        start(day.year() - 1)
     }
 }
 
@@ -806,12 +832,106 @@ mod tests {
     }
 
     #[test]
+    fn a_timetable_starts_the_day_after_the_second_saturday_of_december() {
+        assert_eq!(timetable_start(date(2026, 11, 23)), date(2025, 12, 14));
+        assert_eq!(timetable_start(date(2026, 12, 12)), date(2025, 12, 14));
+        assert_eq!(timetable_start(date(2026, 12, 13)), date(2026, 12, 13));
+        assert_eq!(timetable_start(date(2024, 12, 31)), date(2024, 12, 15));
+    }
+
+    #[test]
+    fn times_count_on_the_days_of_the_timetable_in_force() {
+        use Direction::Outbound;
+        let journal = [
+            // On the timetable that ended on Saturday 12 Dec.
+            ended(
+                date(2026, 12, 9),
+                Outbound,
+                "C01740",
+                "06:52",
+                0,
+                Outcome::Ran,
+            ),
+            ended(
+                date(2026, 12, 10),
+                Outbound,
+                "C01740",
+                "06:52",
+                0,
+                Outcome::Ran,
+            ),
+            ended(
+                date(2026, 12, 11),
+                Outbound,
+                "C01740",
+                "06:52",
+                0,
+                Outcome::Ran,
+            ),
+            // On the one from Sunday 13: one day in two of its own.
+            ended(
+                date(2026, 12, 14),
+                Outbound,
+                "C01740",
+                "06:53",
+                6,
+                Outcome::Ran,
+            ),
+            ended(
+                date(2026, 12, 15),
+                Outbound,
+                "C01740",
+                "06:53",
+                0,
+                Outcome::Ran,
+            ),
+            ended(
+                date(2026, 12, 15),
+                Outbound,
+                "C01740",
+                "07:08",
+                0,
+                Outcome::Ran,
+            ),
+        ];
+        let stats = stats(
+            &journal,
+            &[],
+            &UsualTrains::default(),
+            |_| None,
+            &[],
+            &paris(),
+        );
+        assert_eq!(
+            (stats.since, stats.times_since),
+            (Some(date(2026, 12, 9)), Some(date(2026, 12, 13)))
+        );
+        let way = &stats.ways[0];
+        let times: Vec<(Time, &Count)> = way
+            .times
+            .iter()
+            .map(|slot| (slot.time, &slot.count))
+            .collect();
+        assert_eq!(
+            times,
+            [
+                (time(7, 53, 0, 0), &count(2, 1, 1, 0)),
+                (time(8, 8, 0, 0), &count(1, 1, 0, 0))
+            ]
+        );
+        // The rest counts every day.
+        assert_eq!(way.count, count(6, 5, 1, 0));
+        assert_eq!(way.days.len(), 5);
+    }
+
+    #[test]
     fn with_nothing_kept_there_is_nothing_to_say() {
         let stats = stats(&[], &[], &UsualTrains::default(), |_| None, &[], &paris());
         assert_eq!(
             stats,
             Stats {
                 since: None,
+                times_since: None,
                 ways: vec![],
                 disruptions: Disruptions {
                     since: None,
