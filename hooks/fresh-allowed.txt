@@ -5,3 +5,4 @@
 # RUSTSEC, CVE or GHSA id. A version fixing a vulnerability of the one it
 # replaces needs no line: hooks/ages.py finds the fix on OSV.dev. A line is
 # for what that cannot show, such as a new dependency needed at once.
+form_urlencoded 1.2.3 RUSTSEC-2026-0592 needed by url 2.5.9, which fixes it
