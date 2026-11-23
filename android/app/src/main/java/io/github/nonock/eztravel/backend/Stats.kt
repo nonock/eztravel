@@ -12,7 +12,13 @@ import java.time.LocalTime
  * disrupted: `/stats`. A backend from before [Way.times], [Way.weekdays] and
  * [disruptions] leaves them empty, or none.
  */
-data class Stats(val since: LocalDate?, val ways: List<Way>, val disruptions: Disruptions? = null) {
+data class Stats(
+    val since: LocalDate?,
+    val ways: List<Way>,
+    val disruptions: Disruptions? = null,
+    /** The first day counted by departure time: from the timetable in force only; none from an older backend. */
+    val timesSince: LocalDate? = null,
+) {
     /** Of [trains], those on time (less than five minutes behind), late and cancelled. */
     data class Count(val trains: Int, val onTime: Int, val late: Int, val cancelled: Int) {
         /** The share on time, in whole percents rounded down; none with no train. */
@@ -82,7 +88,8 @@ data class Stats(val since: LocalDate?, val ways: List<Way>, val disruptions: Di
                         },
                     )
                 },
-                stats.optJSONObject("disruptions")?.let { disruptions ->
+                timesSince = stats.stringOrNull("times_since")?.let(LocalDate::parse),
+                disruptions = stats.optJSONObject("disruptions")?.let { disruptions ->
                     Disruptions(
                         disruptions.stringOrNull("since")?.let(LocalDate::parse),
                         disruptions.getJSONArray("lines").objects().map {

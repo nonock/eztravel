@@ -45,6 +45,7 @@ import io.github.nonock.eztravel.home.shortDate
 import io.github.nonock.eztravel.ui.theme.Good
 import org.json.JSONException
 import java.io.IOException
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.time.format.TextStyle
@@ -87,7 +88,9 @@ fun StatsPage(backend: Backend, modifier: Modifier = Modifier, refresh: Int = 0,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                for (way in current.stats.ways) WayCard(way)
+                // Times counted from a later day, the timetable having changed: said under their heading.
+                val timesSince = current.stats.timesSince?.takeIf { it != current.stats.since }
+                for (way in current.stats.ways) WayCard(way, timesSince)
                 current.stats.disruptions?.let { DisruptionsCard(it) }
             }
             current == Reading.Unreachable -> Text(stringResource(R.string.unreachable), color = MaterialTheme.colorScheme.error)
@@ -97,7 +100,7 @@ fun StatsPage(backend: Backend, modifier: Modifier = Modifier, refresh: Int = 0,
 }
 
 @Composable
-private fun WayCard(way: Stats.Way) {
+private fun WayCard(way: Stats.Way, timesSince: LocalDate?) {
     val resources = LocalResources.current
     val count = way.count
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
@@ -130,6 +133,9 @@ private fun WayCard(way: Stats.Way) {
             )
             if (way.times.isNotEmpty()) {
                 Heading(R.string.stats_times)
+                timesSince?.let {
+                    Text(stringResource(R.string.stats_since, it.shortDate()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 val format = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
                 // The usual train's: the first leaving at the time set or after, as each day's.
                 val usual = way.usual?.let { usual -> way.times.firstOrNull { !it.time.isBefore(usual) }?.time }

@@ -25,6 +25,7 @@ class StatsTest {
         assertEquals(
             Stats(
                 since = day,
+                timesSince = day,
                 ways = listOf(
                     Stats.Way(
                         Status.Direction.OUTBOUND,
@@ -63,6 +64,7 @@ class StatsTest {
     fun fromABackendBeforeThemThereAreNoTimesWeekdaysOrDisruptions() {
         val older = JSONObject(fixture).apply {
             remove("disruptions")
+            remove("times_since")
             val ways = getJSONArray("ways")
             for (i in 0 until ways.length()) {
                 ways.getJSONObject(i).apply {
@@ -73,6 +75,7 @@ class StatsTest {
         }
         val stats = Stats.parse(older.toString())
         assertEquals(null, stats.disruptions)
+        assertEquals(null, stats.timesSince)
         assertEquals(listOf(emptyList<Stats.Slot>()), stats.ways.map { it.times }.distinct())
         assertEquals(listOf(emptyList<Stats.Weekday>()), stats.ways.map { it.weekdays }.distinct())
     }
